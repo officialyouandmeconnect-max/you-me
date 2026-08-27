@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>You &amp; Me — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+
+<!-- ===== LOGIN SCREEN ===== -->
+<div id="loginScreen" class="login-screen">
+  <form id="loginForm" class="login-card">
+    <div class="login-brand">
+      <span class="login-logo">Y&amp;M</span>
+      <h1>You &amp; Me Admin</h1>
+    </div>
+    <div class="form-field">
+      <label for="loginUsername">Username</label>
+      <input type="text" id="loginUsername" autocomplete="username" required>
+    </div>
+    <div class="form-field">
+      <label for="loginPassword">Password</label>
+      <input type="password" id="loginPassword" autocomplete="current-password" required>
+    </div>
+    <p class="login-error" id="loginError"></p>
+    <button type="submit" class="btn-primary btn-block">Log In</button>
+  </form>
+</div>
+
+<!-- ===== ADMIN APP SHELL ===== -->
+<div id="adminApp" class="admin-app" hidden>
+  <aside class="admin-sidebar" id="adminSidebar">
+    <div class="sidebar-brand">
+      <span class="sidebar-logo">Y&amp;M</span>
+      <span>You &amp; Me<br><small>Admin</small></span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#dashboard" data-route="dashboard">📊 Dashboard</a>
+      <a href="#products" data-route="products">👕 Products</a>
+      <a href="#orders" data-route="orders">🧾 Orders</a>
+      <a href="#customers" data-route="customers">👤 Customers</a>
+      <a href="#inventory" data-route="inventory">📦 Inventory</a>
+      <a href="#shipping" data-route="shipping">🚚 Shipping</a>
+      <a href="#categories" data-route="categories">🏷️ Categories</a>
+      <a href="#media" data-route="media">🖼️ Media Library</a>
+      <a href="#settings" data-route="settings">⚙️ Settings</a>
+    </nav>
+    <button type="button" class="sidebar-logout" id="logoutBtn">🚪 Logout</button>
+  </aside>
+
+  <div class="admin-main">
+    <header class="admin-topbar">
+      <button class="mobile-nav-toggle" id="mobileNavToggle" aria-label="Toggle menu">☰</button>
+      <h2 id="pageTitle">Dashboard</h2>
+      <div class="topbar-right">
+        <span class="topbar-username" id="topbarUsername"></span>
+        <button type="button" class="notif-bell" id="notifBell" aria-label="Notifications">
+          🔔<span class="notif-dot" id="notifDot" hidden></span>
+        </button>
+      </div>
+    </header>
+
+    <main class="admin-content" id="adminContent"><!-- injected per route --></main>
+  </div>
+</div>
+
+<div class="admin-scrim" id="adminScrim" hidden></div>
+<div class="admin-modal" id="adminModal" hidden>
+  <div class="admin-modal-inner">
+    <button class="admin-modal-close" id="adminModalClose" aria-label="Close">&times;</button>
+    <div id="adminModalBody"></div>
+  </div>
+</div>
+
+<div class="toast-order" id="orderToast" hidden>
+  <span class="toast-order-bell">🔔</span>
+  <div>
+    <strong>New Order Received</strong>
+    <p id="orderToastBody"></p>
+  </div>
+</div>
+
+<script src="admin.js"></script>
+</body>
+</html>

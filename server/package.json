@@ -1,0 +1,18 @@
+{
+  "name": "youandme-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "You & Me store API + admin panel (products, orders, inventory) — separate from the video-downloader app in the parent backend project.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node db/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "multer": "^2.2.0"
+  }
+}
