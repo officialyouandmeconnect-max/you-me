@@ -7,8 +7,12 @@ order-management system. Plain HTML/CSS/JS, no build step, no server: [Supabase]
 ## Structure
 
 - **Customer site** (`index.html`, `script.js`, `style.css`, `supabase-client.js`) — the
-  storefront: home, Kids Wear, product details, cart, wishlist, search, login/account, and
-  WhatsApp checkout.
+  storefront: home, Kids Wear, product details, cart, wishlist, search, and WhatsApp checkout.
+  Browsing, search, cart and wishlist never require an account; **checkout does** — see below.
+- **Customer accounts** (`/login`, `/account`) — email+password or Google Sign-In (Supabase
+  Auth), a full "My Account" dashboard (Overview, My Orders with tracking, Addresses, Wishlist,
+  Profile). A customer can only ever see their *own* orders/addresses — enforced by Row Level
+  Security in `0002_customer_accounts.sql`, not just by the UI.
 - **`admin/`** — the admin panel: dashboard, products, orders, customers, inventory, shipping,
   media library. It's a protected *section of this same site*, not a separate app — same
   domain, same login form (`/login`), just gated by `profiles.role = 'admin'`. There is no
@@ -16,6 +20,11 @@ order-management system. Plain HTML/CSS/JS, no build step, no server: [Supabase]
 - **`supabase/migrations/0001_init.sql`** — the full Postgres schema, Row Level Security
   policies, and the `create_order()` function. Run once in the Supabase SQL Editor for a new
   project.
+- **`supabase/migrations/0002_customer_accounts.sql`** — adds customer-owns-their-orders RLS
+  policies, the `addresses` table, and makes `create_order()` reject anonymous callers (checkout
+  requires sign-in at the database level, not just in the UI). Run once, after 0001.
+- **`supabase/README-google-oauth.md`** — the one-time Google Cloud Console + Supabase Dashboard
+  setup "Continue with Google" needs (a dashboard step, not something the code can do alone).
 - **`supabase/scripts/seed.js`** — one-time setup script (needs the Supabase **service_role**
   key, never committed here) that creates the first admin login and seeds the starting product
   catalog. Run locally, not from the browser.

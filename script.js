@@ -78,6 +78,12 @@
     return '₹' + Number(value).toLocaleString('en-IN');
   }
 
+  function formatDate(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    return isNaN(d) ? iso : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
   function findProduct(id) {
     // Product ids come back from the API as numbers, but every data-* attribute in the DOM
     // (dataset.buyNow, dataset.openProduct, …) is always a string — compare loosely so a
@@ -954,17 +960,36 @@
       return supabaseClient.auth.signOut().then(function () { current = null; });
     }
 
-    return { check: check, getUser: getUser, login: login, register: register, logout: logout };
+    // Full-page redirect to Google, then back to `redirectTo` with the session already parsed
+    // into localStorage by the Supabase SDK (detectSessionInUrl, on by default) before this
+    // page's own scripts run again — SessionService.check() picks it up like any other session.
+    // Requires the Google provider to actually be enabled in the Supabase dashboard first; see
+    // supabase/README-google-oauth.md for that one-time setup (a Supabase/Google Cloud
+    // Console step, not something this code can do on its own).
+    function loginWithGoogle() {
+      return supabaseClient.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin + window.location.pathname }
+      });
+    }
+
+    return { check: check, getUser: getUser, login: login, register: register, logout: logout, loginWithGoogle: loginWithGoogle };
   })();
 
   /* ---------- 16. Account panel ---------- */
+  // This panel is the sign-in/create-account gate — the only place any customer authenticates.
+  // A logged-in customer never sees it (the header Account icon goes straight to the /account
+  // dashboard instead, and this panel redirects there itself if somehow opened while signed in).
   var AccountPanel = (function () {
     function panel() { return document.getElementById('accountPanel'); }
     function body() { return document.getElementById('accountPanelBody'); }
     var mode = 'login';
+    var message = ''; // optional context line shown above the form, e.g. "Sign in to continue your order."
 
-    function open() {
+    function open(customMessage) {
+      if (SessionService.getUser()) { window.location.href = BASE_PATH + '/account'; return; }
       mode = 'login';
+      message = customMessage || '';
       render();
       openPanel(panel());
     }
@@ -974,8 +999,20 @@
       var b = body();
       if (!b) return;
       var user = SessionService.getUser();
+      if (user) { window.location.href = BASE_PATH + '/account'; return; }
 
-      if (user) { renderProfile(b, user); return; }
+      var heading =
+        '<div class="account-welcome">' +
+          '<h3>Welcome to You &amp; Me &hearts;</h3>' +
+          '<p>' + escapeHtml(message || 'Sign in to continue shopping.') + '</p>' +
+        '</div>';
+
+      var googleBtn =
+        '<button type="button" class="btn btn-google btn-block" id="googleSignInBtn">' +
+          '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.28-1.66 3.76-5.5 3.76-3.31 0-6.02-2.74-6.02-6.12s2.7-6.12 6.02-6.12c1.89 0 3.15.8 3.87 1.5l2.64-2.55C16.86 2.98 14.66 2 12 2 6.98 2 2.9 6.06 2.9 11s4.08 9 9.1 9c5.25 0 8.74-3.69 8.74-8.89 0-.6-.07-1.05-.15-1.5z"/></svg>' +
+          'Continue with Google' +
+        '</button>' +
+        '<div class="account-divider"><span>or</span></div>';
 
       var tabs =
         '<div class="account-tabs">' +
@@ -989,7 +1026,7 @@
             field('accEmail', 'Email', 'email') +
             field('accPassword', 'Password', 'password') +
             '<div class="account-forgot"><button type="button" id="forgotPasswordBtn">Forgot Password?</button></div>' +
-            '<button type="submit" class="btn btn-primary btn-block" style="margin-top:16px;">Login</button>' +
+            '<button type="submit" class="btn btn-primary btn-block" style="margin-top:16px;">Sign In</button>' +
           '</form>'
         )
         : (
@@ -1002,11 +1039,21 @@
           '</form>'
         );
 
-      b.innerHTML = tabs + formHtml + '<p class="account-submit-feedback" id="accountFeedback"></p>';
+      b.innerHTML = heading + googleBtn + tabs + formHtml + '<p class="account-submit-feedback" id="accountFeedback"></p>';
 
       function field(id, label, type) {
         return '<div class="form-field"><label for="' + id + '">' + label + '</label><input type="' + type + '" id="' + id + '"></div>';
       }
+
+      var googleBtnEl = document.getElementById('googleSignInBtn');
+      if (googleBtnEl) googleBtnEl.addEventListener('click', function () {
+        googleBtnEl.disabled = true;
+        SessionService.loginWithGoogle().catch(function (err) {
+          googleBtnEl.disabled = false;
+          var feedback = document.getElementById('accountFeedback');
+          if (feedback) feedback.textContent = err.message || 'Could not start Google sign-in.';
+        });
+      });
 
       var form = document.getElementById('accountForm');
       if (form) form.addEventListener('submit', onSubmit);
@@ -1015,22 +1062,6 @@
       if (forgot) forgot.addEventListener('click', function () {
         var feedback = document.getElementById('accountFeedback');
         if (feedback) feedback.textContent = 'Password reset isn\'t available yet — contact us on WhatsApp for help.';
-      });
-    }
-
-    function renderProfile(b, user) {
-      b.innerHTML =
-        '<div class="panel-card" style="text-align:center;padding:12px 0 20px;">' +
-          '<p style="font-size:1.05rem;font-weight:600;margin:0 0 4px;">' + escapeHtml(user.name || 'You') + '</p>' +
-          '<p style="color:var(--color-text-soft);font-size:0.85rem;margin:0 0 18px;">' + escapeHtml(user.email) + '</p>' +
-          '<button type="button" class="btn btn-outline" id="accountLogoutBtn">Logout</button>' +
-        '</div>';
-      var logoutBtn = document.getElementById('accountLogoutBtn');
-      if (logoutBtn) logoutBtn.addEventListener('click', function () {
-        SessionService.logout().then(function () {
-          if (window.location.pathname === BASE_PATH + '/account') window.location.href = BASE_PATH + '/';
-          else render();
-        });
       });
     }
 
@@ -1048,7 +1079,10 @@
             var email = document.getElementById('accEmail').value.trim();
             var pw = document.getElementById('accPassword2').value;
             var confirm = document.getElementById('accConfirmPassword').value;
+            if (!name) return Promise.resolve({ ok: false, data: { error: 'Please enter your full name.' } });
             if (pw !== confirm) return Promise.resolve({ ok: false, data: { error: 'Passwords do not match.' } });
+            // Every signup lands as role='customer' — see handle_new_user() in the Supabase
+            // migration. Nothing in this form (or anywhere client-side) can request 'admin'.
             return SessionService.register(name, email, pw);
           })();
 
@@ -1061,6 +1095,9 @@
 
     function redirectAfterLogin(user) {
       if (user.role === 'admin') { window.location.href = BASE_PATH + '/admin'; return; }
+      // A checkout that got interrupted by this login requirement takes priority over any
+      // other post-login destination — the whole point is to return the customer to it.
+      if (Checkout.consumePendingFlag()) { close(); window.setTimeout(function () { Checkout.open(); }, 250); return; }
       if (window.location.pathname === BASE_PATH + '/login') { window.location.href = BASE_PATH + '/account'; return; }
       showToast('Welcome back, ' + user.name + '!');
       close();
@@ -1076,7 +1113,11 @@
     function init() {
       var btn = document.getElementById('accountBtn');
       if (btn) btn.addEventListener('click', function () {
-        if (SessionService.getUser()) { render(); openPanel(panel()); } else open();
+        // Logged in: the Account icon is a shortcut straight to the full dashboard, not this
+        // small sign-in panel — matches the header icon everywhere else on the site (cart,
+        // wishlist) being a launcher for its own dedicated view.
+        if (SessionService.getUser()) { window.location.href = BASE_PATH + '/account'; }
+        else open();
       });
       var b = body();
       if (b) b.addEventListener('click', onTabClick);
@@ -1103,18 +1144,48 @@
       { id: 'coPin', label: 'PIN Code', required: true }
     ];
 
+    var PENDING_KEY = 'ym_checkout_after_login';
+    var savedAddresses = [];
+
+    // The one gate every purchase path (Buy Now, Add to Cart → Checkout, cart drawer's
+    // "Checkout" button) funnels through — see CONFIG-level note at the top of this file.
+    // Authentication is enforced again at the database level too (create_order() rejects an
+    // anonymous caller, and only 'authenticated' may even call it — see
+    // supabase/migrations/0002_customer_accounts.sql), so this is a UX convenience, not the
+    // actual security boundary.
     function open() {
       if (CartService.getItems().length === 0) { showToast('Your cart is empty'); return; }
-      render();
+      if (!SessionService.getUser()) {
+        try { sessionStorage.setItem(PENDING_KEY, '1'); } catch (e) { /* ignore */ }
+        AccountPanel.open('Sign in to continue your order.');
+        return;
+      }
+      loadSavedAddresses().then(render);
       openPanel(panel());
     }
     function close() { closePanel(panel()); }
+
+    // Called once, right after a login/signup/Google redirect resolves — consumes the flag so
+    // it only ever fires once per interrupted checkout, never on a later, unrelated login.
+    function consumePendingFlag() {
+      try {
+        if (sessionStorage.getItem(PENDING_KEY) === '1') { sessionStorage.removeItem(PENDING_KEY); return true; }
+      } catch (e) { /* ignore */ }
+      return false;
+    }
+
+    function loadSavedAddresses() {
+      return supabaseClient.from('addresses').select('*').order('is_default', { ascending: false }).order('created_at', { ascending: false })
+        .then(function (res) { savedAddresses = (res.data || []); })
+        .catch(function () { savedAddresses = []; });
+    }
 
     function render() {
       var b = body();
       if (!b) return;
       var items = CartService.getItems();
       var totals = CartService.getTotals();
+      var user = SessionService.getUser();
 
       var rows = items.map(function (item) {
         return (
@@ -1124,12 +1195,20 @@
         );
       }).join('');
 
+      var savedAddressPicker = savedAddresses.length === 0 ? '' :
+        '<div class="form-field"><label for="coSavedAddress">Use a saved address</label>' +
+          '<select id="coSavedAddress"><option value="">+ Add New Address</option>' +
+          savedAddresses.map(function (a, i) {
+            return '<option value="' + i + '">' + escapeHtml(a.name) + ' — ' + escapeHtml(a.line1) + ', ' + escapeHtml(a.city) + (a.is_default ? ' (Default)' : '') + '</option>';
+          }).join('') + '</select></div>';
+
       b.innerHTML =
         '<form id="checkoutForm" novalidate>' +
           '<div class="checkout-section"><h3>Customer Information</h3>' +
             field('coFullName', 'Full Name', 'text', true) + field('coMobile', 'Mobile Number', 'tel', true) + field('coEmail', 'Email (optional)', 'email', false) +
           '</div>' +
           '<div class="checkout-section"><h3>Shipping Address</h3>' +
+            savedAddressPicker +
             field('coHouse', 'House / Flat / Building', 'text', true) + field('coStreet', 'Street / Area', 'text', true) + field('coLandmark', 'Landmark (optional)', 'text', false) +
             '<div class="form-row">' + field('coCity', 'City', 'text', true) + field('coDistrict', 'District', 'text', true) + '</div>' +
             '<div class="form-row">' + field('coState', 'State', 'text', true) + field('coPin', 'PIN Code', 'text', true) + '</div>' +
@@ -1156,6 +1235,33 @@
       function field(id, label, type, required) {
         return '<div class="form-field"><label for="' + id + '">' + label + (required ? ' *' : '') + '</label>' +
           '<input type="' + type + '" id="' + id + '"' + (required ? ' required' : '') + '><span class="field-error" id="' + id + 'Error"></span></div>';
+      }
+
+      function applyAddress(a) {
+        document.getElementById('coHouse').value = a.line1 || '';
+        document.getElementById('coStreet').value = a.line2 || '';
+        document.getElementById('coLandmark').value = a.landmark || '';
+        document.getElementById('coCity').value = a.city || '';
+        document.getElementById('coDistrict').value = a.district || '';
+        document.getElementById('coState').value = a.state || '';
+        document.getElementById('coPin').value = a.pincode || '';
+        document.getElementById('coFullName').value = a.name || document.getElementById('coFullName').value;
+        document.getElementById('coMobile').value = a.phone || document.getElementById('coMobile').value;
+      }
+
+      // Pre-fill from the account and, if there's a default saved address, from that too — the
+      // customer only has to type anything at all the first time they ever check out.
+      if (user) {
+        document.getElementById('coFullName').value = user.name || '';
+        document.getElementById('coEmail').value = user.email || '';
+      }
+      var savedSelect = document.getElementById('coSavedAddress');
+      if (savedSelect) {
+        savedSelect.addEventListener('change', function () {
+          if (savedSelect.value === '') return;
+          applyAddress(savedAddresses[Number(savedSelect.value)]);
+        });
+        if (savedAddresses.length > 0) { savedSelect.value = '0'; applyAddress(savedAddresses[0]); }
       }
 
       var form = document.getElementById('checkoutForm');
@@ -1221,11 +1327,11 @@
             var unitPrice = product.price || 0;
             return { name: product.name || 'Item', image: (product.images || [])[0] || null, size: it.size, color: it.color, quantity: it.qty, totalPrice: unitPrice * it.qty };
           });
-          var savedOrder = { orderNumber: rpcResult.orderNumber, items: fullItems, totals: rpcResult.totals, customer: customer, address: address };
+          var savedOrder = { id: rpcResult.id, orderNumber: rpcResult.orderNumber, items: fullItems, totals: rpcResult.totals, customer: customer, address: address };
           var whatsappUrl = OrderService.placeOrder('whatsapp', savedOrder).url;
           close();
           CartService.clear();
-          window.setTimeout(function () { SuccessScreen.show(savedOrder.orderNumber, whatsappUrl); }, 320);
+          window.setTimeout(function () { SuccessScreen.show(savedOrder, whatsappUrl); }, 320);
         })
         .catch(function (err) {
           if (errorEl) errorEl.textContent = err.message;
@@ -1235,7 +1341,7 @@
 
     function init() { /* body listeners attach in render() */ }
 
-    return { open: open, close: close, init: init };
+    return { open: open, close: close, init: init, consumePendingFlag: consumePendingFlag };
   })();
 
   /* ---------- 18. Order service (pluggable payment methods) ---------- */
@@ -1282,25 +1388,443 @@
     function panel() { return document.getElementById('successModal'); }
     function body() { return document.getElementById('successModalBody'); }
 
-    function show(orderId, whatsappUrl) {
+    // `order` is what create_order() actually returned + what the cart/form held — payment is
+    // never marked confirmed here, no matter what: only Admin manually marking an order Paid
+    // ever changes that, and the customer's own Account → My Orders reflects it once they do.
+    function show(order, whatsappUrl) {
       var b = body();
       if (b) {
         b.innerHTML =
-          '<div class="success-icon">&#9825;</div><h2>Almost Done</h2>' +
-          '<p>Your order details have been prepared. Send the message on WhatsApp to complete your order.</p>' +
-          '<p class="success-order-id">Order Ref: ' + escapeHtml(orderId) + '</p>' +
+          '<div class="success-icon">&#9825;</div><h2>Order Confirmed &hearts;</h2>' +
+          '<p>Thank you for shopping with You &amp; Me.</p>' +
+          '<p class="success-order-id">Order #' + escapeHtml(order.orderNumber) + '</p>' +
+          '<p>Your order has been successfully registered.</p>' +
+          '<p class="success-payment-status">Payment: <strong>Pending Confirmation</strong></p>' +
           '<div class="success-actions">' +
-            '<a class="btn whatsapp-place-order-btn" href="' + whatsappUrl + '" target="_blank" rel="noopener">Open WhatsApp Again</a>' +
+            '<a class="btn whatsapp-place-order-btn" href="' + whatsappUrl + '" target="_blank" rel="noopener">Continue on WhatsApp</a>' +
+            '<button type="button" class="btn btn-outline" id="successViewOrder">View My Order</button>' +
             '<button type="button" class="btn btn-outline" id="successContinueShopping">Continue Shopping</button>' +
           '</div>';
         var continueBtn = document.getElementById('successContinueShopping');
         if (continueBtn) continueBtn.addEventListener('click', close);
+        var viewBtn = document.getElementById('successViewOrder');
+        if (viewBtn) viewBtn.addEventListener('click', function () {
+          close();
+          try { sessionStorage.setItem('ym_account_focus_order', String(order.id)); } catch (e) { /* ignore */ }
+          window.location.href = BASE_PATH + '/account';
+        });
       }
       openPanel(panel());
     }
     function close() { closePanel(panel()); }
     return { show: show };
   })();
+
+  function statusLabel(s) { return String(s || '').replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
+
+  /* ---------- 18b. Account dashboard (/account) ---------- */
+  // Every query in this module reads through the anon-key Supabase client, same as everywhere
+  // else on the site — what actually limits a customer to their own orders/addresses is Row
+  // Level Security (see "customer reads own" policies in
+  // supabase/migrations/0002_customer_accounts.sql), not anything client-side. A customer who
+  // edits the URL or forges a request still can't see or touch another customer's data.
+  var AccountDashboard = (function () {
+    var currentTab = 'overview';
+    var ordersCache = null; // reloaded once per dashboard visit, invalidated on tab re-entry
+
+    function content() { return document.getElementById('accountDashContent'); }
+
+    function setActiveNav(tab) {
+      document.querySelectorAll('.account-nav-item[data-tab]').forEach(function (a) {
+        a.classList.toggle('active', a.dataset.tab === tab);
+      });
+    }
+
+    function render(tab) {
+      currentTab = tab || currentTab || 'overview';
+      setActiveNav(currentTab);
+      var c = content();
+      if (!c) return;
+      c.innerHTML = '<p class="account-dash-loading">Loading…</p>';
+      if (currentTab === 'overview') renderOverview();
+      else if (currentTab === 'orders') renderOrders();
+      else if (currentTab === 'addresses') renderAddresses();
+      else if (currentTab === 'wishlist') renderWishlist();
+      else if (currentTab === 'profile') renderProfile();
+    }
+
+    function fetchOrders() {
+      if (ordersCache) return Promise.resolve(ordersCache);
+      return supabaseClient.from('orders').select('*, order_items(*)').order('created_at', { ascending: false })
+        .then(function (res) { ordersCache = res.data || []; return ordersCache; })
+        .catch(function () { ordersCache = []; return ordersCache; });
+    }
+
+    function orderThumbAndSummary(o) {
+      var items = o.order_items || [];
+      var thumb = items.length ? items[0].product_image : null;
+      var summary = items.length === 0 ? '—' : items.length === 1
+        ? items[0].product_name + ' — Size: ' + items[0].size + ', Color: ' + items[0].color + ', Qty: ' + items[0].quantity
+        : items[0].product_name + ' +' + (items.length - 1) + ' more item' + (items.length - 1 === 1 ? '' : 's');
+      return { thumb: thumb, summary: summary };
+    }
+
+    /* ---- Overview ---- */
+    function renderOverview() {
+      fetchOrders().then(function (orders) {
+        var user = SessionService.getUser();
+        var active = orders.filter(function (o) { return o.order_status !== 'delivered' && o.order_status !== 'cancelled'; }).length;
+        var delivered = orders.filter(function (o) { return o.order_status === 'delivered'; }).length;
+
+        content().innerHTML =
+          '<h3 class="account-hello">Hello, ' + escapeHtml((user && user.name) || 'there') + ' &hearts;</h3>' +
+          '<p class="account-welcome-line">Welcome back to You &amp; Me.</p>' +
+          '<div class="account-stat-grid">' +
+            accountStat(orders.length, 'Total Orders') +
+            accountStat(active, 'Active Orders') +
+            accountStat(delivered, 'Delivered Orders') +
+            accountStat(WishlistService.getCount(), 'Wishlist Items') +
+          '</div>' +
+          '<div class="account-dash-section-head"><h3>Recent Orders</h3>' + (orders.length ? '<button type="button" class="link-btn" data-goto-tab="orders">View All</button>' : '') + '</div>' +
+          (orders.length === 0 ? emptyOrdersState() : orders.slice(0, 3).map(orderCardHtml).join(''));
+
+        bindOrderCardActions();
+        var gotoBtn = content().querySelector('[data-goto-tab]');
+        if (gotoBtn) gotoBtn.addEventListener('click', function () { render('orders'); });
+      });
+    }
+
+    function accountStat(value, label) {
+      return '<div class="account-stat-card"><div class="account-stat-value">' + value + '</div><div class="account-stat-label">' + label + '</div></div>';
+    }
+
+    /* ---- My Orders (list) ---- */
+    function renderOrders() {
+      fetchOrders().then(function (orders) {
+        content().innerHTML =
+          '<h3>My Orders</h3>' +
+          (orders.length === 0 ? emptyOrdersState() : orders.map(orderCardHtml).join(''));
+        bindOrderCardActions();
+      });
+    }
+
+    function emptyOrdersState() {
+      return '<div class="account-empty-state">' +
+        '<div class="account-empty-icon">&hearts;</div>' +
+        '<p><strong>No orders yet &hearts;</strong></p>' +
+        '<p>When you place your first You &amp; Me order, you\'ll find it here.</p>' +
+        '<button type="button" class="btn btn-primary" id="accountExploreBtn">Explore Kids Wear</button>' +
+      '</div>';
+    }
+
+    function orderCardHtml(o) {
+      var ts = orderThumbAndSummary(o);
+      return '<div class="order-card">' +
+        '<div class="order-card-thumb">' + productImageHtml(ts.thumb) + '</div>' +
+        '<div class="order-card-info">' +
+          '<div class="order-card-top"><strong>Order #' + escapeHtml(o.order_number) + '</strong><span class="order-card-date">' + formatDate(o.created_at) + '</span></div>' +
+          '<p class="order-card-summary">' + escapeHtml(ts.summary) + '</p>' +
+          '<div class="order-card-badges">' +
+            '<span class="badge badge-' + o.payment_status + '">' + statusLabel(o.payment_status) + '</span>' +
+            '<span class="badge badge-' + o.order_status + '">' + statusLabel(o.order_status) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="order-card-right"><div class="order-card-total">' + formatPrice(o.total) + '</div>' +
+          '<button type="button" class="btn btn-sm btn-outline" data-view-order="' + o.id + '">View Order</button></div>' +
+      '</div>';
+    }
+
+    function bindOrderCardActions() {
+      content().querySelectorAll('[data-view-order]').forEach(function (btn) {
+        btn.addEventListener('click', function () { renderOrderDetail(Number(btn.dataset.viewOrder)); });
+      });
+      var exploreBtn = document.getElementById('accountExploreBtn');
+      if (exploreBtn) exploreBtn.addEventListener('click', function () { hideAccountDashboardView(); Router.navigate('kids'); });
+    }
+
+    /* ---- Order detail ---- */
+    var TRACKING_STEPS = [
+      { key: 'placed', label: 'Order Placed' },
+      { key: 'paid', label: 'Payment Confirmed' },
+      { key: 'confirmed', label: 'Confirmed' },
+      { key: 'packing', label: 'Packed' },
+      { key: 'shipped', label: 'Shipped' },
+      { key: 'out_for_delivery', label: 'Out for Delivery' },
+      { key: 'delivered', label: 'Delivered' }
+    ];
+    var ORDER_STATUS_RANK = { new: 0, confirmed: 1, packing: 2, ready_to_ship: 2, shipped: 3, out_for_delivery: 4, delivered: 5 };
+
+    function trackingStepsDone(o) {
+      var rank = ORDER_STATUS_RANK[o.order_status] != null ? ORDER_STATUS_RANK[o.order_status] : 0;
+      return {
+        placed: true,
+        paid: o.payment_status === 'paid',
+        confirmed: rank >= 1,
+        packing: rank >= 2,
+        shipped: rank >= 3,
+        out_for_delivery: rank >= 4,
+        delivered: rank >= 5
+      };
+    }
+
+    function renderOrderDetail(id) {
+      content().innerHTML = '<p class="account-dash-loading">Loading order…</p>';
+      supabaseClient.from('orders').select('*, order_items(*), order_status_history(*), shipments(*)').eq('id', id).single()
+        .then(function (res) {
+          if (res.error || !res.data) throw new Error('Order not found.');
+          var o = res.data;
+          var shipment = (o.shipments || [])[0] || null;
+          var done = o.order_status === 'cancelled' ? null : trackingStepsDone(o);
+
+          content().innerHTML =
+            '<button type="button" class="link-btn" id="orderDetailBack">&#8592; Back to My Orders</button>' +
+            '<div class="order-detail-head"><h3>Order #' + escapeHtml(o.order_number) + '</h3><span class="order-detail-date">Order Placed &middot; ' + formatDate(o.created_at) + '</span></div>' +
+            '<div class="panel-card"><h4>Product' + ((o.order_items || []).length > 1 ? 's' : '') + '</h4>' +
+              (o.order_items || []).map(function (it) {
+                return '<div class="order-detail-item">' + '<div class="order-detail-item-thumb">' + productImageHtml(it.product_image) + '</div>' +
+                  '<div class="order-detail-item-info"><strong>' + escapeHtml(it.product_name) + '</strong>' +
+                  '<p>Size: ' + escapeHtml(it.size) + ' &middot; Color: ' + escapeHtml(it.color) + ' &middot; Quantity: ' + it.quantity + '</p></div>' +
+                  '<div class="order-detail-item-price">' + formatPrice(it.total_price) + '</div>' +
+                '</div>';
+              }).join('') +
+            '</div>' +
+            '<div class="panel-card"><h4>Delivery Address</h4>' +
+              '<p>' + escapeHtml(o.customer_name) + '<br>' + escapeHtml(o.house) + ', ' + escapeHtml(o.street) + (o.landmark ? ' (near ' + escapeHtml(o.landmark) + ')' : '') +
+              '<br>' + escapeHtml(o.city) + ', ' + escapeHtml(o.state) + ' — ' + escapeHtml(o.pincode) + '<br>Phone: ' + escapeHtml(o.phone) + '</p>' +
+            '</div>' +
+            '<div class="panel-card"><h4>Order Summary</h4>' +
+              '<div class="cart-totals-row"><span>Subtotal</span><span>' + formatPrice(o.subtotal) + '</span></div>' +
+              '<div class="cart-totals-row"><span>Delivery</span><span>' + (o.delivery_charge === 0 ? 'Free' : formatPrice(o.delivery_charge)) + '</span></div>' +
+              (o.discount > 0 ? '<div class="cart-totals-row"><span>Discount</span><span>&minus;' + formatPrice(o.discount) + '</span></div>' : '') +
+              '<div class="cart-totals-row grand"><span>Total</span><span>' + formatPrice(o.total) + '</span></div>' +
+            '</div>' +
+            '<div class="panel-card"><h4>Payment</h4>' +
+              '<p>Method: ' + escapeHtml(o.payment_method === 'whatsapp' ? 'WhatsApp / Manual Payment' : o.payment_method) + '</p>' +
+              '<p class="success-payment-status">Payment Status: <span class="badge badge-' + o.payment_status + '">' + statusLabel(o.payment_status) + '</span></p>' +
+              '<p class="account-payment-note">Payment is confirmed manually by our team once received — you\'ll see this update automatically, no action needed here.</p>' +
+            '</div>' +
+            (o.order_status === 'cancelled'
+              ? '<div class="panel-card"><h4>Order Status</h4><p><span class="badge badge-cancelled">Cancelled</span></p></div>'
+              : '<div class="panel-card"><h4>Order Status</h4>' + trackingTimelineHtml(done) + '</div>') +
+            '<div class="panel-card"><h4>Shipping</h4>' +
+              (shipment && shipment.awb
+                ? '<p>Courier Partner: <strong>' + escapeHtml(shipment.courier || '—') + '</strong></p>' +
+                  '<p>Tracking ID: <strong>' + escapeHtml(shipment.awb) + '</strong></p>' +
+                  (shipment.estimated_delivery ? '<p>Estimated Delivery: <strong>' + formatDate(shipment.estimated_delivery) + '</strong></p>' : '') +
+                  (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track Package</a>' : '')
+                : '<p>Preparing your order &hearts;</p><p class="account-payment-note">Tracking information will appear here once your order has been shipped.</p>') +
+            '</div>';
+
+          var back = document.getElementById('orderDetailBack');
+          if (back) back.addEventListener('click', function () { render('orders'); });
+        })
+        .catch(function (err) {
+          content().innerHTML = '<button type="button" class="link-btn" id="orderDetailBack">&#8592; Back to My Orders</button><p class="account-empty-state">' + escapeHtml(err.message) + '</p>';
+          var back = document.getElementById('orderDetailBack');
+          if (back) back.addEventListener('click', function () { render('orders'); });
+        });
+    }
+
+    function trackingTimelineHtml(done) {
+      return '<div class="tracking-timeline">' + TRACKING_STEPS.map(function (step) {
+        return '<div class="tracking-step' + (done[step.key] ? ' done' : '') + '"><span class="tracking-dot">' + (done[step.key] ? '&#10003;' : '') + '</span><span>' + step.label + '</span></div>';
+      }).join('') + '</div>';
+    }
+
+    /* ---- Addresses ---- */
+    var editingAddressId = null;
+    var ADDRESS_FIELDS = ['name', 'phone', 'line1', 'line2', 'landmark', 'city', 'district', 'state', 'pincode'];
+
+    function renderAddresses() {
+      supabaseClient.from('addresses').select('*').order('is_default', { ascending: false }).order('created_at', { ascending: false })
+        .then(function (res) {
+          var addresses = res.data || [];
+          content().innerHTML =
+            '<div class="account-dash-section-head"><h3>Addresses</h3><button type="button" class="btn btn-sm btn-primary" id="addAddressBtn">+ Add Address</button></div>' +
+            (addresses.length === 0
+              ? '<div class="account-empty-state"><p><strong>No saved addresses yet</strong></p><p>Add one to make checkout faster next time.</p></div>'
+              : addresses.map(addressCardHtml).join(''));
+
+          document.getElementById('addAddressBtn').addEventListener('click', function () { openAddressForm(null); });
+          content().querySelectorAll('[data-edit-address]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var a = addresses.find(function (x) { return String(x.id) === btn.dataset.editAddress; });
+              if (a) openAddressForm(a);
+            });
+          });
+          content().querySelectorAll('[data-delete-address]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              if (!window.confirm('Delete this address?')) return;
+              supabaseClient.from('addresses').delete().eq('id', btn.dataset.deleteAddress).then(function () { renderAddresses(); });
+            });
+          });
+          content().querySelectorAll('[data-default-address]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var uid = SessionService.getUser().id;
+              supabaseClient.from('addresses').update({ is_default: false }).eq('user_id', uid)
+                .then(function () { return supabaseClient.from('addresses').update({ is_default: true }).eq('id', btn.dataset.defaultAddress); })
+                .then(function () { renderAddresses(); });
+            });
+          });
+        });
+    }
+
+    function addressCardHtml(a) {
+      return '<div class="address-card">' +
+        '<div class="address-card-head"><strong>' + escapeHtml(a.name) + '</strong>' + (a.is_default ? '<span class="badge badge-active">Default</span>' : '') + '</div>' +
+        '<p>' + escapeHtml(a.line1) + (a.line2 ? ', ' + escapeHtml(a.line2) : '') + (a.landmark ? ' (near ' + escapeHtml(a.landmark) + ')' : '') +
+        '<br>' + escapeHtml(a.city) + (a.district ? ', ' + escapeHtml(a.district) : '') + ', ' + escapeHtml(a.state) + ' — ' + escapeHtml(a.pincode) +
+        '<br>Phone: ' + escapeHtml(a.phone) + '</p>' +
+        '<div class="address-card-actions">' +
+          (a.is_default ? '' : '<button type="button" class="btn btn-sm btn-outline" data-default-address="' + a.id + '">Set Default</button>') +
+          '<button type="button" class="btn btn-sm btn-outline" data-edit-address="' + a.id + '">Edit</button>' +
+          '<button type="button" class="btn btn-sm btn-outline" data-delete-address="' + a.id + '">Delete</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function openAddressForm(address) {
+      editingAddressId = address ? address.id : null;
+      var panel = document.getElementById('addressFormPanel');
+      var body = document.getElementById('addressFormBody');
+      document.getElementById('addressFormTitle').textContent = address ? 'Edit Address' : 'Add Address';
+      body.innerHTML =
+        '<form id="addressForm">' +
+          field('addrName', 'Full Name', 'text') + field('addrPhone', 'Phone', 'tel') +
+          field('addrLine1', 'Address Line 1', 'text') + field('addrLine2', 'Address Line 2 (optional)', 'text') +
+          field('addrLandmark', 'Landmark (optional)', 'text') +
+          '<div class="form-row">' + field('addrCity', 'City', 'text') + field('addrDistrict', 'District (optional)', 'text') + '</div>' +
+          '<div class="form-row">' + field('addrState', 'State', 'text') + field('addrPincode', 'PIN Code', 'text') + '</div>' +
+          '<div class="toggle-row" style="display:flex;align-items:center;gap:8px;margin:10px 0;"><input type="checkbox" id="addrDefault"><label for="addrDefault">Set as default address</label></div>' +
+          '<p class="account-submit-feedback" id="addressFormFeedback"></p>' +
+          '<button type="submit" class="btn btn-primary btn-block">' + (address ? 'Save Changes' : 'Add Address') + '</button>' +
+        '</form>';
+
+      function field(id, label, type) { return '<div class="form-field"><label for="' + id + '">' + label + '</label><input type="' + type + '" id="' + id + '"></div>'; }
+
+      if (address) {
+        document.getElementById('addrName').value = address.name || '';
+        document.getElementById('addrPhone').value = address.phone || '';
+        document.getElementById('addrLine1').value = address.line1 || '';
+        document.getElementById('addrLine2').value = address.line2 || '';
+        document.getElementById('addrLandmark').value = address.landmark || '';
+        document.getElementById('addrCity').value = address.city || '';
+        document.getElementById('addrDistrict').value = address.district || '';
+        document.getElementById('addrState').value = address.state || '';
+        document.getElementById('addrPincode').value = address.pincode || '';
+        document.getElementById('addrDefault').checked = !!address.is_default;
+      }
+
+      document.getElementById('addressForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var payload = {
+          user_id: SessionService.getUser().id,
+          name: document.getElementById('addrName').value.trim(),
+          phone: document.getElementById('addrPhone').value.trim(),
+          line1: document.getElementById('addrLine1').value.trim(),
+          line2: document.getElementById('addrLine2').value.trim() || null,
+          landmark: document.getElementById('addrLandmark').value.trim() || null,
+          city: document.getElementById('addrCity').value.trim(),
+          district: document.getElementById('addrDistrict').value.trim() || null,
+          state: document.getElementById('addrState').value.trim(),
+          pincode: document.getElementById('addrPincode').value.trim(),
+          is_default: document.getElementById('addrDefault').checked
+        };
+        var feedback = document.getElementById('addressFormFeedback');
+        if (!payload.name || !payload.phone || !payload.line1 || !payload.city || !payload.state || !payload.pincode) {
+          feedback.textContent = 'Please fill in all required fields.'; return;
+        }
+        var req = editingAddressId
+          ? supabaseClient.from('addresses').update(payload).eq('id', editingAddressId)
+          : supabaseClient.from('addresses').insert(payload);
+        req.then(function (res) {
+          if (res.error) { feedback.textContent = res.error.message; return; }
+          closeAddressForm();
+          renderAddresses();
+        });
+      });
+
+      openPanel(panel);
+    }
+    function closeAddressForm() { closePanel(document.getElementById('addressFormPanel')); }
+
+    /* ---- Wishlist ---- */
+    function renderWishlist() {
+      var products = WishlistService.getIds().map(findProduct).filter(Boolean);
+      content().innerHTML = '<h3>Wishlist</h3>' +
+        (products.length === 0
+          ? '<div class="account-empty-state"><p><strong>Your wishlist is empty &hearts;</strong></p><p>Save products you love to find them here later.</p><button type="button" class="btn btn-primary" id="accountWishlistExplore">Explore Kids Wear</button></div>'
+          : '<div class="product-grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;">' + products.map(renderProductCard).join('') + '</div>');
+      var exploreBtn = document.getElementById('accountWishlistExplore');
+      if (exploreBtn) exploreBtn.addEventListener('click', function () { hideAccountDashboardView(); Router.navigate('kids'); });
+    }
+    WishlistService.onChange(function () { if (currentTab === 'wishlist' && document.getElementById('viewAccountDashboard') && !document.getElementById('viewAccountDashboard').hidden) renderWishlist(); });
+
+    /* ---- Profile ---- */
+    function renderProfile() {
+      var user = SessionService.getUser();
+      content().innerHTML =
+        '<h3>Profile</h3>' +
+        '<div class="panel-card">' +
+          '<div class="form-field"><label for="profileName">Full Name</label><input type="text" id="profileName" value="' + escapeHtml(user.name || '') + '"></div>' +
+          '<div class="form-field"><label>Email</label><input type="text" value="' + escapeHtml(user.email || '') + '" disabled></div>' +
+          '<p class="account-submit-feedback" id="profileFeedback"></p>' +
+          '<button type="button" class="btn btn-primary" id="profileSaveBtn">Save Changes</button>' +
+        '</div>' +
+        '<button type="button" class="btn btn-outline" id="accountDashLogoutInline">Logout</button>';
+
+      document.getElementById('profileSaveBtn').addEventListener('click', function () {
+        var name = document.getElementById('profileName').value.trim();
+        var feedback = document.getElementById('profileFeedback');
+        if (!name) { feedback.textContent = 'Name cannot be empty.'; return; }
+        supabaseClient.from('profiles').update({ name: name }).eq('id', user.id).then(function (res) {
+          if (res.error) { feedback.textContent = res.error.message; return; }
+          user.name = name;
+          feedback.textContent = 'Saved ✓';
+        });
+      });
+      document.getElementById('accountDashLogoutInline').addEventListener('click', doLogout);
+    }
+
+    function doLogout() {
+      SessionService.logout().then(function () { window.location.href = BASE_PATH + '/'; });
+    }
+
+    function init() {
+      var nav = document.getElementById('accountSideNav');
+      if (nav) nav.addEventListener('click', function (e) {
+        var tabBtn = e.target.closest('[data-tab]');
+        if (tabBtn) { render(tabBtn.dataset.tab); return; }
+        if (e.target.id === 'accountDashLogout') doLogout();
+      });
+      var back = document.getElementById('accountBackHome');
+      if (back) back.addEventListener('click', function (e) { e.preventDefault(); window.location.href = BASE_PATH + '/'; });
+      var closeAddrBtn = document.getElementById('addressFormClose');
+      if (closeAddrBtn) closeAddrBtn.addEventListener('click', closeAddressForm);
+    }
+
+    // Reset caches (fresh data) every time the dashboard view is (re-)entered.
+    function enter(focusOrderId) {
+      ordersCache = null;
+      if (focusOrderId) { setActiveNav('orders'); currentTab = 'orders'; renderOrderDetail(focusOrderId); }
+      else render('overview');
+    }
+
+    return { init: init, render: render, enter: enter };
+  })();
+
+  function showAccountDashboardView() {
+    ['viewHome', 'viewGallery', 'viewComingSoon'].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = true; });
+    var dash = document.getElementById('viewAccountDashboard');
+    if (dash) dash.hidden = false;
+    window.scrollTo(0, 0);
+  }
+  function hideAccountDashboardView() {
+    var dash = document.getElementById('viewAccountDashboard');
+    if (dash) dash.hidden = true;
+    var home = document.getElementById('viewHome');
+    if (home) home.hidden = false;
+  }
 
   /* ---------- Cart / Wishlist badges ---------- */
   function initBadgesAndButtons() {
@@ -1500,6 +2024,7 @@
     WishlistDrawer.init();
     SearchOverlay.init();
     AccountPanel.init();
+    AccountDashboard.init();
     Checkout.init();
     Gallery.init();
     ComingSoon.init();
@@ -1529,10 +2054,30 @@
       SessionService.check().then(function (user) {
         var path = window.location.pathname;
         var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account';
-        if (path !== loginPath && path !== accountPath) return;
-        if (user && user.role === 'admin') { window.location.href = BASE_PATH + '/admin'; return; }
-        if (path === accountPath && !user) { window.location.href = loginPath; return; }
-        AccountPanel.open();
+
+        // A checkout interrupted by the login requirement resumes here — this is also how
+        // Google Sign-In finishes: it's a full-page redirect away and back, so this is the
+        // very first moment (after that reload) a signed-in customer can be detected at all.
+        if (user && user.role !== 'admin' && Checkout.consumePendingFlag()) {
+          if (path === loginPath || path === accountPath) window.history.replaceState(null, '', BASE_PATH + '/');
+          Checkout.open();
+          return;
+        }
+
+        if (path === accountPath) {
+          if (user && user.role === 'admin') { window.location.href = BASE_PATH + '/admin'; return; }
+          if (!user) { window.location.href = loginPath; return; }
+          showAccountDashboardView();
+          var focusOrderId = null;
+          try { focusOrderId = sessionStorage.getItem('ym_account_focus_order'); sessionStorage.removeItem('ym_account_focus_order'); } catch (e) { /* ignore */ }
+          AccountDashboard.enter(focusOrderId ? Number(focusOrderId) : null);
+          return;
+        }
+        if (path === loginPath) {
+          if (user && user.role === 'admin') { window.location.href = BASE_PATH + '/admin'; return; }
+          if (user) { window.location.href = accountPath; return; }
+          AccountPanel.open();
+        }
       });
     });
   });

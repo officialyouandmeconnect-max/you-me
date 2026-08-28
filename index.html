@@ -358,6 +358,25 @@
 </div>
 <!-- /VIEW: COMING SOON -->
 
+<!-- ============ VIEW: MY ACCOUNT (customer dashboard, /account) ============ -->
+<div id="viewAccountDashboard" class="view-account" hidden>
+  <div class="section-inner account-dashboard-inner">
+    <a href="#" class="gallery-back link-btn" id="accountBackHome">&#8592; Back to Shopping</a>
+    <div class="account-dashboard-layout">
+      <nav class="account-side-nav" id="accountSideNav">
+        <button type="button" class="account-nav-item active" data-tab="overview">Overview</button>
+        <button type="button" class="account-nav-item" data-tab="orders">My Orders</button>
+        <button type="button" class="account-nav-item" data-tab="addresses">Addresses</button>
+        <button type="button" class="account-nav-item" data-tab="wishlist">Wishlist</button>
+        <button type="button" class="account-nav-item" data-tab="profile">Profile</button>
+        <button type="button" class="account-nav-item account-nav-logout" id="accountDashLogout">Logout</button>
+      </nav>
+      <div class="account-dash-content" id="accountDashContent"><!-- injected --></div>
+    </div>
+  </div>
+</div>
+<!-- /VIEW: MY ACCOUNT -->
+
 </main>
 
 <!-- ============ SITE FOOTER ============ -->
@@ -520,6 +539,15 @@
     <button class="panel-close" id="accountPanelClose" aria-label="Close account">&times;</button>
   </div>
   <div class="checkout-modal-body" id="accountPanelBody"><!-- injected --></div>
+</div>
+
+<!-- Address Form Panel (Account → Addresses: Add / Edit) -->
+<div class="panel address-form-panel" id="addressFormPanel" role="dialog" aria-modal="true" aria-labelledby="addressFormTitle" hidden>
+  <div class="checkout-modal-header">
+    <h2 id="addressFormTitle">Add Address</h2>
+    <button class="panel-close" id="addressFormClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="checkout-modal-body" id="addressFormBody"><!-- injected --></div>
 </div>
 
 <!-- Info Modal (Shipping / Returns / Size Guide / FAQ / Order Help / Privacy / Terms) -->
