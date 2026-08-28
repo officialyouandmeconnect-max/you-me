@@ -2,9 +2,9 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const db = require('../db/init');
+const { UPLOAD_DIR } = require('../db/paths');
 
 const router = express.Router();
-const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
 
 router.get('/', (req, res) => {
   const rows = db.prepare('SELECT * FROM media ORDER BY uploaded_at DESC').all();

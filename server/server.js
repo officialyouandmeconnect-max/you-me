@@ -41,7 +41,7 @@ app.use('/api/admin/shipments', requireAdmin, require('./routes/adminShipments')
 app.use('/api/admin/upload', requireAdmin, require('./routes/upload'));
 
 // ---- Static file serving ----
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(require('./db/paths').UPLOAD_DIR));
 app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
 app.use('/', express.static(path.join(__dirname, '..', 'you-and-me-site')));
 

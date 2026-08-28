@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: you-me-store
+    runtime: node
+    rootDir: server
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/products
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NODE_VERSION
+        value: 22.9.0
+      - key: DB_PATH
+        value: /var/data/data.sqlite
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+    disk:
+      name: you-me-data
+      mountPath: /var/data
+      sizeGB: 1

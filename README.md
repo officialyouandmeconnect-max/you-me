@@ -24,3 +24,13 @@ npm start
 
 Then open `http://localhost:4300/` for the store and `http://localhost:4300/admin` for the
 admin panel (the server serves the customer site itself, so there's nothing else to start).
+
+## Live hosting
+
+The store now needs a real running server (products, cart and checkout all go through the
+API — there's no more hardcoded product data in the frontend). **GitHub Pages can't serve
+this** — it's static-only and has no way to run `server/`. Deploy `server/` to a host that
+runs Node (see [`server/README.md`](server/README.md) for a Render Blueprint config already
+included as `render.yaml`); that deployment serves the storefront, the API, and `/admin` all
+from one URL, and should become the actual live link — GitHub Pages should not be relied on
+as the live site anymore.

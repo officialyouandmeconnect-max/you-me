@@ -165,16 +165,25 @@
           statCard('Cancelled', d.orders.cancelled, 'red') +
         '</div>' +
         '<div class="stat-grid">' +
+          // Revenue only counts orders actually marked Paid — never just placed. See
+          // routes/adminDashboard.js for the exact query this comes from.
+          statCard('Revenue (Paid)', fmtPrice(d.revenue.paid), 'sage') +
+          statCard('Pending Payment', fmtPrice(d.revenue.pending), 'amber') +
+          statCard('Customers', d.customers.total, 'blue') +
           statCard('Total Products', d.products.total, 'blue') +
           statCard('Low Stock', d.products.lowStock, 'amber') +
           statCard('Out of Stock', d.products.outOfStock, 'red') +
+        '</div>' +
+        '<div class="stat-grid">' +
           statCard("Today's Orders", d.orders.today, 'pink') +
           statCard("This Week", d.orders.thisWeek, 'pink') +
           statCard("This Month", d.orders.thisMonth, 'pink') +
         '</div>' +
         '<div class="panel-card">' +
           '<h3>Recent Orders</h3>' +
-          (d.recentOrders.length === 0 ? '<p class="empty-state">No orders yet.</p>' : recentOrdersTable(d.recentOrders)) +
+          (d.recentOrders.length === 0
+            ? '<div class="empty-state"><p><strong>No orders yet</strong></p><p>New customer orders will appear here automatically.</p></div>'
+            : recentOrdersTable(d.recentOrders)) +
         '</div>';
     });
   };
@@ -501,7 +510,13 @@
             '<td><a href="#orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
           '</tr>';
         }).join('')) + '</tbody></table></div>' +
-        (orders.length === 0 ? '<p class="empty-state">No orders match this filter.</p>' : '');
+        (orders.length === 0
+          ? '<div class="empty-state">' +
+              (orderListState.status === 'all' && !orderListState.q
+                ? '<p><strong>No orders yet</strong></p><p>New customer orders will appear here automatically.</p>'
+                : '<p>No orders match this filter.</p>') +
+            '</div>'
+          : '');
 
       content().querySelectorAll('[data-status]').forEach(function (btn) {
         btn.addEventListener('click', function () { orderListState.status = btn.dataset.status; renderOrderList(); });

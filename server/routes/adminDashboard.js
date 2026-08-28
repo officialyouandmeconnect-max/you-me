@@ -16,6 +16,13 @@ router.get('/', (req, res) => {
   const lowStock = db.prepare('SELECT COUNT(*) AS n FROM products WHERE stock > 0 AND stock <= 5').get().n;
   const outOfStock = db.prepare('SELECT COUNT(*) AS n FROM products WHERE stock <= 0').get().n;
 
+  // Revenue only ever counts orders the admin has actually marked Paid — placing an order
+  // (payment_status = 'pending') must never move this number. See routes/adminOrders.js
+  // PATCH /:id/payment for the only place payment_status changes.
+  const paidRevenue = db.prepare("SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE payment_status = 'paid'").get().n;
+  const pendingRevenue = db.prepare("SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE payment_status = 'pending'").get().n;
+  const totalCustomers = db.prepare('SELECT COUNT(DISTINCT phone) AS n FROM orders').get().n;
+
   const recent = db.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT 8').all().map((row) => {
     const firstItem = db.prepare('SELECT product_name, product_image FROM order_items WHERE order_id = ? LIMIT 1').get(row.id);
     return {
@@ -47,6 +54,13 @@ router.get('/', (req, res) => {
       total: totalProducts,
       lowStock,
       outOfStock
+    },
+    revenue: {
+      paid: paidRevenue,
+      pending: pendingRevenue
+    },
+    customers: {
+      total: totalCustomers
     },
     recentOrders: recent
   });
