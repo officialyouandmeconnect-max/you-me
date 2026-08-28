@@ -1769,6 +1769,140 @@
       };
     }
 
+    /* ---- Invoice ---- */
+    // Same rule as public.eligible_for_invoice() in the database — kept in sync deliberately so
+    // the UI never shows a "Download Invoice" button the server would then refuse. The server
+    // function is still the real authority (this is only for what the button looks like before
+    // the click); generate_invoice_for_order() re-checks this itself either way.
+    function invoiceEligible(o) {
+      return o.payment_status === 'paid' && ['new', 'cancelled'].indexOf(o.order_status) === -1;
+    }
+
+    function getExistingInvoice(orderId) {
+      return supabaseClient.from('invoices').select('*').eq('order_id', orderId).maybeSingle()
+        .then(function (res) { return res.data || null; })
+        .catch(function () { return null; });
+    }
+
+    // Creates the invoice on first call (server-side, via generate_invoice_for_order — the only
+    // way an invoices row is ever written), or just returns the existing one on every call after
+    // that. Never generates a second invoice for the same order.
+    function ensureInvoice(orderId) {
+      return supabaseClient.rpc('generate_invoice_for_order', { p_order_id: orderId })
+        .then(function (res) { if (res.error) throw res.error; return res.data; });
+    }
+
+    var INVOICE_SELLER_FALLBACK = { name: 'You & Me' };
+
+    // One canonical invoice document — this exact function (mirrored, not literally shared,
+    // in admin.js) is what both Admin and the customer render, from the same `invoices` row and
+    // the same immutable order_items rows. Nothing here is fabricated: every field either comes
+    // from the invoice's own frozen snapshot or is omitted (no GST/tax fields exist unless
+    // invoice.tax_amount is genuinely > 0 — this store has no GST registration, so that's
+    // always the case today, and the Tax line simply never renders).
+    function buildInvoiceHtml(order, items, invoice) {
+      var seller = invoice.seller_snapshot || INVOICE_SELLER_FALLBACK;
+      var customer = invoice.customer_snapshot || {};
+      var addr = invoice.shipping_address_snapshot || {};
+      var shipment = invoice.shipping_snapshot;
+      var sellerAddrLine = [seller.line1, seller.line2].filter(Boolean).join(', ');
+      var sellerCityLine = [seller.city, seller.state, seller.pincode].filter(Boolean).join(', ');
+      var addrLine1 = [addr.house, addr.street].filter(Boolean).join(', ') + (addr.landmark ? ' (near ' + addr.landmark + ')' : '');
+      var addrLine2 = [addr.city, addr.state, addr.pincode].filter(Boolean).join(', ');
+
+      var itemRows = items.map(function (it) {
+        return '<tr>' +
+          '<td>' + escapeHtml(it.product_name) + '</td>' +
+          '<td>' + escapeHtml(it.sku || '—') + '</td>' +
+          '<td>' + escapeHtml(it.size || '—') + '</td>' +
+          '<td>' + escapeHtml(it.color || '—') + '</td>' +
+          '<td class="num">' + it.quantity + '</td>' +
+          '<td class="num">' + formatPrice(it.unit_price) + '</td>' +
+          '<td class="num">' + formatPrice(it.total_price) + '</td>' +
+        '</tr>';
+      }).join('');
+
+      var summaryRows =
+        '<tr><td>Subtotal</td><td class="num">' + formatPrice(invoice.subtotal) + '</td></tr>' +
+        (invoice.discount > 0 ? '<tr><td>Discount</td><td class="num">&minus;' + formatPrice(invoice.discount) + '</td></tr>' : '') +
+        '<tr><td>Shipping Charge</td><td class="num">' + (invoice.shipping_amount === 0 ? 'Free' : formatPrice(invoice.shipping_amount)) + '</td></tr>' +
+        (invoice.tax_amount > 0 ? '<tr><td>Tax</td><td class="num">' + formatPrice(invoice.tax_amount) + '</td></tr>' : '') +
+        '<tr class="grand"><td>Grand Total</td><td class="num">' + formatPrice(invoice.grand_total) + '</td></tr>';
+
+      var titleSafe = 'You-and-Me-Invoice-' + invoice.invoice_number.replace(/\s+/g, '-');
+
+      return '<!doctype html><html><head><meta charset="utf-8"><title>' + escapeHtml(titleSafe) + '</title><style>' +
+        'body{font-family:Poppins,Arial,sans-serif;color:#2E2A26;margin:0;padding:32px;background:#fff;}' +
+        '.invoice{max-width:760px;margin:0 auto;}' +
+        '.inv-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #F1E4D3;padding-bottom:20px;margin-bottom:24px;}' +
+        '.inv-brand h1{margin:0;font-size:1.6rem;color:#E68A98;}' +
+        '.inv-brand p{margin:2px 0 0;color:#6B6259;font-size:0.85rem;}' +
+        '.inv-meta{text-align:right;font-size:0.85rem;color:#2E2A26;}' +
+        '.inv-meta strong{color:#E68A98;}' +
+        'h2.section{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;color:#6B6259;margin:24px 0 8px;}' +
+        '.inv-cols{display:flex;gap:32px;}' +
+        '.inv-cols > div{flex:1;font-size:0.9rem;line-height:1.5;}' +
+        'table{width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:8px;}' +
+        'th{text-align:left;background:#FBF6F1;padding:8px 10px;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:#6B6259;}' +
+        'td{padding:8px 10px;border-bottom:1px solid #F1E4D3;}' +
+        'td.num,th.num{text-align:right;}' +
+        '.summary-table{width:280px;margin-left:auto;margin-top:8px;}' +
+        '.summary-table td{border-bottom:none;padding:4px 10px;}' +
+        '.summary-table tr.grand td{font-weight:700;font-size:1rem;border-top:2px solid #2E2A26;padding-top:8px;}' +
+        '.inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #F1E4D3;font-size:0.78rem;color:#6B6259;text-align:center;}' +
+        '@media print{body{padding:0;} @page{size:A4;margin:16mm;}}' +
+        '</style></head><body><div class="invoice">' +
+        '<div class="inv-head">' +
+          '<div class="inv-brand"><h1>YOU &amp; ME</h1><p>Together in Every Style</p></div>' +
+          '<div class="inv-meta">' +
+            '<div><strong>Invoice #' + escapeHtml(invoice.invoice_number) + '</strong></div>' +
+            '<div>Invoice Date: ' + formatDate(invoice.invoice_date) + '</div>' +
+            '<div>Order Number: ' + escapeHtml(order.order_number) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="inv-cols">' +
+          '<div><h2 class="section">Customer Details</h2>' +
+            escapeHtml(customer.name || '') + '<br>' +
+            (customer.email ? escapeHtml(customer.email) + '<br>' : '') +
+            escapeHtml(customer.phone || '') +
+          '</div>' +
+          '<div><h2 class="section">Shipping Address</h2>' +
+            escapeHtml(addrLine1) + '<br>' + escapeHtml(addrLine2) +
+          '</div>' +
+          '<div><h2 class="section">Sold By</h2>' +
+            escapeHtml(seller.name || 'You & Me') + '<br>' +
+            (sellerAddrLine ? escapeHtml(sellerAddrLine) + '<br>' : '') +
+            (sellerCityLine ? escapeHtml(sellerCityLine) + '<br>' : '') +
+            (seller.phone ? escapeHtml(seller.phone) : '') +
+          '</div>' +
+        '</div>' +
+        '<h2 class="section">Order Items</h2>' +
+        '<table><thead><tr><th>Product</th><th>SKU</th><th>Size</th><th>Color</th><th class="num">Qty</th><th class="num">Unit Price</th><th class="num">Line Total</th></tr></thead>' +
+        '<tbody>' + itemRows + '</tbody></table>' +
+        '<table class="summary-table"><tbody>' + summaryRows + '</tbody></table>' +
+        '<h2 class="section">Payment</h2>' +
+        '<div style="font-size:0.9rem;">Method: ' + escapeHtml(invoice.payment_method === 'whatsapp' ? 'WhatsApp / Manual Payment' : invoice.payment_method) + '<br>' +
+          'Status: ' + escapeHtml(statusLabel(invoice.payment_status)) +
+          (invoice.payment_reference ? '<br>Reference: ' + escapeHtml(invoice.payment_reference) : '') +
+        '</div>' +
+        (shipment && shipment.provider ? '<h2 class="section">Shipping</h2>' +
+          '<div style="font-size:0.9rem;">Shipping Partner: ' + escapeHtml(shipment.provider === 'delhivery' ? 'Delhivery' : shipment.provider === 'amazon_shipping' ? 'Amazon Shipping' : shipment.provider) +
+          (shipment.tracking_id ? '<br>Tracking / AWB: ' + escapeHtml(shipment.tracking_id) : '') +
+          '</div>' : '') +
+        '<div class="inv-footer">This is a system-generated invoice for your You &amp; Me order. Thank you for shopping with us. &hearts;</div>' +
+        '</div><script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script>' +
+        '</body></html>';
+    }
+
+    function downloadInvoice(order, items, invoice) {
+      var html = buildInvoiceHtml(order, items, invoice);
+      var blob = new Blob([html], { type: 'text/html' });
+      var url = URL.createObjectURL(blob);
+      var win = window.open(url, '_blank');
+      if (!win) { window.location.href = url; }
+      setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+    }
+
     function renderOrderDetail(id) {
       content().innerHTML = '<p class="account-dash-loading">Loading order…</p>';
       // shipment_events is fetched separately (not nested in this select) so that an older
@@ -1786,10 +1920,12 @@
           var eventsPromise = shipment
             ? supabaseClient.from('shipment_events').select('*').eq('shipment_id', shipment.id).then(function (r) { return r.data || []; }).catch(function () { return []; })
             : Promise.resolve([]);
-          return eventsPromise.then(function (events) { if (shipment) shipment.shipment_events = events; return { o: o, shipment: shipment, isCourier: isCourier, courierSteps: courierSteps }; });
+          return eventsPromise
+            .then(function (events) { if (shipment) shipment.shipment_events = events; return getExistingInvoice(o.id); })
+            .then(function (invoice) { return { o: o, shipment: shipment, isCourier: isCourier, courierSteps: courierSteps, invoice: invoice }; });
         })
         .then(function (ctx) {
-          var o = ctx.o, shipment = ctx.shipment, isCourier = ctx.isCourier, courierSteps = ctx.courierSteps;
+          var o = ctx.o, shipment = ctx.shipment, isCourier = ctx.isCourier, courierSteps = ctx.courierSteps, invoice = ctx.invoice;
           var done = o.order_status === 'cancelled' ? null : (isCourier ? courierTrackingStepsDone(o, shipment) : trackingStepsDone(o));
 
           content().innerHTML =
@@ -1827,10 +1963,33 @@
                     : trackingTimelineHtml(done, isCourier ? courierSteps : TRACKING_STEPS)) +
                 '</div>') +
             '<div class="panel-card"><h4>Shipping</h4>' + shippingSectionHtml(shipment) +
+            '</div>' +
+            '<div class="panel-card"><h4>Invoice</h4>' +
+              (invoice
+                ? '<p>Invoice #' + escapeHtml(invoice.invoice_number) + '</p><button type="button" class="btn btn-sm btn-outline" id="downloadInvoiceBtn">Download Invoice</button>'
+                : invoiceEligible(o)
+                  ? '<button type="button" class="btn btn-sm btn-outline" id="downloadInvoiceBtn">Download Invoice</button>'
+                  : '<p class="account-payment-note">Invoice will be available after your order is confirmed.</p>') +
             '</div>';
 
           var back = document.getElementById('orderDetailBack');
           if (back) back.addEventListener('click', function () { render('orders'); });
+
+          var downloadBtn = document.getElementById('downloadInvoiceBtn');
+          if (downloadBtn) downloadBtn.addEventListener('click', function () {
+            downloadBtn.disabled = true;
+            var originalText = downloadBtn.textContent;
+            downloadBtn.textContent = 'Preparing…';
+            ensureInvoice(o.id).then(function (inv) {
+              downloadInvoice(o, o.order_items || [], inv);
+              downloadBtn.disabled = false;
+              downloadBtn.textContent = originalText;
+            }).catch(function (err) {
+              downloadBtn.disabled = false;
+              downloadBtn.textContent = originalText;
+              alert(err.message || 'Could not prepare the invoice — please try again.');
+            });
+          });
         })
         .catch(function (err) {
           content().innerHTML = '<button type="button" class="link-btn" id="orderDetailBack">&#8592; Back to My Orders</button><p class="account-empty-state">' + escapeHtml(err.message) + '</p>';
@@ -2126,17 +2285,36 @@
     var nav = document.getElementById('mainNav');
     if (!toggle || !nav) return;
 
+    function closeDrawer() {
+      nav.classList.remove('open');
+      toggle.setAttribute('aria-expanded', 'false');
+    }
+
     toggle.addEventListener('click', function () {
       var isOpen = nav.classList.toggle('open');
       toggle.setAttribute('aria-expanded', String(isOpen));
     });
 
     nav.querySelectorAll('a').forEach(function (link) {
-      link.addEventListener('click', function () {
-        nav.classList.remove('open');
-        toggle.setAttribute('aria-expanded', 'false');
-      });
+      link.addEventListener('click', closeDrawer);
     });
+
+    // Search/Wishlist/Account/Cart triggers inside the drawer (hidden from the header itself on
+    // mobile — see .header-icon-secondary) — same open() calls as their header-icon
+    // counterparts, never a second copy of the underlying logic.
+    var mobileSearchBtn = document.getElementById('mobileSearchBtn');
+    if (mobileSearchBtn) mobileSearchBtn.addEventListener('click', function () { closeDrawer(); SearchOverlay.open(); });
+    var mobileWishlistBtn = document.getElementById('mobileWishlistBtn');
+    if (mobileWishlistBtn) mobileWishlistBtn.addEventListener('click', function () { closeDrawer(); WishlistDrawer.open(); });
+    var mobileAccountBtn = document.getElementById('mobileAccountBtn');
+    if (mobileAccountBtn) mobileAccountBtn.addEventListener('click', function () {
+      closeDrawer();
+      // Same logic as the header Account icon: straight to the dashboard if already signed in.
+      if (SessionService.getUser()) { window.location.href = BASE_PATH + '/account'; }
+      else AccountPanel.open();
+    });
+    var mobileCartBtn = document.getElementById('mobileCartBtn');
+    if (mobileCartBtn) mobileCartBtn.addEventListener('click', function () { closeDrawer(); CartDrawer.open(); });
   }
 
   function initScrollEffects() {

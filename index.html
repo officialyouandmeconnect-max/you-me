@@ -40,36 +40,63 @@
       />
     </a>
 
-    <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
-      <span></span><span></span><span></span>
-    </button>
-
     <nav class="main-nav" id="mainNav" aria-label="Primary">
       <ul>
         <li><a href="#home" data-nav-link="home" class="active">Home</a></li>
         <li><a href="#kids" data-nav-link="kids">Kids Wear</a></li>
+        <li><a href="#new-arrivals" data-nav-link="new-arrivals">New Arrivals</a></li>
         <li><a href="#family" data-nav-link="family">Family Wear</a></li>
         <li><a href="#couples" data-nav-link="couples">Couple Sets</a></li>
-        <li><a href="#new-arrivals" data-nav-link="new-arrivals">New Arrivals</a></li>
         <li><a href="#about" data-nav-link="about">About Us</a></li>
         <li><a href="#contact" data-nav-link="contact">Contact Us</a></li>
       </ul>
+      <!-- Shown only inside the mobile drawer (CSS) — the same Search/Wishlist/Account/Cart
+           triggers as the header icons, hidden on mobile to keep the header itself uncluttered.
+           These call the exact same open() functions as their header counterparts (see
+           initMobileNav() in script.js), never duplicate logic. -->
+      <div class="mobile-nav-actions">
+        <button type="button" class="mobile-nav-action" id="mobileSearchBtn">
+          <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><line x1="20" y1="20" x2="16.6" y2="16.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span>Search</span>
+        </button>
+        <button type="button" class="mobile-nav-action" id="mobileWishlistBtn">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 20s-7-4.4-9.3-9C1.2 7.7 3 4.5 6.4 4.5c2 0 3.4 1.1 5.6 3.5 2.2-2.4 3.6-3.5 5.6-3.5 3.4 0 5.2 3.2 3.7 6.5C19 15.6 12 20 12 20Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          <span>Wishlist</span>
+        </button>
+        <button type="button" class="mobile-nav-action" id="mobileAccountBtn">
+          <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-4.4 3.6-7 8-7s8 2.6 8 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span>My Account</span>
+        </button>
+        <button type="button" class="mobile-nav-action" id="mobileCartBtn">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path d="M6 8h12l-1 12H7L6 8Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 8a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          <span>Cart</span>
+        </button>
+      </div>
     </nav>
 
     <div class="header-icons">
-      <button class="icon-btn" aria-label="Search" id="searchBtn">
+      <button class="icon-btn header-icon-secondary" aria-label="Search" id="searchBtn">
         <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><line x1="20" y1="20" x2="16.6" y2="16.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
-      <button class="icon-btn" aria-label="Wishlist" id="wishlistBtn">
+      <button class="icon-btn header-icon-secondary" aria-label="Wishlist" id="wishlistBtn">
         <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 20s-7-4.4-9.3-9C1.2 7.7 3 4.5 6.4 4.5c2 0 3.4 1.1 5.6 3.5 2.2-2.4 3.6-3.5 5.6-3.5 3.4 0 5.2 3.2 3.7 6.5C19 15.6 12 20 12 20Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
         <span class="cart-badge" id="wishlistBadge" hidden>0</span>
       </button>
-      <button class="icon-btn" aria-label="Account" id="accountBtn">
+      <button class="icon-btn header-icon-secondary" aria-label="Account" id="accountBtn">
         <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-4.4 3.6-7 8-7s8 2.6 8 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
       <button class="icon-btn cart-btn" aria-label="Cart" id="cartBtn">
         <svg viewBox="0 0 24 24" width="20" height="20"><path d="M6 8h12l-1 12H7L6 8Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 8a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="2"/></svg>
         <span class="cart-badge" id="cartBadge">0</span>
+      </button>
+      <!-- Hamburger lives here, as the last header-icons child, so it's grouped with the other
+           right-aligned actions instead of sitting as its own flex child between the logo and
+           icons (that old placement — plus main-nav going position:absolute on mobile, removing
+           it from flex flow — was exactly why the hamburger used to drift into the header's
+           visual center: header-inner's justify-content:space-between was spreading 3 remaining
+           flex children (logo / hamburger / icons) instead of the intended 2 (logo / actions). -->
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
       </button>
     </div>
   </div>

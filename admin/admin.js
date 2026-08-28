@@ -1126,6 +1126,134 @@
     });
   }
 
+  /* ---------- Invoice ---------- */
+  // Same rule as public.eligible_for_invoice() in the database — kept in sync deliberately so
+  // Admin never sees a button the server would refuse. generate_invoice_for_order() re-checks
+  // this itself regardless; this is only what the button looks like before the click.
+  function invoiceEligible(o) {
+    return o.paymentStatus === 'paid' && ['new', 'cancelled'].indexOf(o.orderStatus) === -1;
+  }
+  function getExistingInvoice(orderId) {
+    return supabaseClient.from('invoices').select('*').eq('order_id', orderId).maybeSingle()
+      .then(function (res) { return res.data || null; })
+      .catch(function () { return null; });
+  }
+  // Creates the invoice on first call (server-side, via generate_invoice_for_order — the only
+  // way an invoices row is ever written), or just returns the existing one after that. Never
+  // generates a second invoice for the same order — same function the customer site calls, same
+  // canonical invoice either surface ends up showing.
+  function ensureInvoice(orderId) {
+    return supabaseClient.rpc('generate_invoice_for_order', { p_order_id: orderId })
+      .then(function (res) { if (res.error) throw res.error; return res.data; });
+  }
+  var INVOICE_SELLER_FALLBACK = { name: 'You & Me' };
+
+  // Mirrors buildInvoiceHtml() in the customer site's script.js — same visual document, same
+  // data (the invoices row + the order's own immutable order_items), adapted only to admin.js's
+  // already-mapped order-detail shape (o.items / o.customer / o.address / …) instead of raw
+  // Supabase columns.
+  function buildInvoiceHtml(o, invoice) {
+    var seller = invoice.seller_snapshot || INVOICE_SELLER_FALLBACK;
+    var customer = invoice.customer_snapshot || {};
+    var addr = invoice.shipping_address_snapshot || {};
+    var shipment = invoice.shipping_snapshot;
+    var sellerAddrLine = [seller.line1, seller.line2].filter(Boolean).join(', ');
+    var sellerCityLine = [seller.city, seller.state, seller.pincode].filter(Boolean).join(', ');
+    var addrLine1 = [addr.house, addr.street].filter(Boolean).join(', ') + (addr.landmark ? ' (near ' + addr.landmark + ')' : '');
+    var addrLine2 = [addr.city, addr.state, addr.pincode].filter(Boolean).join(', ');
+
+    var itemRows = o.items.map(function (it) {
+      return '<tr>' +
+        '<td>' + esc(it.name) + '</td>' +
+        '<td>' + esc(it.sku || '—') + '</td>' +
+        '<td>' + esc(it.size || '—') + '</td>' +
+        '<td>' + esc(it.color || '—') + '</td>' +
+        '<td class="num">' + it.quantity + '</td>' +
+        '<td class="num">' + fmtPrice(it.unitPrice) + '</td>' +
+        '<td class="num">' + fmtPrice(it.totalPrice) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    var summaryRows =
+      '<tr><td>Subtotal</td><td class="num">' + fmtPrice(invoice.subtotal) + '</td></tr>' +
+      (invoice.discount > 0 ? '<tr><td>Discount</td><td class="num">&minus;' + fmtPrice(invoice.discount) + '</td></tr>' : '') +
+      '<tr><td>Shipping Charge</td><td class="num">' + (invoice.shipping_amount === 0 ? 'Free' : fmtPrice(invoice.shipping_amount)) + '</td></tr>' +
+      (invoice.tax_amount > 0 ? '<tr><td>Tax</td><td class="num">' + fmtPrice(invoice.tax_amount) + '</td></tr>' : '') +
+      '<tr class="grand"><td>Grand Total</td><td class="num">' + fmtPrice(invoice.grand_total) + '</td></tr>';
+
+    var titleSafe = 'You-and-Me-Invoice-' + invoice.invoice_number.replace(/\s+/g, '-');
+
+    return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(titleSafe) + '</title><style>' +
+      'body{font-family:Poppins,Arial,sans-serif;color:#2E2A26;margin:0;padding:32px;background:#fff;}' +
+      '.invoice{max-width:760px;margin:0 auto;}' +
+      '.inv-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #F1E4D3;padding-bottom:20px;margin-bottom:24px;}' +
+      '.inv-brand h1{margin:0;font-size:1.6rem;color:#E68A98;}' +
+      '.inv-brand p{margin:2px 0 0;color:#6B6259;font-size:0.85rem;}' +
+      '.inv-meta{text-align:right;font-size:0.85rem;color:#2E2A26;}' +
+      '.inv-meta strong{color:#E68A98;}' +
+      'h2.section{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;color:#6B6259;margin:24px 0 8px;}' +
+      '.inv-cols{display:flex;gap:32px;}' +
+      '.inv-cols > div{flex:1;font-size:0.9rem;line-height:1.5;}' +
+      'table{width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:8px;}' +
+      'th{text-align:left;background:#FBF6F1;padding:8px 10px;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:#6B6259;}' +
+      'td{padding:8px 10px;border-bottom:1px solid #F1E4D3;}' +
+      'td.num,th.num{text-align:right;}' +
+      '.summary-table{width:280px;margin-left:auto;margin-top:8px;}' +
+      '.summary-table td{border-bottom:none;padding:4px 10px;}' +
+      '.summary-table tr.grand td{font-weight:700;font-size:1rem;border-top:2px solid #2E2A26;padding-top:8px;}' +
+      '.inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #F1E4D3;font-size:0.78rem;color:#6B6259;text-align:center;}' +
+      '@media print{body{padding:0;} @page{size:A4;margin:16mm;}}' +
+      '</style></head><body><div class="invoice">' +
+      '<div class="inv-head">' +
+        '<div class="inv-brand"><h1>YOU &amp; ME</h1><p>Together in Every Style</p></div>' +
+        '<div class="inv-meta">' +
+          '<div><strong>Invoice #' + esc(invoice.invoice_number) + '</strong></div>' +
+          '<div>Invoice Date: ' + fmtDate(invoice.invoice_date) + '</div>' +
+          '<div>Order Number: ' + esc(o.orderNumber) + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="inv-cols">' +
+        '<div><h2 class="section">Customer Details</h2>' +
+          esc(customer.name || '') + '<br>' +
+          (customer.email ? esc(customer.email) + '<br>' : '') +
+          esc(customer.phone || '') +
+        '</div>' +
+        '<div><h2 class="section">Shipping Address</h2>' +
+          esc(addrLine1) + '<br>' + esc(addrLine2) +
+        '</div>' +
+        '<div><h2 class="section">Sold By</h2>' +
+          esc(seller.name || 'You & Me') + '<br>' +
+          (sellerAddrLine ? esc(sellerAddrLine) + '<br>' : '') +
+          (sellerCityLine ? esc(sellerCityLine) + '<br>' : '') +
+          (seller.phone ? esc(seller.phone) : '') +
+        '</div>' +
+      '</div>' +
+      '<h2 class="section">Order Items</h2>' +
+      '<table><thead><tr><th>Product</th><th>SKU</th><th>Size</th><th>Color</th><th class="num">Qty</th><th class="num">Unit Price</th><th class="num">Line Total</th></tr></thead>' +
+      '<tbody>' + itemRows + '</tbody></table>' +
+      '<table class="summary-table"><tbody>' + summaryRows + '</tbody></table>' +
+      '<h2 class="section">Payment</h2>' +
+      '<div style="font-size:0.9rem;">Method: ' + esc(invoice.payment_method === 'whatsapp' ? 'WhatsApp / Manual Payment' : invoice.payment_method) + '<br>' +
+        'Status: ' + esc(statusLabel(invoice.payment_status)) +
+        (invoice.payment_reference ? '<br>Reference: ' + esc(invoice.payment_reference) : '') +
+      '</div>' +
+      (shipment && shipment.provider ? '<h2 class="section">Shipping</h2>' +
+        '<div style="font-size:0.9rem;">Shipping Partner: ' + esc(shipment.provider === 'delhivery' ? 'Delhivery' : shipment.provider === 'amazon_shipping' ? 'Amazon Shipping' : shipment.provider) +
+        (shipment.tracking_id ? '<br>Tracking / AWB: ' + esc(shipment.tracking_id) : '') +
+        '</div>' : '') +
+      '<div class="inv-footer">This is a system-generated invoice for a You &amp; Me order.</div>' +
+      '</div><script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script>' +
+      '</body></html>';
+  }
+  function openInvoiceDocument(o, invoice) {
+    var html = buildInvoiceHtml(o, invoice);
+    var blob = new Blob([html], { type: 'text/html' });
+    var url = URL.createObjectURL(blob);
+    var win = window.open(url, '_blank');
+    if (!win) window.location.href = url;
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+  }
+
   function renderOrderDetail(id) {
     content().innerHTML = '<p class="empty-state">Loading order…</p>';
     shippingProviderChoice = null;
@@ -1133,7 +1261,11 @@
     delhiveryServiceability = null;
     delhiveryServiceabilityError = null;
     AdminAPI.orders.get(id).then(function (o) {
-      AdminAPI.shipments.get(o.id).catch(function () { return null; }).then(function (shipment) {
+      Promise.all([
+        AdminAPI.shipments.get(o.id).catch(function () { return null; }),
+        getExistingInvoice(o.id)
+      ]).then(function (results) {
+        var shipment = results[0], invoice = results[1];
         o.shipment = shipment || o.shipment;
         var isDelhiveryConfirmed = !!(o.shipment && o.shipment.provider === 'delhivery' && o.shipment.provider_shipment_id);
         var orderStatusOptions = isDelhiveryConfirmed ? INTERNAL_ORDER_STATUSES : ORDER_STATUSES;
@@ -1190,6 +1322,17 @@
                     (isDelhiveryConfirmed ? '<p class="account-payment-note" style="margin-top:6px;">Once shipped, courier tracking (Shipped / In Transit / Out for Delivery / Delivered) syncs automatically from Delhivery — no need to set those here.</p>' : '')
                 ) +
               '</div>' +
+              '<div class="panel-card"><h3>Invoice</h3>' +
+                (invoice
+                  ? '<p>Invoice Number: <strong>' + esc(invoice.invoice_number) + '</strong><br>Invoice Date: ' + fmtDate(invoice.invoice_date) + '</p>' +
+                    '<div class="amazon-shipping-actions">' +
+                      '<button type="button" class="btn-secondary btn-sm" id="viewInvoiceBtn">View Invoice</button>' +
+                      '<button type="button" class="btn-primary btn-sm" id="downloadInvoiceBtn">Download PDF</button>' +
+                    '</div>'
+                  : invoiceEligible(o)
+                    ? '<p class="amazon-shipping-hint">No invoice generated yet.</p><button type="button" class="btn-primary btn-sm" id="generateInvoiceBtn">Generate Invoice</button>'
+                    : '<p class="amazon-shipping-hint">Invoice will be available once payment is confirmed and the order is out of "New".</p>') +
+              '</div>' +
             '</div>' +
           '</div>';
 
@@ -1206,6 +1349,20 @@
               .then(function () { renderOrderDetail(o.id); });
           });
         }
+        var viewInvoiceBtn = document.getElementById('viewInvoiceBtn');
+        if (viewInvoiceBtn) viewInvoiceBtn.addEventListener('click', function () { openInvoiceDocument(o, invoice); });
+        var downloadInvoiceBtn = document.getElementById('downloadInvoiceBtn');
+        if (downloadInvoiceBtn) downloadInvoiceBtn.addEventListener('click', function () { openInvoiceDocument(o, invoice); });
+        var generateInvoiceBtn = document.getElementById('generateInvoiceBtn');
+        if (generateInvoiceBtn) generateInvoiceBtn.addEventListener('click', function () {
+          generateInvoiceBtn.disabled = true;
+          generateInvoiceBtn.textContent = 'Generating…';
+          ensureInvoice(o.id).then(function () { renderOrderDetail(o.id); }).catch(function (err) {
+            generateInvoiceBtn.disabled = false;
+            generateInvoiceBtn.textContent = 'Generate Invoice';
+            alert(err.message || 'Could not generate the invoice.');
+          });
+        });
         bindShippingForm(o);
       });
     });

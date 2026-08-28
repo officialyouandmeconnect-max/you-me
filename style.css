@@ -261,6 +261,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   background: none;
   border: none;
   padding: 6px;
+  flex-shrink: 0;
 }
 .nav-toggle span {
   width: 22px;
@@ -269,6 +270,12 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   border-radius: 2px;
   transition: transform 0.2s ease, opacity 0.2s ease;
 }
+
+/* Search/Wishlist/Account/Cart triggers duplicated inside the mobile drawer (see
+   .mobile-nav-actions below) — desktop-only otherwise, hidden on mobile via
+   .header-icon-secondary in the responsive block so the header itself only ever shows Cart +
+   the hamburger on small screens. */
+.mobile-nav-actions { display: none; }
 
 /* ---------- 4. Hero section ---------- */
 .hero {
@@ -793,7 +800,17 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 }
 
 @media (max-width: 720px) {
+  /* Header: logo left, hamburger + Cart right, nothing floating in between (see the DOM-order
+     bug-fix comment on .nav-toggle in index.html — this rule is just what makes that layout
+     actually visible). Search/Wishlist/Account move into the drawer instead of staying in the
+     header row, where 5 icon buttons + logo + hamburger don't reliably fit down to a 320px
+     screen — Cart and the hamburger are the two the header always keeps. */
+  .header-inner { padding: 14px 16px; gap: 12px; }
   .nav-toggle { display: flex; }
+  .header-icon-secondary { display: none; }
+
+  /* Drawer: a full-width sheet dropping from under the header. Scrolls internally (rather than
+     clipping) if a small screen's viewport is shorter than the full menu content. */
   .main-nav {
     position: absolute;
     top: 100%;
@@ -805,8 +822,51 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
     overflow: hidden;
     transition: max-height 0.3s ease;
   }
-  .main-nav.open { max-height: 420px; }
-  .main-nav ul { flex-direction: column; align-items: flex-start; padding: 16px 24px; gap: 18px; }
+  .main-nav.open { max-height: min(560px, 85vh); overflow-y: auto; }
+  .main-nav ul {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 20px 24px 8px;
+    gap: 4px;
+  }
+  .main-nav ul li { width: 100%; max-width: 320px; }
+  .main-nav ul a {
+    display: block;
+    padding: 14px 12px;
+    width: 100%;
+    font-size: 1rem;
+  }
+  .main-nav ul a.active::after { display: none; }
+  .main-nav ul a.active { color: var(--color-pink); font-weight: 700; }
+
+  /* Search / Wishlist / My Account / Cart — same triggers as the header icons, shown only here
+     on mobile (see .header-icon-secondary above and the DOM comment in index.html). */
+  .mobile-nav-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    max-width: 320px;
+    margin: 8px auto 20px;
+    padding: 16px 24px 0;
+    border-top: 1px solid rgba(64,46,33,0.08);
+  }
+  .mobile-nav-action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 14px 8px;
+    min-height: 64px;
+    background: var(--color-bg);
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--color-text);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+  .mobile-nav-action:active { background: var(--color-cream); }
   .section { padding: 60px 20px; }
   .section-heading h2, .centered-heading { font-size: 1.6rem; }
   .hero-copy h1 { font-size: 2.2rem; }
