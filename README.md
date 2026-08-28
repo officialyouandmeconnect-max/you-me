@@ -54,9 +54,9 @@ subpath rather than a domain root, every root-relative route (`/login`, `/accoun
 `/admin/dashboard`, …) is prefixed with `BASE_PATH = '/you-me'`, defined once in
 `supabase-client.js` and shared by both `script.js` and `admin.js`. **If you ever point a custom
 domain at Pages** (or move to a `<user>.github.io` user/org repo, which serves at the real
-root), change `BASE_PATH` back to `''` in both `supabase-client.js` files, and update the 9
-hardcoded sidebar links in `admin/index.html` to match (see the comment above them) — everything
-else keeps working unmodified.
+root), change `BASE_PATH` back to `''` in both `supabase-client.js` files — the admin sidebar is
+generated from `NAV_ITEMS` in `admin.js` at runtime (not hardcoded HTML), so that's the only
+place it needs to change; everything else keeps working unmodified.
 
 `404.html` at the repo root is what makes client-side routes like `/you-me/login` or
 `/you-me/admin/orders/12` survive a hard refresh or a bookmark — see the comments in that file

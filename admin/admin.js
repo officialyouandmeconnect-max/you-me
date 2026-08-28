@@ -24,6 +24,31 @@
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function statusLabel(s) { return String(s || '').replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
 
+  /* ---------- 0. Inline icon system (Lucide-style stroke icons — no icon font/CDN needed) ---------- */
+  var ICON_PATHS = {
+    dashboard: '<rect width="7" height="9" x="3" y="3" rx="1.5"/><rect width="7" height="5" x="14" y="3" rx="1.5"/><rect width="7" height="9" x="14" y="12" rx="1.5"/><rect width="7" height="5" x="3" y="16" rx="1.5"/>',
+    products: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+    orders: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2h-2"/><path d="M9 12h6"/><path d="M9 16h6"/><path d="M9 8h6"/>',
+    customers: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+    inventory: '<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+    shipping: '<path d="M1 3h15v13H1z"/><path d="M16 8h4l3 3v5h-7V8Z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>',
+    categories: '<path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.41 0l8.29-8.29a1 1 0 0 0 0-1.41L12 2Z"/><circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none"/>',
+    media: '<rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>',
+    logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+    search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+    bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+    chevronDown: '<polyline points="6 9 12 15 18 9"/>',
+    menu: '<line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>',
+    eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/>',
+    box: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" y1="22" x2="12" y2="12"/>',
+    plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+    pencil: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+    activity: '<path d="M3 12h4l3 8 4-16 3 8h4"/>'
+  };
+  function svgIcon(name) { return '<svg viewBox="0 0 24 24">' + (ICON_PATHS[name] || '') + '</svg>'; }
+  function icon(name) { return '<span class="icon icon-' + name + '">' + svgIcon(name) + '</span>'; }
+
   // Shared: render a product image (real upload OR one of the customer site's pastel
   // placeholder classes) as an <img> or a colored box, consistently across every admin view.
   var PLACEHOLDER_COLORS = { 'img-blue': '#DCE9F1', 'img-beige': '#F1E4D3', 'img-pink': '#F7DEE1', 'img-sage': '#E3EBDD', 'img-dual': 'linear-gradient(135deg,#DCE9F1,#F7DEE1)' };
@@ -65,13 +90,33 @@
       return Promise.all([
         supabaseClient.from('orders').select('id, order_number, customer_name, total, payment_status, order_status, created_at').order('created_at', { ascending: false }),
         supabaseClient.from('products').select('id, stock, status'),
-        supabaseClient.from('order_items').select('order_id, product_image').order('id', { ascending: true })
+        supabaseClient.from('order_items').select('order_id, product_image, product_name').order('id', { ascending: true })
       ]).then(function (results) {
         var ordersRes = throwIfError(results[0]), productsRes = throwIfError(results[1]), itemsRes = throwIfError(results[2]);
         var orders = ordersRes.data || [], products = productsRes.data || [], items = itemsRes.data || [];
 
-        var firstImageByOrder = {};
-        items.forEach(function (it) { if (!(it.order_id in firstImageByOrder)) firstImageByOrder[it.order_id] = it.product_image; });
+        var firstImageByOrder = {}, itemsByOrder = {};
+        items.forEach(function (it) {
+          if (!(it.order_id in firstImageByOrder)) firstImageByOrder[it.order_id] = it.product_image;
+          (itemsByOrder[it.order_id] = itemsByOrder[it.order_id] || []).push(it.product_name);
+        });
+
+        // Last 7 calendar days (real order counts, no synthetic/fake data) for the Order
+        // Activity chart — an empty bucket just means genuinely no orders landed that day.
+        var dayKeys = [], dayCounts = {};
+        for (var i = 6; i >= 0; i--) {
+          var d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - i);
+          var key = d.toISOString().slice(0, 10);
+          dayKeys.push(key); dayCounts[key] = 0;
+        }
+        orders.forEach(function (o) {
+          var key = new Date(o.created_at).toISOString().slice(0, 10);
+          if (key in dayCounts) dayCounts[key]++;
+        });
+        var last7Days = dayKeys.map(function (key) {
+          var d = new Date(key + 'T00:00:00');
+          return { label: d.toLocaleDateString('en-IN', { weekday: 'short' }), count: dayCounts[key] };
+        });
 
         var now = new Date();
         var startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -105,8 +150,11 @@
             lowStock: products.filter(function (p) { return p.stock > 0 && p.stock <= 5; }).length,
             outOfStock: products.filter(function (p) { return p.stock <= 0; }).length
           },
+          last7Days: last7Days,
           recentOrders: orders.slice(0, 8).map(function (o) {
-            return { id: o.id, orderNumber: o.order_number, customerName: o.customer_name, thumbnail: firstImageByOrder[o.id] || null, total: o.total, paymentStatus: o.payment_status, orderStatus: o.order_status, createdAt: o.created_at };
+            var names = itemsByOrder[o.id] || [];
+            var productSummary = names.length === 0 ? '—' : names.length === 1 ? names[0] : names[0] + ' +' + (names.length - 1) + ' more';
+            return { id: o.id, orderNumber: o.order_number, customerName: o.customer_name, thumbnail: firstImageByOrder[o.id] || null, productSummary: productSummary, itemCount: names.length, total: o.total, paymentStatus: o.payment_status, orderStatus: o.order_status, createdAt: o.created_at };
           })
         };
       });
@@ -374,7 +422,10 @@
   function showApp(user) {
     document.getElementById('checkingSession').hidden = true;
     document.getElementById('adminApp').hidden = false;
-    document.getElementById('topbarUsername').textContent = user.name || user.email || '';
+    var name = user.name || user.email || '';
+    document.getElementById('topbarUsername').textContent = name;
+    var avatar = document.getElementById('topbarAvatar');
+    if (avatar) avatar.textContent = (name.trim().charAt(0) || 'A').toUpperCase();
   }
 
   function initAuth() {
@@ -388,16 +439,36 @@
       }
     }).catch(function () { window.location.href = BASE_PATH + '/login'; });
 
-    document.getElementById('logoutBtn').addEventListener('click', function () {
-      AdminAPI.auth.logout().then(function () { window.location.href = BASE_PATH + '/login'; });
-    });
+    function doLogout() { AdminAPI.auth.logout().then(function () { window.location.href = BASE_PATH + '/login'; }); }
+    document.getElementById('logoutBtn').addEventListener('click', doLogout);
+    var profileLogout = document.getElementById('profileMenuLogout');
+    if (profileLogout) profileLogout.addEventListener('click', doLogout);
   }
 
   /* ---------- 3. Router + shell chrome ---------- */
-  var ROUTE_TITLES = {
-    dashboard: 'Dashboard', products: 'Products', orders: 'Orders', customers: 'Customers',
-    inventory: 'Inventory', shipping: 'Shipping', categories: 'Categories', media: 'Media Library', settings: 'Settings'
+  var NAV_ITEMS = [
+    { route: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { route: 'products', label: 'Products', icon: 'products' },
+    { route: 'orders', label: 'Orders', icon: 'orders' },
+    { route: 'customers', label: 'Customers', icon: 'customers' },
+    { route: 'inventory', label: 'Inventory', icon: 'inventory' },
+    { route: 'shipping', label: 'Shipping', icon: 'shipping' },
+    { route: 'categories', label: 'Categories', icon: 'categories' },
+    { route: 'media', label: 'Media Library', icon: 'media' },
+    { route: 'settings', label: 'Settings', icon: 'settings' }
+  ];
+  var ROUTE_TITLES = {}, ROUTE_SUBTITLES = {
+    dashboard: "Here's what's happening with You & Me today.",
+    products: 'Manage your product catalog.',
+    orders: 'Track and manage customer orders.',
+    customers: 'Everyone who has shopped with you.',
+    inventory: 'Keep stock levels accurate across every variant.',
+    shipping: 'Manage shipments and tracking for orders in transit.',
+    categories: 'A live summary of your catalog structure.',
+    media: 'Every image uploaded across the store.',
+    settings: 'Account and store configuration.'
   };
+  NAV_ITEMS.forEach(function (item) { ROUTE_TITLES[item.route] = item.label; });
   var ROUTE_RENDERERS = {}; // filled in by each section below
 
   // Real URLs (/admin/dashboard, /admin/products/12, …) via the History API — not hash
@@ -416,6 +487,8 @@
     function render() {
       var route = currentRoute();
       document.getElementById('pageTitle').textContent = ROUTE_TITLES[route] || 'Dashboard';
+      var subtitleEl = document.getElementById('pageSubtitle');
+      if (subtitleEl) subtitleEl.textContent = ROUTE_SUBTITLES[route] || '';
       document.querySelectorAll('.sidebar-nav a').forEach(function (a) { a.classList.toggle('active', a.dataset.route === route); });
       document.getElementById('adminSidebar').classList.remove('open');
       var renderer = ROUTE_RENDERERS[route] || ROUTE_RENDERERS.dashboard;
@@ -445,9 +518,53 @@
   })();
 
   function initShellChrome() {
-    document.getElementById('mobileNavToggle').addEventListener('click', function () {
-      document.getElementById('adminSidebar').classList.toggle('open');
+    // Sidebar nav is built here (not hardcoded HTML) so BASE_PATH and the icon set stay in one
+    // place — see the /you-me comment this used to require in index.html before this rewrite.
+    var navEl = document.getElementById('sidebarNav');
+    if (navEl) {
+      navEl.innerHTML = NAV_ITEMS.map(function (item) {
+        return '<a href="' + BASE_PATH + '/admin/' + item.route + '" data-route="' + item.route + '">' +
+          '<span class="nav-icon">' + svgIcon(item.icon) + '</span><span>' + esc(item.label) + '</span></a>';
+      }).join('');
+    }
+
+    var mobileToggle = document.getElementById('mobileNavToggle');
+    if (mobileToggle) {
+      mobileToggle.innerHTML = svgIcon('menu');
+      mobileToggle.addEventListener('click', function () { document.getElementById('adminSidebar').classList.toggle('open'); });
+    }
+    var logoutIcon = document.querySelector('#logoutBtn .nav-icon');
+    if (logoutIcon) logoutIcon.innerHTML = svgIcon('logout');
+    var searchIcon = document.querySelector('.search-icon');
+    if (searchIcon) searchIcon.innerHTML = svgIcon('search');
+    var bellIcon = document.querySelector('.bell-icon');
+    if (bellIcon) bellIcon.innerHTML = svgIcon('bell');
+    var chevronIcon = document.querySelector('.chevron-icon');
+    if (chevronIcon) chevronIcon.innerHTML = svgIcon('chevronDown');
+    var toastIcon = document.querySelector('.toast-order-icon');
+    if (toastIcon) toastIcon.innerHTML = svgIcon('bell');
+
+    // Typing a name/SKU in the topbar search and hitting Enter jumps to Products pre-filtered —
+    // a real shortcut, not just decoration.
+    var searchInput = document.getElementById('topbarSearchInput');
+    if (searchInput) searchInput.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' || !searchInput.value.trim()) return;
+      productListState.q = searchInput.value.trim();
+      Router.navigate(BASE_PATH + '/admin/products');
     });
+
+    // Profile menu: a lightweight dropdown, not a second logout mechanism — closes on an
+    // outside click or a real navigation.
+    var profileBtn = document.getElementById('topbarProfile');
+    var profileMenu = document.getElementById('topbarProfileMenu');
+    if (profileBtn && profileMenu) {
+      profileBtn.addEventListener('click', function (e) { e.stopPropagation(); profileMenu.hidden = !profileMenu.hidden; });
+      document.addEventListener('click', function () { profileMenu.hidden = true; });
+      var settingsLink = document.getElementById('profileMenuSettings');
+      if (settingsLink) settingsLink.addEventListener('click', function (e) {
+        e.preventDefault(); profileMenu.hidden = true; Router.navigate(BASE_PATH + '/admin/settings');
+      });
+    }
   }
 
   function content() { return document.getElementById('adminContent'); }
@@ -477,57 +594,123 @@
     Promise.all([AdminAPI.dashboard(), AdminAPI.customers.list()]).then(function (results) {
       var d = results[0];
       d.customers.total = results[1].length;
+
       content().innerHTML =
-        '<div class="stat-grid">' +
-          statCard('Total Orders', d.orders.total, 'pink') +
-          statCard('New', d.orders.new, 'amber') +
-          statCard('Confirmed', d.orders.confirmed, 'blue') +
-          statCard('Packing', d.orders.packing, 'blue') +
-          statCard('Shipped', d.orders.shipped, 'sage') +
-          statCard('Delivered', d.orders.delivered, 'sage') +
-          statCard('Cancelled', d.orders.cancelled, 'red') +
+        // 1. Primary KPIs — the four numbers that matter first.
+        '<div class="kpi-grid">' +
+          kpiCard('orders', 'Total Orders', d.orders.total, 'coral') +
+          kpiCard('activity', 'Revenue (Paid)', fmtPrice(d.revenue.paid), 'sage') +
+          kpiCard('box', 'New Orders', d.orders.new, 'blue') +
+          kpiCard('customers', 'Customers', d.customers.total, 'lavender') +
         '</div>' +
-        '<div class="stat-grid">' +
-          // Revenue only counts orders actually marked Paid — never just placed.
-          statCard('Revenue (Paid)', fmtPrice(d.revenue.paid), 'sage') +
-          statCard('Pending Payment', fmtPrice(d.revenue.pending), 'amber') +
-          statCard('Customers', d.customers.total, 'blue') +
-          statCard('Total Products', d.products.total, 'blue') +
-          statCard('Low Stock', d.products.lowStock, 'amber') +
-          statCard('Out of Stock', d.products.outOfStock, 'red') +
-        '</div>' +
-        '<div class="stat-grid">' +
-          statCard("Today's Orders", d.orders.today, 'pink') +
-          statCard("This Week", d.orders.thisWeek, 'pink') +
-          statCard("This Month", d.orders.thisMonth, 'pink') +
-        '</div>' +
+
+        // 2. Order status — one horizontal segmented bar instead of seven equal boxes.
         '<div class="panel-card">' +
-          '<h3>Recent Orders</h3>' +
+          '<div class="panel-card-head"><h3>Order Status</h3></div>' +
+          orderStatusBar(d.orders) +
+        '</div>' +
+
+        // 3. Order activity (real last-7-day counts, honest empty state) + inventory summary.
+        '<div class="dashboard-mid-row">' +
+          '<div class="panel-card">' +
+            '<div class="panel-card-head"><h3>Order Activity</h3></div>' +
+            (d.orders.total === 0
+              ? '<div class="chart-empty">' + icon('activity') + '<strong>No order activity yet</strong><span>Your sales activity will appear here after your first order.</span></div>'
+              : activityChartSvg(d.last7Days)) +
+          '</div>' +
+          '<div class="panel-card">' +
+            '<div class="panel-card-head"><h3>Inventory</h3></div>' +
+            inventorySummary(d.products) +
+          '</div>' +
+        '</div>' +
+
+        // 4. Recent orders.
+        '<div class="panel-card">' +
+          '<div class="panel-card-head"><h3>Recent Orders</h3>' + (d.recentOrders.length ? '<a href="' + BASE_PATH + '/admin/orders" class="panel-link">View All Orders</a>' : '') + '</div>' +
           (d.recentOrders.length === 0
-            ? '<div class="empty-state"><p><strong>No orders yet</strong></p><p>New customer orders will appear here automatically.</p></div>'
+            ? '<div class="empty-state-illustrated">' + icon('box') + '<p>No orders yet</p><p>New customer orders will appear here automatically.</p></div>'
             : recentOrdersTable(d.recentOrders)) +
+        '</div>' +
+
+        // 5. Quick actions.
+        '<div class="panel-card">' +
+          '<div class="panel-card-head"><h3>Quick Actions</h3></div>' +
+          '<div class="quick-actions-grid">' +
+            quickAction('plus', 'Add Product', BASE_PATH + '/admin/products/new') +
+            quickAction('orders', 'View Orders', BASE_PATH + '/admin/orders') +
+            quickAction('inventory', 'Update Inventory', BASE_PATH + '/admin/inventory') +
+            quickAction('shipping', 'Create Shipment', BASE_PATH + '/admin/shipping') +
+          '</div>' +
         '</div>';
     });
   };
 
-  function statCard(label, value, accent) {
-    return '<div class="stat-card accent-' + accent + '"><div class="stat-value">' + value + '</div><div class="stat-label">' + label + '</div></div>';
+  function kpiCard(iconName, label, value, tone) {
+    return '<div class="kpi-card tone-' + tone + '">' +
+      '<div class="kpi-card-icon">' + icon(iconName) + '</div>' +
+      '<div><div class="kpi-card-value">' + value + '</div><div class="kpi-card-label">' + label + '</div></div>' +
+    '</div>';
+  }
+
+  function quickAction(iconName, label, href) {
+    return '<a class="quick-action-btn" href="' + href + '">' + icon(iconName) + '<span>' + label + '</span></a>';
+  }
+
+  var ORDER_STATUS_TONES = { new: 'amber', confirmed: 'sage', packing: 'blue', shipped: 'lavender', delivered: 'sage', cancelled: 'red' };
+  function orderStatusBar(orders) {
+    var statuses = ['new', 'confirmed', 'packing', 'shipped', 'delivered', 'cancelled'];
+    var total = statuses.reduce(function (sum, s) { return sum + orders[s]; }, 0);
+    var bar = total === 0
+      ? '<div class="order-status-bar"><span style="width:100%;background:var(--surface-sunk);"></span></div>'
+      : '<div class="order-status-bar">' + statuses.map(function (s) {
+          var pct = (orders[s] / total) * 100;
+          if (pct <= 0) return '';
+          return '<span style="width:' + pct + '%;background:var(--' + ORDER_STATUS_TONES[s] + ');"></span>';
+        }).join('') + '</div>';
+    var legend = '<div class="order-status-legend">' + statuses.map(function (s) {
+      return '<div class="status-legend-item"><span class="status-legend-dot" style="background:var(--' + ORDER_STATUS_TONES[s] + ');"></span>' + statusLabel(s) + '<strong>' + orders[s] + '</strong></div>';
+    }).join('') + '</div>';
+    return bar + legend;
+  }
+
+  // Real last-7-day order counts as a small inline SVG bar chart — no chart library, no fake data.
+  function activityChartSvg(days) {
+    var w = 640, h = 160, padBottom = 24, padTop = 10, barGap = 14;
+    var max = Math.max(1, Math.max.apply(null, days.map(function (d) { return d.count; })));
+    var barW = (w - barGap * (days.length - 1)) / days.length;
+    var bars = days.map(function (d, i) {
+      var barH = (d.count / max) * (h - padBottom - padTop);
+      var x = i * (barW + barGap);
+      var y = h - padBottom - barH;
+      return '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + Math.max(barH, 2) + '" rx="6" fill="var(--coral)" opacity="' + (d.count === 0 ? '0.25' : '1') + '"></rect>' +
+        '<text x="' + (x + barW / 2) + '" y="' + (h - 6) + '" text-anchor="middle" font-size="10" fill="var(--text-faint)" font-family="var(--font)">' + d.label + '</text>' +
+        (d.count > 0 ? '<text x="' + (x + barW / 2) + '" y="' + (y - 6) + '" text-anchor="middle" font-size="10" font-weight="700" fill="var(--text-soft)" font-family="var(--font)">' + d.count + '</text>' : '');
+    }).join('');
+    return '<div class="activity-chart-wrap"><svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' + bars + '</svg></div>';
+  }
+
+  function inventorySummary(products) {
+    return '<div class="inventory-summary-list">' +
+      '<div class="inventory-summary-row"><span class="inventory-summary-dot" style="background:var(--blue);"></span>Total Products<strong>' + products.total + '</strong></div>' +
+      '<div class="inventory-summary-row"><span class="inventory-summary-dot" style="background:var(--amber);"></span>Low Stock<strong>' + products.lowStock + '</strong></div>' +
+      '<div class="inventory-summary-row"><span class="inventory-summary-dot" style="background:var(--red);"></span>Out of Stock<strong>' + products.outOfStock + '</strong></div>' +
+    '</div>';
   }
 
   function recentOrdersTable(orders) {
     return '<div class="table-wrap"><table class="data-table"><thead><tr>' +
-      '<th>Order</th><th>Customer</th><th>Photo</th><th>Amount</th><th>Payment</th><th>Status</th><th>Date</th><th></th>' +
+      '<th>Order ID</th><th>Customer</th><th>Product</th><th>Amount</th><th>Payment</th><th>Status</th><th>Date</th><th></th>' +
       '</tr></thead><tbody>' +
       orders.map(function (o) {
         return '<tr>' +
           '<td>' + esc(o.orderNumber) + '</td>' +
           '<td>' + esc(o.customerName) + '</td>' +
-          '<td>' + imageHtml(o.thumbnail) + '</td>' +
+          '<td style="display:flex;align-items:center;gap:10px;">' + imageHtml(o.thumbnail) + '<span>' + esc(o.productSummary) + '</span></td>' +
           '<td>' + fmtPrice(o.total) + '</td>' +
           '<td><span class="badge badge-' + o.paymentStatus + '">' + statusLabel(o.paymentStatus) + '</span></td>' +
           '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td>' +
           '<td>' + fmtDate(o.createdAt) + '</td>' +
-          '<td><a href="' + BASE_PATH + '/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
+          '<td><a href="' + BASE_PATH + '/admin/orders/' + o.id + '" class="icon-action-btn" aria-label="View order">' + icon('eye') + '</a></td>' +
         '</tr>';
       }).join('') + '</tbody></table></div>';
   }
