@@ -78,10 +78,14 @@
     return '₹' + Number(value).toLocaleString('en-IN');
   }
 
+  // BUG FIX: toLocaleDateString('en-IN', ...) without an explicit timeZone renders in the
+  // VIEWER's own system/browser timezone — 'en-IN' only affects date formatting conventions, not
+  // the actual timezone. Pinned to Asia/Kolkata explicitly, once, so a courier event near
+  // midnight IST never shows the wrong calendar day to a customer whose device is set elsewhere.
   function formatDate(iso) {
     if (!iso) return '—';
     var d = new Date(iso);
-    return isNaN(d) ? iso : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    return isNaN(d) ? iso : d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' });
   }
 
   function findProduct(id) {

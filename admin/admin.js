@@ -20,7 +20,12 @@
   'use strict';
 
   function fmtPrice(n) { return '₹' + Number(n || 0).toLocaleString('en-IN'); }
-  function fmtDate(iso) { if (!iso) return '—'; var d = new Date(iso.replace(' ', 'T') + (iso.indexOf('Z') === -1 && iso.indexOf('+') === -1 ? 'Z' : '')); return isNaN(d) ? iso : d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+  // BUG FIX: toLocaleString('en-IN', ...) without an explicit timeZone renders in the VIEWER's
+  // own system/browser timezone — 'en-IN' only affects number/date formatting conventions, not
+  // the actual timezone used. That silently showed wrong times for any admin whose machine
+  // wasn't set to IST. All timestamps here are courier/order events that only make sense in
+  // India time, so it's pinned explicitly — once, here — rather than left to chance.
+  function fmtDate(iso) { if (!iso) return '—'; var d = new Date(iso.replace(' ', 'T') + (iso.indexOf('Z') === -1 && iso.indexOf('+') === -1 ? 'Z' : '')); return isNaN(d) ? iso : d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function statusLabel(s) { return String(s || '').replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
 
@@ -1290,11 +1295,13 @@
             (terminal ? '' : '<button type="button" class="btn-danger btn-sm" id="amzCancelBtn">Cancel Shipment</button>') +
           '</div>' +
           (s.last_error ? '<p class="shipping-error-inline">Last sync error: ' + esc(s.last_error) + '</p>' : '') +
-          (events.length ? '<div class="tracking-events"><h4>Tracking History</h4>' + events.map(function (e) {
+          '<div class="tracking-events"><h4>Tracking History</h4>' +
+          (events.length ? events.map(function (e) {
             return '<div class="tracking-event-row"><strong>' + esc(NORMALIZED_STATUS_LABELS[e.normalized_status] || e.normalized_status || e.provider_status || '—') + '</strong>' +
               '<span>' + (e.event_time ? fmtDate(e.event_time) : '') + (e.event_location ? ' · ' + esc(e.event_location) : '') + '</span>' +
               (e.description ? '<p>' + esc(e.description) + '</p>' : '') + '</div>';
-          }).join('') + '</div>' : '') +
+          }).join('') : '<p class="amazon-shipping-hint">No courier scans available yet.</p>') +
+          '</div>' +
         '</div>';
     }
 
@@ -1345,11 +1352,13 @@
             (terminal ? '' : '<button type="button" class="btn-danger btn-sm" id="dlCancelBtn">Cancel Shipment</button>') +
           '</div>' +
           (s.last_error ? '<p class="shipping-error-inline">Last sync error: ' + esc(s.last_error) + '</p>' : '') +
-          (events.length ? '<div class="tracking-events"><h4>Tracking History</h4>' + events.map(function (e) {
+          '<div class="tracking-events"><h4>Tracking History</h4>' +
+          (events.length ? events.map(function (e) {
             return '<div class="tracking-event-row"><strong>' + esc(NORMALIZED_STATUS_LABELS[e.normalized_status] || e.normalized_status || e.provider_status || '—') + '</strong>' +
               '<span>' + (e.event_time ? fmtDate(e.event_time) : '') + (e.event_location ? ' · ' + esc(e.event_location) : '') + '</span>' +
               (e.description ? '<p>' + esc(e.description) + '</p>' : '') + '</div>';
-          }).join('') + '</div>' : '') +
+          }).join('') : '<p class="amazon-shipping-hint">No courier scans available yet.</p>') +
+          '</div>' +
         '</div>';
     }
 
