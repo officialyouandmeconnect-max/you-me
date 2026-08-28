@@ -1587,12 +1587,22 @@
 
     function renderOrderDetail(id) {
       content().innerHTML = '<p class="account-dash-loading">Loading order…</p>';
-      supabaseClient.from('orders').select('*, order_items(*), order_status_history(*), shipments(*, shipment_events(*))').eq('id', id).single()
+      // shipment_events is fetched separately (not nested in this select) so that an older
+      // database schema without it yet (migration 0003 not applied) degrades to "no tracking
+      // events" instead of breaking the entire order page — see the .catch below.
+      supabaseClient.from('orders').select('*, order_items(*), order_status_history(*), shipments(*)').eq('id', id).single()
         .then(function (res) {
           if (res.error || !res.data) throw new Error('Order not found.');
           var o = res.data;
           var shipment = (o.shipments || [])[0] || null;
           var isAmazon = shipment && shipment.provider === 'amazon_shipping';
+          var eventsPromise = shipment
+            ? supabaseClient.from('shipment_events').select('*').eq('shipment_id', shipment.id).then(function (r) { return r.data || []; }).catch(function () { return []; })
+            : Promise.resolve([]);
+          return eventsPromise.then(function (events) { if (shipment) shipment.shipment_events = events; return { o: o, shipment: shipment, isAmazon: isAmazon }; });
+        })
+        .then(function (ctx) {
+          var o = ctx.o, shipment = ctx.shipment, isAmazon = ctx.isAmazon;
           var done = o.order_status === 'cancelled' ? null : (isAmazon ? amazonTrackingStepsDone(shipment) : trackingStepsDone(o));
 
           content().innerHTML =

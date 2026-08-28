@@ -299,9 +299,19 @@
     },
 
     shipments: {
+      // shipment_events is fetched separately (not nested) so an older schema without it yet
+      // (migration 0003 not applied) still returns the shipment row itself, just with no
+      // events — instead of the whole call failing and hiding a real shipment from Admin.
       get: function (orderId) {
-        return supabaseClient.from('shipments').select('*, shipment_events(*)').eq('order_id', orderId).maybeSingle()
-          .then(function (res) { throwIfError(res); return res.data; });
+        return supabaseClient.from('shipments').select('*').eq('order_id', orderId).maybeSingle()
+          .then(function (res) {
+            throwIfError(res);
+            var shipment = res.data;
+            if (!shipment) return null;
+            return supabaseClient.from('shipment_events').select('*').eq('shipment_id', shipment.id)
+              .then(function (r) { shipment.shipment_events = r.data || []; return shipment; })
+              .catch(function () { shipment.shipment_events = []; return shipment; });
+          });
       },
       // Manual Shipping only — Amazon-provider shipments are never written to directly like
       // this; every one of their fields comes from the amazon-shipping Edge Function instead
