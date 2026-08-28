@@ -73,9 +73,20 @@
     return supabaseClient.auth.getSession().then(function (res) {
       var token = res.data && res.data.session && res.data.session.access_token;
       if (!token) return Promise.reject(new Error('Not authenticated.'));
+      // `Authorization` carries the anon key — this project's edge gateway silently 502s any
+      // request carrying a genuine Supabase JWT in any header (Authorization or otherwise)
+      // before the function's own code ever runs, even with per-function JWT verification off.
+      // Base64-encoding the real token is enough to dodge that, so it travels as
+      // x-user-token-b64 and gets decoded server-side (see requireAdmin() in
+      // supabase/functions/_shared/shipping.ts).
       return fetch(SUPABASE_URL + '/functions/v1/' + name, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+          'apikey': SUPABASE_ANON_KEY,
+          'x-user-token-b64': btoa(token)
+        },
         body: JSON.stringify(body)
       }).then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (data) {
