@@ -67,18 +67,18 @@ how they behave in production, where they're both under the same domain.
 
 ## Live hosting — GitHub Pages
 
-This repo is served by GitHub Pages at **https://officialyouandmeconnect-max.github.io/you-me/**
-(Settings → Pages → deploy from `main` / `/`). Because Pages serves this repo at the `/you-me`
-subpath rather than a domain root, every root-relative route (`/login`, `/account`, `/admin`,
-`/admin/dashboard`, …) is prefixed with `BASE_PATH = '/you-me'`, defined once in
-`supabase-client.js` and shared by both `script.js` and `admin.js`. **If you ever point a custom
-domain at Pages** (or move to a `<user>.github.io` user/org repo, which serves at the real
-root), change `BASE_PATH` back to `''` in both `supabase-client.js` files — the admin sidebar is
-generated from `NAV_ITEMS` in `admin.js` at runtime (not hardcoded HTML), so that's the only
-place it needs to change; everything else keeps working unmodified.
+This repo is served by GitHub Pages at **https://officialyouandme.in/** — a custom domain
+(Settings → Pages → Custom domain, with a `CNAME` file at the repo root), which serves from the
+real domain root. Every root-relative route (`/login`, `/account`, `/admin`, `/admin/dashboard`,
+…) uses `BASE_PATH`, defined once in `supabase-client.js` and shared by both `script.js` and
+`admin.js` — currently `''` since Pages serves from the root. **If this repo ever moves back to
+a plain `github.io/<repo>` project subpath** (custom domain removed), change `BASE_PATH` back to
+`'/you-me'` in both `supabase-client.js` files and update the `isAdmin`/redirect paths in
+`404.html` to match — the admin sidebar itself is generated from `NAV_ITEMS` in `admin.js` at
+runtime (not hardcoded HTML), so it needs no separate change.
 
-`404.html` at the repo root is what makes client-side routes like `/you-me/login` or
-`/you-me/admin/orders/12` survive a hard refresh or a bookmark — see the comments in that file
+`404.html` at the repo root is what makes client-side routes like `/login` or
+`/admin/orders/12` survive a hard refresh or a bookmark — see the comments in that file
 and at the top of both `index.html` files for how the redirect-and-restore trick works.
 
 ## First-time Supabase setup (new project only)

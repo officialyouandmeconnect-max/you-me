@@ -14,12 +14,11 @@ var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 
 var supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// GitHub Pages serves this repo at https://<user>.github.io/you-me/ — a project subpath, not a
-// domain root — so every root-relative route (/login, /account, /admin, /admin/dashboard, …)
-// used by script.js / admin.js needs this prefix. If you later point a custom domain at Pages
-// (or move to a <user>.github.io user/org repo), the site serves from the real root — change
-// this back to '' and every one of those routes keeps working unmodified.
-var BASE_PATH = '/you-me';
+// officialyouandme.in (a custom domain on GitHub Pages) serves this repo from the real domain
+// root, so every root-relative route (/login, /account, /admin, /admin/dashboard, …) needs no
+// prefix. If this ever moves back to a github.io/<repo> project subpath instead, change this
+// back to '/you-me' and every one of those routes keeps working unmodified.
+var BASE_PATH = '';
 
 // Raw Postgres row (snake_case, nested foreign-table arrays from a `.select('*, product_images(*), ...')`
 // query) -> the camelCase product shape every render function in script.js / admin.js already expects.

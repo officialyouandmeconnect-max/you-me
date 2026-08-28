@@ -4,17 +4,19 @@
 <meta charset="UTF-8">
 <title>You &amp; Me</title>
 <script>
-  // GitHub Pages is static-only — it has no idea /you-me/login or /you-me/admin/orders/12 are
-  // real client-side routes handled by script.js / admin.js, so a hard load or refresh of one
-  // 404s straight to this file. Stash the real path the visitor actually wanted, then bounce to
+  // GitHub Pages is static-only — it has no idea /login or /admin/orders/12 are real
+  // client-side routes handled by script.js / admin.js, so a hard load or refresh of one 404s
+  // straight to this file. Stash the real path the visitor actually wanted, then bounce to
   // whichever app's index.html should handle it — that page restores the path via
   // history.replaceState (see the inline script at the top of its <head>) before its own router
   // ever reads window.location, so the correct view renders with no visible flash or redirect.
+  // Paths are root-relative (officialyouandme.in serves this repo from the domain root, not a
+  // github.io/<repo> subpath) — see BASE_PATH in supabase-client.js if that ever changes.
   (function () {
     var path = window.location.pathname;
-    var isAdmin = path.indexOf('/you-me/admin') === 0;
+    var isAdmin = path.indexOf('/admin') === 0;
     try { sessionStorage.setItem('ym_redirect_path', path + window.location.search + window.location.hash); } catch (e) { /* ignore */ }
-    window.location.replace(isAdmin ? '/you-me/admin/' : '/you-me/');
+    window.location.replace(isAdmin ? '/admin/' : '/');
   })();
 </script>
 </head>
