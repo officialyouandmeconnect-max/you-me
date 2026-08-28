@@ -12,21 +12,27 @@ const SUBCATEGORY_LABELS = {
 };
 
 function seedAdmin() {
-  const existing = db.prepare('SELECT id FROM admin_users LIMIT 1').get();
+  const existing = db.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get();
   if (existing) {
-    console.log('Admin user already exists — skipping.');
+    console.log('An admin account already exists — skipping.');
     return;
   }
-  const username = process.env.ADMIN_USERNAME || 'admin';
+  const email = process.env.ADMIN_EMAIL || 'admin@youandme.in';
   const password = process.env.ADMIN_PASSWORD || crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
   const hash = bcrypt.hashSync(password, 10);
-  db.prepare('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)').run(username, hash);
+  const dupe = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+  if (dupe) {
+    db.prepare("UPDATE users SET password_hash = ?, role = 'admin' WHERE id = ?").run(hash, dupe.id);
+  } else {
+    db.prepare("INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, 'Admin', 'admin')").run(email, hash);
+  }
   console.log('');
   console.log('========================================');
   console.log(' ADMIN LOGIN CREATED');
-  console.log(' Username: ' + username);
+  console.log(' Email:    ' + email);
   console.log(' Password: ' + password);
   console.log(' (save this now — it is only printed once)');
+  console.log(' Log in at /login — you will be sent to /admin automatically.');
   console.log('========================================');
   console.log('');
 }

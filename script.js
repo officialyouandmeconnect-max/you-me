@@ -898,18 +898,64 @@
     return { open: open, close: close, init: init };
   })();
 
-  /* ---------- 16. Account panel (UI only — no backend yet) ---------- */
+  /* ---------- 15b. Session service ---------- */
+  // One real authentication system for the whole site — customers and admins log in through
+  // the exact same POST /api/auth/login. The server decides `role` from the database; this
+  // service just reflects whatever the server says, it never invents or trusts a role itself.
+  var SessionService = (function () {
+    var current = null; // null = unknown/unauthenticated, else { email, name, role }
+
+    function check() {
+      return fetch('/api/auth/session', { credentials: 'include' })
+        .then(function (res) { return res.json(); })
+        .then(function (data) { current = data.authenticated ? data.user : null; return current; })
+        .catch(function () { current = null; return null; });
+    }
+    function getUser() { return current; }
+
+    function login(email, password) {
+      return fetch('/api/auth/login', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: password })
+      }).then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (r) { if (r.ok) current = r.data.user; return r; });
+    }
+
+    function register(name, email, password) {
+      return fetch('/api/auth/register', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, email: email, password: password })
+      }).then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (r) { if (r.ok) current = r.data.user; return r; });
+    }
+
+    function logout() {
+      return fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+        .then(function () { current = null; });
+    }
+
+    return { check: check, getUser: getUser, login: login, register: register, logout: logout };
+  })();
+
+  /* ---------- 16. Account panel ---------- */
   var AccountPanel = (function () {
     function panel() { return document.getElementById('accountPanel'); }
     function body() { return document.getElementById('accountPanelBody'); }
     var mode = 'login';
 
-    function open() { mode = 'login'; render(); openPanel(panel()); }
+    function open() {
+      mode = 'login';
+      render();
+      openPanel(panel());
+    }
     function close() { closePanel(panel()); }
 
     function render() {
       var b = body();
       if (!b) return;
+      var user = SessionService.getUser();
+
+      if (user) { renderProfile(b, user); return; }
 
       var tabs =
         '<div class="account-tabs">' +
@@ -920,7 +966,7 @@
       var formHtml = mode === 'login'
         ? (
           '<form id="accountForm">' +
-            field('accPhoneEmail', 'Phone Number / Email', 'text') +
+            field('accEmail', 'Email', 'email') +
             field('accPassword', 'Password', 'password') +
             '<div class="account-forgot"><button type="button" id="forgotPasswordBtn">Forgot Password?</button></div>' +
             '<button type="submit" class="btn btn-primary btn-block" style="margin-top:16px;">Login</button>' +
@@ -929,7 +975,6 @@
         : (
           '<form id="accountForm">' +
             field('accFullName', 'Full Name', 'text') +
-            field('accMobile', 'Mobile Number', 'tel') +
             field('accEmail', 'Email', 'email') +
             field('accPassword2', 'Password', 'password') +
             field('accConfirmPassword', 'Confirm Password', 'password') +
@@ -937,26 +982,68 @@
           '</form>'
         );
 
-      b.innerHTML = tabs + formHtml +
-        '<p class="account-submit-feedback" id="accountFeedback"></p>' +
-        '<p class="account-note">This store doesn&rsquo;t have login/signup connected to a server yet — this is a preview of the flow. Orders are placed via WhatsApp and don&rsquo;t require an account.</p>';
+      b.innerHTML = tabs + formHtml + '<p class="account-submit-feedback" id="accountFeedback"></p>';
 
       function field(id, label, type) {
         return '<div class="form-field"><label for="' + id + '">' + label + '</label><input type="' + type + '" id="' + id + '"></div>';
       }
 
       var form = document.getElementById('accountForm');
-      if (form) form.addEventListener('submit', function (event) {
-        event.preventDefault();
-        var feedback = document.getElementById('accountFeedback');
-        if (feedback) feedback.textContent = 'Account features are coming soon — this action isn\'t connected to a server yet.';
-      });
+      if (form) form.addEventListener('submit', onSubmit);
 
       var forgot = document.getElementById('forgotPasswordBtn');
       if (forgot) forgot.addEventListener('click', function () {
         var feedback = document.getElementById('accountFeedback');
-        if (feedback) feedback.textContent = 'Password reset isn\'t connected to a server yet — check back soon.';
+        if (feedback) feedback.textContent = 'Password reset isn\'t available yet — contact us on WhatsApp for help.';
       });
+    }
+
+    function renderProfile(b, user) {
+      b.innerHTML =
+        '<div class="panel-card" style="text-align:center;padding:12px 0 20px;">' +
+          '<p style="font-size:1.05rem;font-weight:600;margin:0 0 4px;">' + escapeHtml(user.name || 'You') + '</p>' +
+          '<p style="color:var(--color-text-soft);font-size:0.85rem;margin:0 0 18px;">' + escapeHtml(user.email) + '</p>' +
+          '<button type="button" class="btn btn-outline" id="accountLogoutBtn">Logout</button>' +
+        '</div>';
+      var logoutBtn = document.getElementById('accountLogoutBtn');
+      if (logoutBtn) logoutBtn.addEventListener('click', function () {
+        SessionService.logout().then(function () {
+          if (window.location.pathname === '/account') window.location.href = '/';
+          else render();
+        });
+      });
+    }
+
+    function onSubmit(event) {
+      event.preventDefault();
+      var feedback = document.getElementById('accountFeedback');
+      var submitBtn = event.target.querySelector('button[type="submit"]');
+      if (feedback) feedback.textContent = '';
+      if (submitBtn) submitBtn.disabled = true;
+
+      var request = mode === 'login'
+        ? SessionService.login(document.getElementById('accEmail').value.trim(), document.getElementById('accPassword').value)
+        : (function () {
+            var name = document.getElementById('accFullName').value.trim();
+            var email = document.getElementById('accEmail').value.trim();
+            var pw = document.getElementById('accPassword2').value;
+            var confirm = document.getElementById('accConfirmPassword').value;
+            if (pw !== confirm) return Promise.resolve({ ok: false, data: { error: 'Passwords do not match.' } });
+            return SessionService.register(name, email, pw);
+          })();
+
+      request.then(function (r) {
+        if (submitBtn) submitBtn.disabled = false;
+        if (!r.ok) { if (feedback) feedback.textContent = r.data.error || 'Something went wrong.'; return; }
+        redirectAfterLogin(r.data.user);
+      });
+    }
+
+    function redirectAfterLogin(user) {
+      if (user.role === 'admin') { window.location.href = '/admin'; return; }
+      if (window.location.pathname === '/login') { window.location.href = '/account'; return; }
+      showToast('Welcome back, ' + user.name + '!');
+      close();
     }
 
     function onTabClick(event) {
@@ -968,12 +1055,14 @@
 
     function init() {
       var btn = document.getElementById('accountBtn');
-      if (btn) btn.addEventListener('click', open);
+      if (btn) btn.addEventListener('click', function () {
+        if (SessionService.getUser()) { render(); openPanel(panel()); } else open();
+      });
       var b = body();
       if (b) b.addEventListener('click', onTabClick);
     }
 
-    return { open: open, close: close, init: init };
+    return { open: open, close: close, render: render, init: init };
   })();
 
   /* ---------- 17. Checkout ---------- */
@@ -1406,6 +1495,18 @@
     loadProducts().then(function () {
       renderProductGrid(grid, PRODUCTS.filter(function (p) { return p.featured; }));
       Router.init();
+    });
+
+    // /login and /account are real, bookmarkable URLs (server.js serves this same page for
+    // both) — on load, check the session once and open the right view. An admin who lands on
+    // either is sent straight to /admin; the server would bounce them there anyway via /admin's
+    // own check, this just skips the extra hop.
+    SessionService.check().then(function (user) {
+      var path = window.location.pathname;
+      if (path !== '/login' && path !== '/account') return;
+      if (user && user.role === 'admin') { window.location.href = '/admin'; return; }
+      if (path === '/account' && !user) { window.location.href = '/login'; return; }
+      AccountPanel.open();
     });
   });
 })();

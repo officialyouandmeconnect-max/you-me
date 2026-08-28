@@ -26,7 +26,7 @@
       credentials: 'include',
       headers: options.body ? { 'Content-Type': 'application/json' } : {}
     }, options)).then(function (res) {
-      if (res.status === 401) { showLogin(); throw new Error('Not authenticated'); }
+      if (res.status === 401 || res.status === 403) { window.location.href = '/login'; throw new Error('Not authenticated'); }
       return res.json().then(function (data) {
         if (!res.ok) throw new Error(data.error || 'Request failed');
         return data;
@@ -59,38 +59,30 @@
   }
 
   /* ---------- 2. Auth ---------- */
-  function showLogin() {
-    document.getElementById('loginScreen').hidden = false;
-    document.getElementById('adminApp').hidden = true;
-  }
-  function showApp(username) {
-    document.getElementById('loginScreen').hidden = true;
+  // There is no login form on this page — the server itself already refuses to serve this
+  // shell to anyone without an admin session (see the /admin route in server.js), so by the
+  // time this script runs we're either looking at a confirmed admin or something's gone wrong
+  // client-side (e.g. the session expired between page load and this check). Either way, the
+  // one and only thing to do is re-verify with the server and bounce to /login if it disagrees.
+  function showApp(user) {
+    document.getElementById('checkingSession').hidden = true;
     document.getElementById('adminApp').hidden = false;
-    document.getElementById('topbarUsername').textContent = username || '';
+    document.getElementById('topbarUsername').textContent = user.name || user.email || '';
   }
 
   function initAuth() {
-    apiGet('/admin/session').then(function (data) {
-      if (data.authenticated) { showApp(data.username); Router.start(); startNotifications(); }
-      else showLogin();
-    }).catch(function () { showLogin(); });
-
-    document.getElementById('loginForm').addEventListener('submit', function (e) {
-      e.preventDefault();
-      var errorEl = document.getElementById('loginError');
-      errorEl.textContent = '';
-      apiPost('/admin/login', {
-        username: document.getElementById('loginUsername').value.trim(),
-        password: document.getElementById('loginPassword').value
-      }).then(function (data) {
-        showApp(data.username);
+    apiGet('/auth/session').then(function (data) {
+      if (data.authenticated && data.user.role === 'admin') {
+        showApp(data.user);
         Router.start();
         startNotifications();
-      }).catch(function (err) { errorEl.textContent = err.message; });
-    });
+      } else {
+        window.location.href = '/login';
+      }
+    }).catch(function () { window.location.href = '/login'; });
 
     document.getElementById('logoutBtn').addEventListener('click', function () {
-      apiPost('/admin/logout', {}).then(function () { window.location.hash = ''; showLogin(); });
+      apiPost('/auth/logout', {}).then(function () { window.location.href = '/login'; });
     });
   }
 
@@ -101,16 +93,19 @@
   };
   var ROUTE_RENDERERS = {}; // filled in by each section below
 
+  // Real URLs (/admin/dashboard, /admin/products/12, …) via the History API — not hash
+  // fragments. Internal navigation (sidebar links + every dynamically-generated "View"/"Edit"
+  // link the renderers below produce) is intercepted so it feels like an SPA, but every one of
+  // those URLs also works as a real, bookmarkable, refresh-safe address, and a full page load
+  // of any of them re-runs the same server-side admin check in server.js.
   var Router = (function () {
-    function currentRoute() {
-      var raw = (window.location.hash || '#dashboard').replace('#', '');
-      return raw.split('/')[0].split('?')[0] || 'dashboard';
+    function segments() {
+      var path = window.location.pathname.replace(/^\/admin\/?/, '');
+      return path.split('/').filter(Boolean);
     }
-    function currentParam() {
-      var raw = (window.location.hash || '').replace('#', '');
-      var parts = raw.split('/');
-      return parts[1] || null;
-    }
+    function currentRoute() { return segments()[0] || 'dashboard'; }
+    function currentParam() { return segments()[1] ? decodeURIComponent(segments()[1]) : null; }
+
     function render() {
       var route = currentRoute();
       document.getElementById('pageTitle').textContent = ROUTE_TITLES[route] || 'Dashboard';
@@ -119,8 +114,27 @@
       var renderer = ROUTE_RENDERERS[route] || ROUTE_RENDERERS.dashboard;
       renderer(currentParam());
     }
-    function start() { window.addEventListener('hashchange', render); render(); }
-    return { start: start, currentParam: currentParam };
+
+    function navigate(path) {
+      if (path !== window.location.pathname) window.history.pushState(null, '', path);
+      render();
+    }
+
+    function initLinkInterception() {
+      document.addEventListener('click', function (event) {
+        var link = event.target.closest('a[href^="/admin"]');
+        if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigate(link.getAttribute('href'));
+      });
+    }
+
+    function start() {
+      initLinkInterception();
+      window.addEventListener('popstate', render);
+      render();
+    }
+    return { start: start, navigate: navigate, currentParam: currentParam };
   })();
 
   function initShellChrome() {
@@ -205,7 +219,7 @@
           '<td><span class="badge badge-' + o.paymentStatus + '">' + statusLabel(o.paymentStatus) + '</span></td>' +
           '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td>' +
           '<td>' + fmtDate(o.createdAt) + '</td>' +
-          '<td><a href="#orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
+          '<td><a href="/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
         '</tr>';
       }).join('') + '</tbody></table></div>';
   }
@@ -229,7 +243,7 @@
       content().innerHTML =
         '<div class="section-heading-row">' +
           '<div class="search-box"><input type="text" id="productSearch" placeholder="Search by name or SKU…" value="' + esc(productListState.q) + '"></div>' +
-          '<a href="#products/new" class="btn-primary">+ Add Product</a>' +
+          '<a href="/admin/products/new" class="btn-primary">+ Add Product</a>' +
         '</div>' +
         '<div class="table-wrap"><table class="data-table"><thead><tr>' +
           '<th>Image</th><th>Name</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Featured</th><th>New</th><th></th>' +
@@ -246,7 +260,7 @@
             '<td>' + (p.featured ? '✔️' : '—') + '</td>' +
             '<td>' + (p.newArrival ? '✔️' : '—') + '</td>' +
             '<td style="white-space:nowrap;">' +
-              '<a href="#products/' + p.id + '" class="btn-ghost btn-sm">Edit</a> ' +
+              '<a href="/admin/products/' + p.id + '" class="btn-ghost btn-sm">Edit</a> ' +
               '<button class="btn-ghost btn-sm" data-dup="' + p.id + '">Duplicate</button> ' +
               '<button class="btn-ghost btn-sm" data-toggle-status="' + p.id + '" data-current="' + p.status + '">' + (p.status === 'active' ? 'Disable' : 'Activate') + '</button> ' +
               '<button class="btn-danger btn-sm" data-delete="' + p.id + '">Delete</button>' +
@@ -286,7 +300,7 @@
 
       content().innerHTML =
         '<div class="section-heading-row"><h3 style="font-size:1.05rem;">' + (isNew ? 'Add Product' : 'Edit Product') + '</h3>' +
-          '<a href="#products" class="btn-ghost btn-sm">← Back to Products</a></div>' +
+          '<a href="/admin/products" class="btn-ghost btn-sm">← Back to Products</a></div>' +
         '<form id="productForm">' +
           '<div class="panel-card">' +
             '<h3>Images</h3>' +
@@ -464,7 +478,7 @@
         var errorEl = document.getElementById('productFormError');
         errorEl.textContent = '';
         var req = isNew ? apiPost('/admin/products', payload) : apiPut('/admin/products/' + p.id, payload);
-        req.then(function (saved) { window.location.hash = '#products/' + saved.id; renderProductForm(saved.id); })
+        req.then(function (saved) { Router.navigate('/admin/products/' + saved.id); })
           .catch(function (err) { errorEl.textContent = err.message; });
       });
     });
@@ -507,7 +521,7 @@
             '<td>' + fmtPrice(o.total) + '</td>' +
             '<td><span class="badge badge-' + o.paymentStatus + '">' + statusLabel(o.paymentStatus) + '</span></td>' +
             '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td>' +
-            '<td><a href="#orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
+            '<td><a href="/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
           '</tr>';
         }).join('')) + '</tbody></table></div>' +
         (orders.length === 0
@@ -534,7 +548,7 @@
         o.shipment = shipment || o.shipment;
         content().innerHTML =
           '<div class="section-heading-row"><h3 style="font-size:1.1rem;">Order ' + esc(o.orderNumber) + '</h3>' +
-            '<a href="#orders" class="btn-ghost btn-sm">← Back to Orders</a></div>' +
+            '<a href="/admin/orders" class="btn-ghost btn-sm">← Back to Orders</a></div>' +
           '<div class="order-detail-grid">' +
             '<div>' +
               '<div class="panel-card"><h3>Customer</h3>' +
@@ -658,7 +672,7 @@
         (customers.length === 0 ? '' : customers.map(function (c) {
           return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.phone) + '</td><td>' + esc(c.email || '—') + '</td>' +
             '<td>' + c.orderCount + '</td><td>' + fmtPrice(c.totalValue) + '</td><td>' + fmtDate(c.lastOrderAt) + '</td>' +
-            '<td><a href="#customers/' + encodeURIComponent(c.phone) + '" class="btn-ghost btn-sm">View</a></td></tr>';
+            '<td><a href="/admin/customers/' + encodeURIComponent(c.phone) + '" class="btn-ghost btn-sm">View</a></td></tr>';
         }).join('')) + '</tbody></table></div>' +
         (customers.length === 0 ? '<p class="empty-state">No customers yet — they appear here after the first order.</p>' : '');
     });
@@ -667,7 +681,7 @@
   function renderCustomerDetail(phone) {
     apiGet('/admin/customers/' + phone).then(function (c) {
       content().innerHTML =
-        '<div class="section-heading-row"><h3 style="font-size:1.05rem;">' + esc(c.name) + '</h3><a href="#customers" class="btn-ghost btn-sm">← Back</a></div>' +
+        '<div class="section-heading-row"><h3 style="font-size:1.05rem;">' + esc(c.name) + '</h3><a href="/admin/customers" class="btn-ghost btn-sm">← Back</a></div>' +
         '<div class="panel-card"><h3>Details</h3><p>Phone: ' + esc(c.phone) + '<br>Email: ' + esc(c.email || '—') + '<br>Orders: ' + c.orderCount + ' &middot; Total Spent: ' + fmtPrice(c.totalValue) + '</p></div>' +
         '<div class="panel-card"><h3>Addresses</h3>' + c.addresses.map(function (a) {
           return '<p>' + esc(a.house) + ', ' + esc(a.street) + (a.landmark ? ' (near ' + esc(a.landmark) + ')' : '') + '<br>' + esc(a.city) + ', ' + esc(a.state) + ' — ' + esc(a.pincode) + '</p>';
@@ -675,7 +689,7 @@
         '<div class="panel-card"><h3>Previous Orders</h3><div class="table-wrap"><table class="data-table"><thead><tr><th>Order</th><th>Date</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>' +
           c.orders.map(function (o) {
             return '<tr><td>' + esc(o.orderNumber) + '</td><td>' + fmtDate(o.createdAt) + '</td><td>' + fmtPrice(o.total) + '</td>' +
-              '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td><td><a href="#orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td></tr>';
+              '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td><td><a href="/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td></tr>';
           }).join('') + '</tbody></table></div></div>';
     });
   }
@@ -705,7 +719,7 @@
           rows.map(function (r) {
             return '<tr><td>' + esc(r.productName) + '</td><td>' + esc(r.sku) + '</td><td>' + esc(r.size) + '</td><td>' + esc(r.color) + '</td>' +
               '<td><input type="number" min="0" class="inv-stock-input" data-pid="' + r.productId + '" data-vid="' + r.variantId + '" value="' + r.stock + '" style="width:70px;padding:4px 6px;"></td>' +
-              '<td><a href="#products/' + r.productId + '" class="btn-ghost btn-sm">Edit Product</a></td></tr>';
+              '<td><a href="/admin/products/' + r.productId + '" class="btn-ghost btn-sm">Edit Product</a></td></tr>';
           }).join('') + '</tbody></table></div></div>';
 
       content().querySelectorAll('.inv-stock-input').forEach(function (input) {
@@ -727,7 +741,7 @@
           relevant.map(function (o) {
             return '<tr><td>' + esc(o.orderNumber) + '</td><td>' + esc(o.customerName) + '</td>' +
               '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td>' +
-              '<td><a href="#orders/' + o.id + '" class="btn-ghost btn-sm">Manage Shipment</a></td></tr>';
+              '<td><a href="/admin/orders/' + o.id + '" class="btn-ghost btn-sm">Manage Shipment</a></td></tr>';
           }).join('') + '</tbody></table></div>') +
         '</div>' +
         '<div class="panel-card"><h3>Courier Integrations</h3><p style="font-size:0.85rem;color:var(--text-soft);">Manual shipping is active today. Amazon Shipping, Ekart and DTDC can be connected here later — each order\'s shipment record already has a <code>carrier_code</code> field ready for that, so this won\'t require rebuilding Orders.</p></div>';
@@ -831,7 +845,7 @@
       }).catch(function () { /* ignore transient poll errors */ });
     }
 
-    document.getElementById('notifBell').addEventListener('click', function () { document.getElementById('notifDot').hidden = true; window.location.hash = '#orders'; });
+    document.getElementById('notifBell').addEventListener('click', function () { document.getElementById('notifDot').hidden = true; Router.navigate('/admin/orders'); });
 
     poll();
     window.setInterval(poll, 15000);

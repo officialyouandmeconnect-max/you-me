@@ -6,12 +6,14 @@ order-management backend.
 ## Structure
 
 - **Customer site** (`index.html`, `script.js`, `style.css`, `assets/`) — the storefront: home,
-  Kids Wear, product details, cart, wishlist, search, and WhatsApp checkout. Plain HTML/CSS/JS,
-  no build step. Can be opened as static files, but product data and checkout require the
-  server below to be running.
-- **`server/`** — the Express API + SQLite database + admin panel (`/admin`) that the customer
-  site talks to for products, orders, inventory and everything else. See
-  [`server/README.md`](server/README.md) for setup.
+  Kids Wear, product details, cart, wishlist, search, login/account, and WhatsApp checkout.
+  Plain HTML/CSS/JS, no build step. Can be opened as static files, but product data, checkout
+  and login all require the server below to be running.
+- **`server/`** — the Express API + SQLite database that the customer site talks to for
+  products, orders, and authentication. It also serves `/admin` — the admin panel is a
+  protected *section of this same site*, not a separate app: same domain, same login form,
+  same server. Only an account with `role = 'admin'` in the database can reach it — see
+  [`server/README.md`](server/README.md) for how that's enforced.
 
 ## Running everything locally
 
@@ -22,8 +24,10 @@ npm run seed   # one-time: creates your admin login + the starting product catal
 npm start
 ```
 
-Then open `http://localhost:4300/` for the store and `http://localhost:4300/admin` for the
-admin panel (the server serves the customer site itself, so there's nothing else to start).
+Then open `http://localhost:4300/` for the store, `http://localhost:4300/login` to sign in
+(customers and admins use the exact same form), and `http://localhost:4300/admin` for the
+admin panel once logged in as an admin account (the server serves the customer site itself, so
+there's nothing else to start).
 
 ## Live hosting
 

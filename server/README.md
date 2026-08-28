@@ -4,7 +4,17 @@ Backend for the You & Me customer site: a JSON API for products/orders, plus an 
 at `/admin` for managing products, orders, inventory, customers, shipping and media.
 
 - **Database:** SQLite via Node's built-in `node:sqlite` (no native module to compile).
-- **Auth:** server-side session (bcrypt-hashed password), not a frontend-only gate.
+- **Auth:** one `users` table (email, password hash, name, `role`) for *both* customers and
+  admins. Everyone logs in through the same `POST /api/auth/login` — the server decides `role`
+  from the database and the frontend redirects accordingly. There is no separate admin login
+  form, no hardcoded credentials anywhere in frontend code, and `role` can never be set by the
+  client (`POST /api/auth/register` always creates `role: 'customer'`; an account only becomes
+  `'admin'` by being created that way directly in the database — see `db/seed.js`).
+- **Authorization:** every `/api/admin/*` route re-checks `session.role === 'admin'` server-side
+  on every request (`middleware/requireAdmin.js`) — a logged-in customer's own valid session
+  still gets a 403. The `/admin/*` pages themselves are gated the same way in `server.js`,
+  before any admin HTML is ever sent, so a non-admin visiting `/admin` is redirected to `/login`
+  server-side, not just hidden by frontend JS.
 - **Images:** uploaded files are stored on disk under `uploads/` and served statically; the
   database only ever stores the URL, never base64.
 - **Orders:** saved to the database first (with server-recomputed prices and live stock checks)
@@ -19,16 +29,18 @@ npm run seed    # one-time: creates the admin login + migrates the original 31 p
 npm start        # http://localhost:4300
 ```
 
-The seed script prints a generated admin username/password **once** — save it immediately.
+The seed script prints a generated admin email/password **once** — save it immediately.
 To set your own instead, run it with env vars:
 
 ```bash
-ADMIN_USERNAME=admin ADMIN_PASSWORD=your-password npm run seed
+ADMIN_EMAIL=admin@youandme.in ADMIN_PASSWORD=your-password npm run seed
 ```
 
 - Customer site: `http://localhost:4300/` (serves `../you-and-me-site` — the static frontend
   in the repo root, unchanged)
-- Admin panel: `http://localhost:4300/admin`
+- Login (customers **and** admins, same form): `http://localhost:4300/login`
+- Admin panel: `http://localhost:4300/admin` — redirects to `/login` unless the logged-in
+  account has `role = 'admin'`
 
 ## Deploying (Render)
 
@@ -62,14 +74,15 @@ don't need to set it yourself.
 ## Project layout
 
 ```
-server.js              Express app: wires static files, public API, admin API (session-gated)
-db/schema.sql           Table definitions
-db/init.js               Opens/creates the SQLite database from schema.sql
+server.js              Express app: static files, public API, admin API, /login + /admin routing
+db/schema.sql           Table definitions (users table holds both customers and admins)
+db/init.js               Opens/creates the SQLite database; migrates any legacy admin_users row
 db/seed.js                One-time admin + product seed (idempotent — safe to re-run)
 db/helpers.js             Shared row -> JSON serializers (products, orders)
-middleware/requireAdmin.js   The one gate every /api/admin/* route passes through
-routes/                 One file per resource (public: products, orders — admin: products,
+routes/auth.js            Shared login/register/logout/session — used by customers and admins
+middleware/requireAdmin.js   The one gate every /api/admin/* route passes through (role check)
+routes/                 One file per resource (public: products, orders, auth — admin: products,
                          orders, dashboard, customers, media, shipments, upload)
-public/admin/            The admin panel itself (plain HTML/CSS/JS, no build step)
+public/admin/            The admin panel itself (plain HTML/CSS/JS, no build step, no login form)
 uploads/                 Product photos uploaded from the admin panel
 ```

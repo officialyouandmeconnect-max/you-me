@@ -1,5 +1,23 @@
 -- You & Me store schema (SQLite via Node's built-in node:sqlite)
 
+-- Single source of truth for who can log in — both customers and admins live in the same
+-- table, distinguished only by `role`. There is no separate admin login system: the same
+-- POST /api/auth/login endpoint authenticates everyone, and the caller's `role` decides
+-- whether they land on /account or /admin. `role` is never accepted from client input when
+-- creating a user (see routes/auth.js) — an account can only become 'admin' by being created
+-- that way directly in the database (e.g. via db/seed.js), never through the public API.
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'customer' CHECK (role IN ('admin', 'customer')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Legacy table from the old username/password-only admin login. No longer used for
+-- authentication (see users, above) — kept only so db/init.js can migrate any existing row
+-- into `users` once, the first time this runs against an older database.
 CREATE TABLE IF NOT EXISTS admin_users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT UNIQUE NOT NULL,

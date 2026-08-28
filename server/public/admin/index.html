@@ -9,25 +9,12 @@
 </head>
 <body>
 
-<!-- ===== LOGIN SCREEN ===== -->
-<div id="loginScreen" class="login-screen">
-  <form id="loginForm" class="login-card">
-    <div class="login-brand">
-      <span class="login-logo">Y&amp;M</span>
-      <h1>You &amp; Me Admin</h1>
-    </div>
-    <div class="form-field">
-      <label for="loginUsername">Username</label>
-      <input type="text" id="loginUsername" autocomplete="username" required>
-    </div>
-    <div class="form-field">
-      <label for="loginPassword">Password</label>
-      <input type="password" id="loginPassword" autocomplete="current-password" required>
-    </div>
-    <p class="login-error" id="loginError"></p>
-    <button type="submit" class="btn-primary btn-block">Log In</button>
-  </form>
-</div>
+<!-- There is no login form here — admin.js checks GET /api/auth/session on load, and the
+     server itself redirects anyone without an admin session to /login before this page even
+     loads (see the /admin route in server.js). This shell only ever renders for a confirmed
+     admin. The website's own /login page (you-and-me-site) is the single place anyone,
+     customer or admin, signs in. -->
+<div id="checkingSession" class="login-screen"><p style="color:#6B6259;">Checking session…</p></div>
 
 <!-- ===== ADMIN APP SHELL ===== -->
 <div id="adminApp" class="admin-app" hidden>
@@ -37,15 +24,15 @@
       <span>You &amp; Me<br><small>Admin</small></span>
     </div>
     <nav class="sidebar-nav">
-      <a href="#dashboard" data-route="dashboard">📊 Dashboard</a>
-      <a href="#products" data-route="products">👕 Products</a>
-      <a href="#orders" data-route="orders">🧾 Orders</a>
-      <a href="#customers" data-route="customers">👤 Customers</a>
-      <a href="#inventory" data-route="inventory">📦 Inventory</a>
-      <a href="#shipping" data-route="shipping">🚚 Shipping</a>
-      <a href="#categories" data-route="categories">🏷️ Categories</a>
-      <a href="#media" data-route="media">🖼️ Media Library</a>
-      <a href="#settings" data-route="settings">⚙️ Settings</a>
+      <a href="/admin/dashboard" data-route="dashboard">📊 Dashboard</a>
+      <a href="/admin/products" data-route="products">👕 Products</a>
+      <a href="/admin/orders" data-route="orders">🧾 Orders</a>
+      <a href="/admin/customers" data-route="customers">👤 Customers</a>
+      <a href="/admin/inventory" data-route="inventory">📦 Inventory</a>
+      <a href="/admin/shipping" data-route="shipping">🚚 Shipping</a>
+      <a href="/admin/categories" data-route="categories">🏷️ Categories</a>
+      <a href="/admin/media" data-route="media">🖼️ Media Library</a>
+      <a href="/admin/settings" data-route="settings">⚙️ Settings</a>
     </nav>
     <button type="button" class="sidebar-logout" id="logoutBtn">🚪 Logout</button>
   </aside>
