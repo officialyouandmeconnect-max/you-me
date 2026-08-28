@@ -335,6 +335,23 @@
       },
       cancelAmazon: function (shipmentId) {
         return callEdgeFunction('amazon-shipping', { action: 'cancel', shipmentId: shipmentId });
+      },
+      // Same pattern as Amazon — every one of these goes through the delhivery-shipping Edge
+      // Function, never a direct table write, never fabricated data.
+      checkDelhiveryServiceability: function (pincode) {
+        return callEdgeFunction('delhivery-shipping', { action: 'check-serviceability', pincode: pincode });
+      },
+      createDelhivery: function (orderId, paymentType, pkg) {
+        return callEdgeFunction('delhivery-shipping', { action: 'create', orderId: orderId, paymentType: paymentType, package: pkg });
+      },
+      schedulePickupDelhivery: function (shipmentId, pickupDate, expectedPackageCount) {
+        return callEdgeFunction('delhivery-shipping', { action: 'schedule-pickup', shipmentId: shipmentId, pickupDate: pickupDate, expectedPackageCount: expectedPackageCount });
+      },
+      syncDelhivery: function (shipmentId) {
+        return callEdgeFunction('delhivery-shipping', { action: 'sync', shipmentId: shipmentId });
+      },
+      cancelDelhivery: function (shipmentId) {
+        return callEdgeFunction('delhivery-shipping', { action: 'cancel', shipmentId: shipmentId });
       }
     },
 
@@ -1091,6 +1108,8 @@
     content().innerHTML = '<p class="empty-state">Loading order…</p>';
     shippingProviderChoice = null;
     shippingCreateError = null;
+    delhiveryServiceability = null;
+    delhiveryServiceabilityError = null;
     AdminAPI.orders.get(id).then(function (o) {
       AdminAPI.shipments.get(o.id).catch(function () { return null; }).then(function (shipment) {
         o.shipment = shipment || o.shipment;
@@ -1163,25 +1182,32 @@
   // dropdown redraw the card locally (no network round-trip) before anything is actually saved.
   var shippingProviderChoice = null;
   var shippingCreateError = null;
+  var delhiveryServiceability = null; // null | { serviceable, codAvailable, prepaidAvailable }
+  var delhiveryServiceabilityError = null;
   var NORMALIZED_STATUS_LABELS = {
     shipment_created: 'Shipment Created', pickup_scheduled: 'Pickup Scheduled', picked_up: 'Picked Up',
     in_transit: 'In Transit', out_for_delivery: 'Out for Delivery', delivered: 'Delivered',
     delivery_failed: 'Delivery Failed', returned: 'Returned', cancelled: 'Cancelled'
   };
+  var PROVIDER_LABELS = { manual: 'Manual Shipping', amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery' };
 
   function renderShippingCard(o) {
     var s = o.shipment;
     var provider = shippingProviderChoice || (s && s.provider) || 'manual';
+    var section = provider === 'amazon_shipping' ? renderAmazonSection(o, s)
+      : provider === 'delhivery' ? renderDelhiverySection(o, s)
+      : renderManualSection(s);
     return '<div class="panel-card" id="shippingCardWrap"><h3>Shipping</h3>' +
       '<div class="form-field"><label for="shipProviderSelect">Shipping Provider</label>' +
         '<select id="shipProviderSelect">' +
           '<option value="manual"' + (provider === 'manual' ? ' selected' : '') + '>Manual Shipping</option>' +
           '<option value="amazon_shipping"' + (provider === 'amazon_shipping' ? ' selected' : '') + '>Amazon Shipping</option>' +
+          '<option value="delhivery"' + (provider === 'delhivery' ? ' selected' : '') + '>Delhivery</option>' +
         '</select></div>' +
       (s && s.provider && s.provider !== provider
-        ? '<p class="shipping-provider-warning">This order already has a ' + (s.provider === 'amazon_shipping' ? 'Amazon Shipping' : 'Manual Shipping') + ' shipment. Creating a new one here replaces it.</p>'
+        ? '<p class="shipping-provider-warning">This order already has a ' + (PROVIDER_LABELS[s.provider] || s.provider) + ' shipment. Creating a new one here replaces it.</p>'
         : '') +
-      (provider === 'amazon_shipping' ? renderAmazonSection(o, s) : renderManualSection(s)) +
+      section +
     '</div>';
   }
 
@@ -1258,6 +1284,75 @@
       '<button type="button" class="btn-primary btn-sm" id="amzCreateBtn">Create Amazon Shipment</button>';
   }
 
+  function renderDelhiverySection(o, s) {
+    var isDelhivery = s && s.provider === 'delhivery';
+    var errorBox = function (message) {
+      return '<div class="shipping-error-box"><strong>Delhivery Shipment Could Not Be Created</strong>' +
+        '<p>Reason: ' + esc(message) + '</p><button type="button" class="btn-secondary btn-sm" id="dlRetryBtn">Try Again</button></div>';
+    };
+
+    // A shipment row exists AND Delhivery actually confirmed it (has a provider_shipment_id,
+    // i.e. a real waybill) — otherwise fall through to the serviceability-check/create flow.
+    if (isDelhivery && s.provider_shipment_id) {
+      var events = (s.shipment_events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at); });
+      var terminal = ['delivered', 'cancelled', 'returned'].indexOf(s.normalized_status) !== -1;
+      return '<div class="amazon-shipping-card">' +
+          '<div class="amazon-shipping-head"><strong>DELHIVERY</strong><span class="badge badge-active">Shipment Created ✓</span></div>' +
+          '<div class="amazon-shipping-grid">' +
+            '<div><span>AWB</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Current Status</span><strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></strong></div>' +
+            '<div><span>Estimated Delivery</span><strong>' + (s.estimated_delivery ? fmtDate(s.estimated_delivery) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Shipping Cost</span><strong>' + (s.shipping_cost != null ? fmtPrice(s.shipping_cost) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Pickup Status</span><strong>' + (s.pickup_status ? statusLabel(s.pickup_status) : 'Unavailable') + '</strong></div>' +
+          '</div>' +
+          (s.last_tracking_sync_at ? '<p class="amazon-sync-note">Last synced ' + fmtDate(s.last_tracking_sync_at) + '</p>' : '') +
+          '<div class="amazon-shipping-actions">' +
+            (s.label_url ? '<a href="' + esc(s.label_url) + '" target="_blank" class="btn-secondary btn-sm">Print Label</a>' : '') +
+            (s.tracking_url ? '<a href="' + esc(s.tracking_url) + '" target="_blank" class="btn-secondary btn-sm">Track Shipment</a>' : '') +
+            '<button type="button" class="btn-secondary btn-sm" id="dlRefreshBtn">Refresh Tracking</button>' +
+            (s.pickup_status === 'requested' ? '<button type="button" class="btn-secondary btn-sm" id="dlSchedulePickupBtn">Schedule Pickup</button>' : '') +
+            (terminal ? '' : '<button type="button" class="btn-danger btn-sm" id="dlCancelBtn">Cancel Shipment</button>') +
+          '</div>' +
+          (s.last_error ? '<p class="shipping-error-inline">Last sync error: ' + esc(s.last_error) + '</p>' : '') +
+          (events.length ? '<div class="tracking-events"><h4>Tracking History</h4>' + events.map(function (e) {
+            return '<div class="tracking-event-row"><strong>' + esc(NORMALIZED_STATUS_LABELS[e.normalized_status] || e.normalized_status || e.provider_status || '—') + '</strong>' +
+              '<span>' + (e.event_time ? fmtDate(e.event_time) : '') + (e.event_location ? ' · ' + esc(e.event_location) : '') + '</span>' +
+              (e.description ? '<p>' + esc(e.description) + '</p>' : '') + '</div>';
+          }).join('') + '</div>' : '') +
+        '</div>';
+    }
+
+    // Delhivery requires checking PIN-code serviceability before creating a shipment — this
+    // step is real (goes through the Edge Function to Delhivery's own API), not decorative.
+    if (!delhiveryServiceability) {
+      return '<p class="amazon-shipping-hint">Check whether Delhivery services this order\'s PIN code (' + esc(o.address.pincode) + ') before creating a shipment.</p>' +
+        (delhiveryServiceabilityError ? '<p class="shipping-error-inline">' + esc(delhiveryServiceabilityError) + '</p>' : '') +
+        '<button type="button" class="btn-primary btn-sm" id="dlCheckServiceabilityBtn">Check Serviceability</button>';
+    }
+    if (!delhiveryServiceability.serviceable) {
+      return '<div class="shipping-error-box"><strong>Not Serviceable</strong><p>Delhivery does not currently service PIN code ' + esc(o.address.pincode) + '.</p></div>' +
+        '<button type="button" class="btn-secondary btn-sm" id="dlRecheckBtn">Check Again</button>';
+    }
+
+    var prepaidOption = delhiveryServiceability.prepaidAvailable !== false ? '<option value="prepaid"' + (o.paymentStatus === 'paid' ? ' selected' : '') + '>Prepaid</option>' : '';
+    var codOption = delhiveryServiceability.codAvailable ? '<option value="cod"' + (o.paymentStatus !== 'paid' ? ' selected' : '') + '>COD</option>' : '';
+
+    return '<p class="amazon-shipping-hint">PIN ' + esc(o.address.pincode) + ' is serviceable ✓' +
+        (delhiveryServiceability.codAvailable ? ' · COD available' : '') + (delhiveryServiceability.prepaidAvailable !== false ? ' · Prepaid available' : '') + '</p>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Package Weight (kg)</label><input type="number" step="0.01" id="dlWeight" placeholder="e.g. 0.4"></div>' +
+        '<div class="form-field"><label>Length (cm)</label><input type="number" id="dlLength"></div>' +
+      '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Width (cm)</label><input type="number" id="dlWidth"></div>' +
+        '<div class="form-field"><label>Height (cm)</label><input type="number" id="dlHeight"></div>' +
+      '</div>' +
+      '<div class="form-field"><label>Payment Type</label><select id="dlPaymentType">' + prepaidOption + codOption + '</select></div>' +
+      '<p class="amazon-shipping-hint">Customer name, address, and order value are loaded automatically from this order.</p>' +
+      (shippingCreateError ? errorBox(shippingCreateError) : '') +
+      '<button type="button" class="btn-primary btn-sm" id="dlCreateBtn">Create Delhivery Shipment</button>';
+  }
+
   function refreshShippingCard(o) {
     var el = document.getElementById('shippingCardWrap');
     if (el) el.outerHTML = renderShippingCard(o);
@@ -1269,6 +1364,8 @@
     if (providerSelect) providerSelect.addEventListener('change', function () {
       shippingProviderChoice = providerSelect.value;
       shippingCreateError = null;
+      delhiveryServiceability = null;
+      delhiveryServiceabilityError = null;
       refreshShippingCard(o);
     });
 
@@ -1331,6 +1428,58 @@
     if (cancelBtn) cancelBtn.addEventListener('click', function () {
       if (!window.confirm('Cancel this Amazon shipment? This cannot be undone.')) return;
       AdminAPI.shipments.cancelAmazon(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not cancel shipment: ' + err.message); });
+    });
+
+    // ---- Delhivery ----
+    var checkServiceabilityBtn = document.getElementById('dlCheckServiceabilityBtn') || document.getElementById('dlRecheckBtn');
+    if (checkServiceabilityBtn) checkServiceabilityBtn.addEventListener('click', function () {
+      checkServiceabilityBtn.disabled = true; checkServiceabilityBtn.textContent = 'Checking…';
+      AdminAPI.shipments.checkDelhiveryServiceability(o.address.pincode)
+        .then(function (res) { delhiveryServiceability = res; delhiveryServiceabilityError = null; refreshShippingCard(o); })
+        .catch(function (err) { delhiveryServiceabilityError = err.message; refreshShippingCard(o); });
+    });
+    var dlCreateBtn = document.getElementById('dlCreateBtn');
+    if (dlCreateBtn) dlCreateBtn.addEventListener('click', function () {
+      var pkg = {
+        weightKg: Number(document.getElementById('dlWeight').value),
+        lengthCm: Number(document.getElementById('dlLength').value),
+        widthCm: Number(document.getElementById('dlWidth').value),
+        heightCm: Number(document.getElementById('dlHeight').value)
+      };
+      if (!pkg.weightKg || !pkg.lengthCm || !pkg.widthCm || !pkg.heightCm) {
+        shippingCreateError = 'Package weight and all three dimensions are required.';
+        refreshShippingCard(o); return;
+      }
+      dlCreateBtn.disabled = true; dlCreateBtn.textContent = 'Creating…';
+      AdminAPI.shipments.createDelhivery(o.id, document.getElementById('dlPaymentType').value, pkg)
+        .then(function () { shippingCreateError = null; shippingProviderChoice = null; delhiveryServiceability = null; renderOrderDetail(o.id); })
+        .catch(function (err) { shippingCreateError = err.message; refreshShippingCard(o); });
+    });
+    var dlRetryBtn = document.getElementById('dlRetryBtn');
+    if (dlRetryBtn) dlRetryBtn.addEventListener('click', function () { shippingCreateError = null; refreshShippingCard(o); });
+    var dlRefreshBtn = document.getElementById('dlRefreshBtn');
+    if (dlRefreshBtn) dlRefreshBtn.addEventListener('click', function () {
+      dlRefreshBtn.disabled = true; dlRefreshBtn.textContent = 'Refreshing…';
+      AdminAPI.shipments.syncDelhivery(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not refresh tracking: ' + err.message); dlRefreshBtn.disabled = false; dlRefreshBtn.textContent = 'Refresh Tracking'; });
+    });
+    var dlSchedulePickupBtn = document.getElementById('dlSchedulePickupBtn');
+    if (dlSchedulePickupBtn) dlSchedulePickupBtn.addEventListener('click', function () {
+      var pickupDate = window.prompt('Pickup date (YYYY-MM-DD)?', new Date().toISOString().slice(0, 10));
+      if (!pickupDate) return;
+      var count = Number(window.prompt('Expected package count?', '1')) || 1;
+      dlSchedulePickupBtn.disabled = true; dlSchedulePickupBtn.textContent = 'Scheduling…';
+      AdminAPI.shipments.schedulePickupDelhivery(o.shipment.id, pickupDate, count)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not schedule pickup: ' + err.message); dlSchedulePickupBtn.disabled = false; dlSchedulePickupBtn.textContent = 'Schedule Pickup'; });
+    });
+    var dlCancelBtn = document.getElementById('dlCancelBtn');
+    if (dlCancelBtn) dlCancelBtn.addEventListener('click', function () {
+      if (!window.confirm('Cancel this Delhivery shipment? This cannot be undone.')) return;
+      AdminAPI.shipments.cancelDelhivery(o.shipment.id)
         .then(function () { renderOrderDetail(o.id); })
         .catch(function (err) { window.alert('Could not cancel shipment: ' + err.message); });
     });

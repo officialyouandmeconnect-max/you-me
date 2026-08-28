@@ -26,15 +26,20 @@ order-management system. Plain HTML/CSS/JS, no build step, no server: [Supabase]
 - **`supabase/README-google-oauth.md`** — the one-time Google Cloud Console + Supabase Dashboard
   setup "Continue with Google" needs (a dashboard step, not something the code can do alone).
 - **Shipping** (Admin → an order → Shipping) — pluggable providers: **Manual** (unchanged, admin
-  types in courier/tracking) or **Amazon Shipping**, where Amazon itself is the source of truth
-  for tracking ID, status, label, and ETA once connected — Admin never hand-enters those.
-  `supabase/migrations/0003_shipping_providers.sql` adds the schema; the actual Amazon API calls
-  live only in `supabase/functions/amazon-shipping/` (a Supabase Edge Function — Amazon
-  credentials never touch the browser). Selecting "Amazon Shipping" before that function is
-  deployed and configured just shows "not connected yet" — see
-  `supabase/README-amazon-shipping.md` for the full setup (it requires actually having Amazon
-  Shipping API access, which is a separate approval process with Amazon, not something either of
-  us can switch on from here).
+  types in courier/tracking), **Amazon Shipping**, or **Delhivery** — for either courier, the
+  provider itself is the source of truth for tracking ID/AWB, status, label, and ETA once
+  connected; Admin never hand-enters those, only package dimensions and payment type (Delhivery
+  also requires a serviceability check on the destination PIN code first — a real API call, not
+  decorative). `supabase/migrations/0003_shipping_providers.sql` and
+  `0004_delhivery_provider.sql` add the schema; the actual courier API calls live only in
+  `supabase/functions/amazon-shipping/` and `supabase/functions/delhivery-shipping/` (Supabase
+  Edge Functions — credentials never touch the browser), both built against a shared
+  `supabase/functions/_shared/shipping.ts` contract so a future courier (DTDC, Ekart, …) is one
+  new function, not a rebuild of Orders. Selecting a courier before its function is deployed and
+  configured just shows "not connected yet" — see `supabase/README-amazon-shipping.md` /
+  `supabase/README-delhivery.md` for the full setup (each requires actually having that courier's
+  API access, a separate approval process with them, not something either of us can switch on
+  from here).
 - **`supabase/scripts/seed.js`** — one-time setup script (needs the Supabase **service_role**
   key, never committed here) that creates the first admin login and seeds the starting product
   catalog. Run locally, not from the browser.
