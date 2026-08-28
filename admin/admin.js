@@ -1065,6 +1065,12 @@
   /* ---------- 6. Orders ---------- */
   var orderListState = { status: 'all', q: '' };
   var ORDER_STATUSES = ['new', 'confirmed', 'packing', 'ready_to_ship', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
+  // Once Delhivery has a confirmed shipment (a real provider_shipment_id/AWB), Delhivery becomes
+  // the source of truth for everything from "shipped" onward — Admin no longer hand-sets those
+  // stages, they're synced automatically (see delhivery-shipping's syncShipment, which advances
+  // orders.order_status itself). Admin still fully owns internal prep before that point, and can
+  // still cancel the order outright.
+  var INTERNAL_ORDER_STATUSES = ['new', 'confirmed', 'packing', 'ready_to_ship', 'cancelled'];
   var PAYMENT_STATUSES = ['pending', 'paid', 'failed', 'refunded'];
 
   ROUTE_RENDERERS.orders = function (param) {
@@ -1124,6 +1130,11 @@
     AdminAPI.orders.get(id).then(function (o) {
       AdminAPI.shipments.get(o.id).catch(function () { return null; }).then(function (shipment) {
         o.shipment = shipment || o.shipment;
+        var isDelhiveryConfirmed = !!(o.shipment && o.shipment.provider === 'delhivery' && o.shipment.provider_shipment_id);
+        var orderStatusOptions = isDelhiveryConfirmed ? INTERNAL_ORDER_STATUSES : ORDER_STATUSES;
+        // True once Delhivery's own sync has already advanced order_status past the
+        // admin-owned prep stages — at that point there's nothing left here for Admin to set.
+        var courierLocked = isDelhiveryConfirmed && INTERNAL_ORDER_STATUSES.indexOf(o.orderStatus) === -1;
         content().innerHTML =
           '<div class="section-heading-row"><h3 style="font-size:1.1rem;">Order ' + esc(o.orderNumber) + '</h3>' +
             '<a href="' + BASE_PATH + '/admin/orders" class="btn-ghost btn-sm">← Back to Orders</a></div>' +
@@ -1165,10 +1176,14 @@
                 '<div class="status-timeline">' + o.statusHistory.map(function (h) {
                   return '<div class="status-timeline-item"><span class="status-timeline-dot"></span><div><strong>' + statusLabel(h.status) + '</strong><br><span style="color:var(--text-soft);">' + fmtDate(h.created_at) + (h.note ? ' — ' + esc(h.note) : '') + '</span></div></div>';
                 }).join('') + '</div>' +
-                '<div class="status-select-row">' +
-                  '<select id="orderStatusSelect">' + ORDER_STATUSES.map(function (s) { return '<option value="' + s + '"' + (s === o.orderStatus ? ' selected' : '') + '>' + statusLabel(s) + '</option>'; }).join('') + '</select>' +
-                  '<button type="button" class="btn-primary btn-sm" id="saveStatusBtn">Update</button>' +
-                '</div>' +
+                (courierLocked
+                  ? '<p class="shipping-provider-warning">Delhivery is now tracking this shipment automatically — see the Shipping card below for live courier status. This stage is no longer manually editable.</p>'
+                  : '<div class="status-select-row">' +
+                      '<select id="orderStatusSelect">' + orderStatusOptions.map(function (s) { return '<option value="' + s + '"' + (s === o.orderStatus ? ' selected' : '') + '>' + statusLabel(s) + '</option>'; }).join('') + '</select>' +
+                      '<button type="button" class="btn-primary btn-sm" id="saveStatusBtn">Update</button>' +
+                    '</div>' +
+                    (isDelhiveryConfirmed ? '<p class="account-payment-note" style="margin-top:6px;">Once shipped, courier tracking (Shipped / In Transit / Out for Delivery / Delivered) syncs automatically from Delhivery — no need to set those here.</p>' : '')
+                ) +
               '</div>' +
             '</div>' +
           '</div>';
@@ -1179,10 +1194,13 @@
             paymentNotes: document.getElementById('paymentRefInput').value.trim() || null
           }).then(function () { renderOrderDetail(o.id); });
         });
-        document.getElementById('saveStatusBtn').addEventListener('click', function () {
-          AdminAPI.orders.setStatus(o.id, document.getElementById('orderStatusSelect').value)
-            .then(function () { renderOrderDetail(o.id); });
-        });
+        var saveStatusBtn = document.getElementById('saveStatusBtn');
+        if (saveStatusBtn) {
+          saveStatusBtn.addEventListener('click', function () {
+            AdminAPI.orders.setStatus(o.id, document.getElementById('orderStatusSelect').value)
+              .then(function () { renderOrderDetail(o.id); });
+          });
+        }
         bindShippingForm(o);
       });
     });
@@ -1195,10 +1213,12 @@
   var shippingCreateError = null;
   var delhiveryServiceability = null; // null | { serviceable, codAvailable, prepaidAvailable }
   var delhiveryServiceabilityError = null;
+  // Same wording as the customer-facing COURIER_STATUS_LABELS in script.js — Admin and the
+  // customer should describe the exact same Delhivery-reported state identically.
   var NORMALIZED_STATUS_LABELS = {
-    shipment_created: 'Shipment Created', pickup_scheduled: 'Pickup Scheduled', picked_up: 'Picked Up',
+    shipment_created: 'Shipment Created', pickup_scheduled: 'Ready for Pickup', picked_up: 'Picked Up',
     in_transit: 'In Transit', out_for_delivery: 'Out for Delivery', delivered: 'Delivered',
-    delivery_failed: 'Delivery Failed', returned: 'Returned', cancelled: 'Cancelled'
+    delivery_failed: 'Delivery Attempt Failed', returned: 'Return to Origin', cancelled: 'Cancelled'
   };
   var PROVIDER_LABELS = { manual: 'Manual Shipping', amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery' };
 

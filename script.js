@@ -1811,6 +1811,16 @@
 
     var COURIER_PROVIDER_LABELS = { amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery' };
     var PREPARING_MESSAGE = '<p>Preparing your order &hearts;</p><p class="account-payment-note">Tracking information will appear here once your order has been shipped.</p>';
+    // Customer-facing wording for each normalized_status — deliberately different from the
+    // generic statusLabel() auto-titlecase used for order_status elsewhere, since courier states
+    // read better in the courier's own vocabulary (e.g. "Ready for Pickup", not "Pickup
+    // Scheduled"). Falls back to statusLabel() for anything not explicitly listed.
+    var COURIER_STATUS_LABELS = {
+      shipment_created: 'Shipment Created', pickup_scheduled: 'Ready for Pickup', picked_up: 'Picked Up',
+      in_transit: 'In Transit', out_for_delivery: 'Out for Delivery', delivered: 'Delivered',
+      delivery_failed: 'Delivery Attempt Failed', returned: 'Return to Origin', cancelled: 'Cancelled'
+    };
+    function courierStatusLabel(normalized) { return COURIER_STATUS_LABELS[normalized] || statusLabel(normalized); }
 
     function shippingSectionHtml(shipment) {
       if (!shipment) return PREPARING_MESSAGE;
@@ -1821,10 +1831,17 @@
           // being created, or the last attempt failed) — never show a technical API error here.
           return PREPARING_MESSAGE;
         }
-        return '<p>Shipping Partner: <strong>' + COURIER_PROVIDER_LABELS[shipment.provider] + '</strong></p>' +
-          '<p>Tracking / AWB: <strong>' + (shipment.tracking_id ? escapeHtml(shipment.tracking_id) : 'Unavailable') + '</strong></p>' +
-          '<p>Current Status: <strong><span class="badge badge-' + escapeHtml(shipment.normalized_status) + '">' + statusLabel(shipment.normalized_status) + '</span></strong></p>' +
+        // "Latest Update" is the most recent real scan/status-change event the courier reported
+        // (shipment_events, synced server-side) — never fabricated client-side.
+        var events = shipment.shipment_events || [];
+        var latestEvent = events.length
+          ? events.slice().sort(function (a, b) { return new Date(b.event_time || 0) - new Date(a.event_time || 0); })[0]
+          : null;
+        return '<p>Shipped with <strong>' + COURIER_PROVIDER_LABELS[shipment.provider] + '</strong></p>' +
+          '<p>AWB: <strong>' + (shipment.tracking_id ? escapeHtml(shipment.tracking_id) : 'Unavailable') + '</strong></p>' +
+          '<p>Current Status: <strong><span class="badge badge-' + escapeHtml(shipment.normalized_status) + '">' + courierStatusLabel(shipment.normalized_status) + '</span></strong></p>' +
           (shipment.estimated_delivery ? '<p>Estimated Delivery: <strong>' + formatDate(shipment.estimated_delivery) + '</strong></p>' : '') +
+          (latestEvent && latestEvent.description ? '<p>Latest Update: <strong>' + escapeHtml(latestEvent.description) + (latestEvent.event_location ? ' — ' + escapeHtml(latestEvent.event_location) : '') + '</strong></p>' : '') +
           (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track Package</a>' : '');
       }
 
