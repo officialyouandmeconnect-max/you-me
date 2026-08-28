@@ -25,6 +25,16 @@ order-management system. Plain HTML/CSS/JS, no build step, no server: [Supabase]
   requires sign-in at the database level, not just in the UI). Run once, after 0001.
 - **`supabase/README-google-oauth.md`** — the one-time Google Cloud Console + Supabase Dashboard
   setup "Continue with Google" needs (a dashboard step, not something the code can do alone).
+- **Shipping** (Admin → an order → Shipping) — pluggable providers: **Manual** (unchanged, admin
+  types in courier/tracking) or **Amazon Shipping**, where Amazon itself is the source of truth
+  for tracking ID, status, label, and ETA once connected — Admin never hand-enters those.
+  `supabase/migrations/0003_shipping_providers.sql` adds the schema; the actual Amazon API calls
+  live only in `supabase/functions/amazon-shipping/` (a Supabase Edge Function — Amazon
+  credentials never touch the browser). Selecting "Amazon Shipping" before that function is
+  deployed and configured just shows "not connected yet" — see
+  `supabase/README-amazon-shipping.md` for the full setup (it requires actually having Amazon
+  Shipping API access, which is a separate approval process with Amazon, not something either of
+  us can switch on from here).
 - **`supabase/scripts/seed.js`** — one-time setup script (needs the Supabase **service_role**
   key, never committed here) that creates the first admin login and seeds the starting product
   catalog. Run locally, not from the browser.

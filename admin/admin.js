@@ -65,6 +65,27 @@
 
   function throwIfError(res) { if (res.error) throw new Error(res.error.message || 'Request failed'); return res; }
 
+  // Every Amazon Shipping call goes through this — a Supabase Edge Function, never Amazon's
+  // API directly from the browser (see supabase/functions/amazon-shipping/index.ts). The
+  // function re-verifies the caller is an admin itself using this same access token; nothing
+  // here is a trust boundary on its own.
+  function callEdgeFunction(name, body) {
+    return supabaseClient.auth.getSession().then(function (res) {
+      var token = res.data && res.data.session && res.data.session.access_token;
+      if (!token) return Promise.reject(new Error('Not authenticated.'));
+      return fetch(SUPABASE_URL + '/functions/v1/' + name, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (data) {
+          if (!r.ok) throw new Error(data.error || 'Request failed (' + r.status + ')');
+          return data;
+        });
+      });
+    });
+  }
+
   /* ---------- 1. AdminAPI (Supabase-backed data layer) ---------- */
   // Every read/write below runs through the same anon-key Supabase client the customer site
   // uses — what it's actually allowed to do is entirely decided by Row Level Security policies
@@ -279,15 +300,46 @@
 
     shipments: {
       get: function (orderId) {
-        return supabaseClient.from('shipments').select('*').eq('order_id', orderId).maybeSingle()
+        return supabaseClient.from('shipments').select('*, shipment_events(*)').eq('order_id', orderId).maybeSingle()
           .then(function (res) { throwIfError(res); return res.data; });
       },
-      save: function (orderId, payload) {
+      // Manual Shipping only — Amazon-provider shipments are never written to directly like
+      // this; every one of their fields comes from the amazon-shipping Edge Function instead
+      // (see AdminAPI.shipments.createAmazon / syncAmazon / cancelAmazon below).
+      saveManual: function (orderId, payload) {
         return supabaseClient.from('shipments').upsert({
-          order_id: orderId, courier: payload.courier || null, awb: payload.awb || null, tracking_url: payload.trackingUrl || null,
+          order_id: orderId, provider: 'manual',
+          courier: payload.courier || null, tracking_id: payload.trackingId || null, tracking_url: payload.trackingUrl || null,
+          status: payload.courier ? 'Manual — ' + payload.courier : null, normalized_status: 'shipment_created',
           shipping_cost: payload.shippingCost, pickup_date: payload.pickupDate, estimated_delivery: payload.estimatedDelivery,
           updated_at: new Date().toISOString()
         }, { onConflict: 'order_id' }).then(throwIfError);
+      },
+      // These three all go through the amazon-shipping Edge Function — never a direct table
+      // write from the browser, and never anything that could fabricate Amazon data locally.
+      createAmazon: function (orderId, pkg, paymentType) {
+        return callEdgeFunction('amazon-shipping', { action: 'create', orderId: orderId, package: pkg, paymentType: paymentType });
+      },
+      syncAmazon: function (shipmentId) {
+        return callEdgeFunction('amazon-shipping', { action: 'sync', shipmentId: shipmentId });
+      },
+      cancelAmazon: function (shipmentId) {
+        return callEdgeFunction('amazon-shipping', { action: 'cancel', shipmentId: shipmentId });
+      }
+    },
+
+    settings: {
+      get: function () {
+        return supabaseClient.from('store_settings').select('*').eq('id', true).single()
+          .then(function (res) { throwIfError(res); return res.data; });
+      },
+      savePickupAddress: function (payload) {
+        return supabaseClient.from('store_settings').update({
+          pickup_name: payload.name, pickup_phone: payload.phone,
+          pickup_line1: payload.line1, pickup_line2: payload.line2 || null,
+          pickup_city: payload.city, pickup_state: payload.state, pickup_pincode: payload.pincode,
+          updated_at: new Date().toISOString()
+        }).eq('id', true).then(throwIfError);
       }
     },
 
@@ -1027,6 +1079,8 @@
 
   function renderOrderDetail(id) {
     content().innerHTML = '<p class="empty-state">Loading order…</p>';
+    shippingProviderChoice = null;
+    shippingCreateError = null;
     AdminAPI.orders.get(id).then(function (o) {
       AdminAPI.shipments.get(o.id).catch(function () { return null; }).then(function (shipment) {
         o.shipment = shipment || o.shipment;
@@ -1094,40 +1148,131 @@
     });
   }
 
+  // Transient UI-only state for the order-detail Shipping card — reset every time a fresh
+  // order loads (renderOrderDetail), never persisted. shippingProviderChoice lets the provider
+  // dropdown redraw the card locally (no network round-trip) before anything is actually saved.
+  var shippingProviderChoice = null;
+  var shippingCreateError = null;
+  var NORMALIZED_STATUS_LABELS = {
+    shipment_created: 'Shipment Created', pickup_scheduled: 'Pickup Scheduled', picked_up: 'Picked Up',
+    in_transit: 'In Transit', out_for_delivery: 'Out for Delivery', delivered: 'Delivered',
+    delivery_failed: 'Delivery Failed', returned: 'Returned', cancelled: 'Cancelled'
+  };
+
   function renderShippingCard(o) {
     var s = o.shipment;
-    return '<div class="panel-card"><h3>Shipping</h3>' +
-      '<div class="form-row">' +
-        '<div class="form-field"><label>Courier</label><input type="text" id="shipCourier" value="' + esc(s ? s.courier : '') + '" placeholder="e.g. Manual / India Post"></div>' +
-        '<div class="form-field"><label>AWB / Tracking ID</label><input type="text" id="shipAwb" value="' + esc(s ? s.awb : '') + '"></div>' +
-      '</div>' +
-      '<div class="form-field"><label>Tracking URL</label><input type="text" id="shipUrl" value="' + esc(s ? s.tracking_url : '') + '"></div>' +
-      '<div class="form-row">' +
-        '<div class="form-field"><label>Shipping Cost (₹)</label><input type="number" id="shipCost" value="' + esc(s ? s.shipping_cost : '') + '"></div>' +
-        '<div class="form-field"><label>Estimated Delivery</label><input type="date" id="shipEta" value="' + esc(s ? s.estimated_delivery : '') + '"></div>' +
-      '</div>' +
-      '<div class="form-field"><label>Pickup Date</label><input type="date" id="shipPickup" value="' + esc(s ? s.pickup_date : '') + '"></div>' +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
-        '<button type="button" class="btn-primary btn-sm" id="shipSaveBtn">' + (s ? 'Update Shipment' : 'Create Shipment') + '</button>' +
-        '<button type="button" class="btn-secondary btn-sm" id="shipPrintBtn"' + (s ? '' : ' disabled') + '>Print Label</button>' +
-        '<button type="button" class="btn-secondary btn-sm" id="shipCopyBtn"' + (s && s.awb ? '' : ' disabled') + '>Copy Tracking ID</button>' +
-        (s && s.tracking_url ? '<a href="' + esc(s.tracking_url) + '" target="_blank" class="btn-secondary btn-sm">Track Shipment</a>' : '<button type="button" class="btn-secondary btn-sm" disabled>Track Shipment</button>') +
-      '</div>' +
-      '<p style="font-size:0.72rem;color:var(--text-soft);margin-top:10px;">Manual shipping today. Amazon Shipping / Ekart / DTDC can be plugged in later without changing this order.</p>' +
+    var provider = shippingProviderChoice || (s && s.provider) || 'manual';
+    return '<div class="panel-card" id="shippingCardWrap"><h3>Shipping</h3>' +
+      '<div class="form-field"><label for="shipProviderSelect">Shipping Provider</label>' +
+        '<select id="shipProviderSelect">' +
+          '<option value="manual"' + (provider === 'manual' ? ' selected' : '') + '>Manual Shipping</option>' +
+          '<option value="amazon_shipping"' + (provider === 'amazon_shipping' ? ' selected' : '') + '>Amazon Shipping</option>' +
+        '</select></div>' +
+      (s && s.provider && s.provider !== provider
+        ? '<p class="shipping-provider-warning">This order already has a ' + (s.provider === 'amazon_shipping' ? 'Amazon Shipping' : 'Manual Shipping') + ' shipment. Creating a new one here replaces it.</p>'
+        : '') +
+      (provider === 'amazon_shipping' ? renderAmazonSection(o, s) : renderManualSection(s)) +
     '</div>';
   }
 
+  function renderManualSection(s) {
+    var isManual = s && s.provider === 'manual';
+    return '<div class="form-row">' +
+        '<div class="form-field"><label>Courier</label><input type="text" id="shipCourier" value="' + esc(isManual ? s.courier : '') + '" placeholder="e.g. India Post, local courier…"></div>' +
+        '<div class="form-field"><label>Tracking ID</label><input type="text" id="shipTrackingId" value="' + esc(isManual ? s.tracking_id : '') + '"></div>' +
+      '</div>' +
+      '<div class="form-field"><label>Tracking URL</label><input type="text" id="shipUrl" value="' + esc(isManual ? s.tracking_url : '') + '"></div>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Shipping Cost (₹)</label><input type="number" id="shipCost" value="' + esc(isManual ? s.shipping_cost : '') + '"></div>' +
+        '<div class="form-field"><label>Estimated Delivery</label><input type="date" id="shipEta" value="' + esc(isManual ? s.estimated_delivery : '') + '"></div>' +
+      '</div>' +
+      '<div class="form-field"><label>Pickup Date</label><input type="date" id="shipPickup" value="' + esc(isManual ? s.pickup_date : '') + '"></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+        '<button type="button" class="btn-primary btn-sm" id="shipSaveBtn">' + (isManual ? 'Update Shipment' : 'Create Shipment') + '</button>' +
+        '<button type="button" class="btn-secondary btn-sm" id="shipPrintBtn"' + (isManual ? '' : ' disabled') + '>Print Label</button>' +
+        '<button type="button" class="btn-secondary btn-sm" id="shipCopyBtn"' + (isManual && s.tracking_id ? '' : ' disabled') + '>Copy Tracking ID</button>' +
+        (isManual && s.tracking_url ? '<a href="' + esc(s.tracking_url) + '" target="_blank" class="btn-secondary btn-sm">Track Shipment</a>' : '<button type="button" class="btn-secondary btn-sm" disabled>Track Shipment</button>') +
+      '</div>';
+  }
+
+  function renderAmazonSection(o, s) {
+    var isAmazon = s && s.provider === 'amazon_shipping';
+    var errorBox = function (message) {
+      return '<div class="shipping-error-box"><strong>Amazon Shipment Could Not Be Created</strong>' +
+        '<p>Reason: ' + esc(message) + '</p><button type="button" class="btn-secondary btn-sm" id="amzRetryBtn">Try Again</button></div>';
+    };
+
+    // A shipment row exists AND Amazon actually confirmed it (has a provider_shipment_id) —
+    // otherwise (no row, or a row with only a recorded failure) fall through to the create form.
+    if (isAmazon && s.provider_shipment_id) {
+      var events = (s.shipment_events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at); });
+      var terminal = ['delivered', 'cancelled', 'returned'].indexOf(s.normalized_status) !== -1;
+      return '<div class="amazon-shipping-card">' +
+          '<div class="amazon-shipping-head"><strong>AMAZON SHIPPING</strong><span class="badge badge-active">Shipment Created ✓</span></div>' +
+          '<div class="amazon-shipping-grid">' +
+            '<div><span>Tracking ID</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Current Status</span><strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></strong></div>' +
+            '<div><span>Estimated Delivery</span><strong>' + (s.estimated_delivery ? fmtDate(s.estimated_delivery) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Shipping Cost</span><strong>' + (s.shipping_cost != null ? fmtPrice(s.shipping_cost) : 'Unavailable') + '</strong></div>' +
+          '</div>' +
+          (s.last_tracking_sync_at ? '<p class="amazon-sync-note">Last synced ' + fmtDate(s.last_tracking_sync_at) + '</p>' : '') +
+          '<div class="amazon-shipping-actions">' +
+            (s.label_url ? '<a href="' + esc(s.label_url) + '" target="_blank" class="btn-secondary btn-sm">Download Shipping Label</a>' : '') +
+            (s.tracking_url ? '<a href="' + esc(s.tracking_url) + '" target="_blank" class="btn-secondary btn-sm">Track Shipment</a>' : '') +
+            '<button type="button" class="btn-secondary btn-sm" id="amzRefreshBtn">Refresh Tracking</button>' +
+            (terminal ? '' : '<button type="button" class="btn-danger btn-sm" id="amzCancelBtn">Cancel Shipment</button>') +
+          '</div>' +
+          (s.last_error ? '<p class="shipping-error-inline">Last sync error: ' + esc(s.last_error) + '</p>' : '') +
+          (events.length ? '<div class="tracking-events"><h4>Tracking History</h4>' + events.map(function (e) {
+            return '<div class="tracking-event-row"><strong>' + esc(NORMALIZED_STATUS_LABELS[e.normalized_status] || e.normalized_status || e.provider_status || '—') + '</strong>' +
+              '<span>' + (e.event_time ? fmtDate(e.event_time) : '') + (e.event_location ? ' · ' + esc(e.event_location) : '') + '</span>' +
+              (e.description ? '<p>' + esc(e.description) + '</p>' : '') + '</div>';
+          }).join('') + '</div>' : '') +
+        '</div>';
+    }
+
+    return '<div class="form-row">' +
+        '<div class="form-field"><label>Package Weight (kg)</label><input type="number" step="0.01" id="amzWeight" placeholder="e.g. 0.4"></div>' +
+        '<div class="form-field"><label>Length (cm)</label><input type="number" id="amzLength"></div>' +
+      '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Width (cm)</label><input type="number" id="amzWidth"></div>' +
+        '<div class="form-field"><label>Height (cm)</label><input type="number" id="amzHeight"></div>' +
+      '</div>' +
+      '<div class="form-field"><label>Payment Type</label><select id="amzPaymentType">' +
+        '<option value="prepaid"' + (o.paymentStatus === 'paid' ? ' selected' : '') + '>Prepaid</option>' +
+        '<option value="cod"' + (o.paymentStatus !== 'paid' ? ' selected' : '') + '>COD</option>' +
+      '</select></div>' +
+      '<p class="amazon-shipping-hint">Customer name, address, and order value are loaded automatically from this order. Pickup address comes from Admin → Settings.</p>' +
+      (shippingCreateError ? errorBox(shippingCreateError) : '') +
+      '<button type="button" class="btn-primary btn-sm" id="amzCreateBtn">Create Amazon Shipment</button>';
+  }
+
+  function refreshShippingCard(o) {
+    var el = document.getElementById('shippingCardWrap');
+    if (el) el.outerHTML = renderShippingCard(o);
+    bindShippingForm(o);
+  }
+
   function bindShippingForm(o) {
+    var providerSelect = document.getElementById('shipProviderSelect');
+    if (providerSelect) providerSelect.addEventListener('change', function () {
+      shippingProviderChoice = providerSelect.value;
+      shippingCreateError = null;
+      refreshShippingCard(o);
+    });
+
+    // ---- Manual Shipping ----
     var saveBtn = document.getElementById('shipSaveBtn');
     if (saveBtn) saveBtn.addEventListener('click', function () {
-      AdminAPI.shipments.save(o.id, {
+      AdminAPI.shipments.saveManual(o.id, {
         courier: document.getElementById('shipCourier').value.trim(),
-        awb: document.getElementById('shipAwb').value.trim(),
+        trackingId: document.getElementById('shipTrackingId').value.trim(),
         trackingUrl: document.getElementById('shipUrl').value.trim(),
         shippingCost: document.getElementById('shipCost').value ? Number(document.getElementById('shipCost').value) : null,
         pickupDate: document.getElementById('shipPickup').value || null,
         estimatedDelivery: document.getElementById('shipEta').value || null
-      }).then(function () { renderOrderDetail(o.id); });
+      }).then(function () { shippingProviderChoice = null; renderOrderDetail(o.id); });
     });
     var printBtn = document.getElementById('shipPrintBtn');
     if (printBtn) printBtn.addEventListener('click', function () {
@@ -1136,13 +1281,48 @@
         '<h2>You & Me — Shipping Label</h2><p><strong>Order:</strong> ' + esc(o.orderNumber) + '</p>' +
         '<p><strong>To:</strong><br>' + esc(o.customer.name) + '<br>' + esc(o.customer.phone) + '<br>' +
         esc(o.address.house) + ', ' + esc(o.address.street) + '<br>' + esc(o.address.city) + ', ' + esc(o.address.state) + ' — ' + esc(o.address.pincode) + '</p>' +
-        '<p><strong>Courier:</strong> ' + esc(document.getElementById('shipCourier').value) + '<br><strong>AWB:</strong> ' + esc(document.getElementById('shipAwb').value) + '</p>' +
+        '<p><strong>Courier:</strong> ' + esc(document.getElementById('shipCourier').value) + '<br><strong>Tracking ID:</strong> ' + esc(document.getElementById('shipTrackingId').value) + '</p>' +
         '</body></html>');
       w.document.close(); w.print();
     });
     var copyBtn = document.getElementById('shipCopyBtn');
     if (copyBtn) copyBtn.addEventListener('click', function () {
-      navigator.clipboard.writeText(document.getElementById('shipAwb').value).then(function () { copyBtn.textContent = 'Copied ✓'; window.setTimeout(function () { copyBtn.textContent = 'Copy Tracking ID'; }, 1200); });
+      navigator.clipboard.writeText(document.getElementById('shipTrackingId').value).then(function () { copyBtn.textContent = 'Copied ✓'; window.setTimeout(function () { copyBtn.textContent = 'Copy Tracking ID'; }, 1200); });
+    });
+
+    // ---- Amazon Shipping ----
+    var createBtn = document.getElementById('amzCreateBtn');
+    if (createBtn) createBtn.addEventListener('click', function () {
+      var pkg = {
+        weightKg: Number(document.getElementById('amzWeight').value),
+        lengthCm: Number(document.getElementById('amzLength').value),
+        widthCm: Number(document.getElementById('amzWidth').value),
+        heightCm: Number(document.getElementById('amzHeight').value)
+      };
+      if (!pkg.weightKg || !pkg.lengthCm || !pkg.widthCm || !pkg.heightCm) {
+        shippingCreateError = 'Package weight and all three dimensions are required.';
+        refreshShippingCard(o); return;
+      }
+      createBtn.disabled = true; createBtn.textContent = 'Creating…';
+      AdminAPI.shipments.createAmazon(o.id, pkg, document.getElementById('amzPaymentType').value)
+        .then(function () { shippingCreateError = null; shippingProviderChoice = null; renderOrderDetail(o.id); })
+        .catch(function (err) { shippingCreateError = err.message; refreshShippingCard(o); });
+    });
+    var retryBtn = document.getElementById('amzRetryBtn');
+    if (retryBtn) retryBtn.addEventListener('click', function () { shippingCreateError = null; refreshShippingCard(o); });
+    var refreshBtn = document.getElementById('amzRefreshBtn');
+    if (refreshBtn) refreshBtn.addEventListener('click', function () {
+      refreshBtn.disabled = true; refreshBtn.textContent = 'Refreshing…';
+      AdminAPI.shipments.syncAmazon(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not refresh tracking: ' + err.message); refreshBtn.disabled = false; refreshBtn.textContent = 'Refresh Tracking'; });
+    });
+    var cancelBtn = document.getElementById('amzCancelBtn');
+    if (cancelBtn) cancelBtn.addEventListener('click', function () {
+      if (!window.confirm('Cancel this Amazon shipment? This cannot be undone.')) return;
+      AdminAPI.shipments.cancelAmazon(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not cancel shipment: ' + err.message); });
     });
   }
 
@@ -1292,7 +1472,48 @@
   ROUTE_RENDERERS.settings = function () {
     content().innerHTML =
       '<div class="panel-card"><h3>Account</h3><p style="font-size:0.85rem;">Logged in as <strong>' + esc(document.getElementById('topbarUsername').textContent) + '</strong>.</p></div>' +
-      '<div class="panel-card"><h3>Store Info</h3><p style="font-size:0.85rem;color:var(--text-soft);">WhatsApp number, delivery threshold and shipping cost are configured in the customer site\'s <code>CONFIG</code> and in <code>create_order()</code> in the Supabase migration — a dedicated settings form can be added here once you tell me which of these you want editable from the UI.</p></div>';
+      '<div class="panel-card"><h3>Pickup Address</h3>' +
+        '<p style="font-size:0.8rem;color:var(--text-soft);margin-bottom:14px;">Used as the ship-from address on every Amazon Shipping shipment created from an order — see Orders → an order → Shipping.</p>' +
+        '<p class="empty-state" id="pickupAddressLoading">Loading…</p>' +
+      '</div>' +
+      '<div class="panel-card"><h3>Store Info</h3><p style="font-size:0.85rem;color:var(--text-soft);">WhatsApp number, delivery threshold and shipping cost are configured in the customer site\'s <code>CONFIG</code> and in <code>create_order()</code> in the Supabase migration.</p></div>';
+
+    AdminAPI.settings.get().then(function (s) {
+      var card = document.getElementById('pickupAddressLoading').closest('.panel-card');
+      card.innerHTML = '<h3>Pickup Address</h3>' +
+        '<p style="font-size:0.8rem;color:var(--text-soft);margin-bottom:14px;">Used as the ship-from address on every Amazon Shipping shipment created from an order — see Orders → an order → Shipping.</p>' +
+        '<div class="form-row">' +
+          field('pickupName', 'Contact Name', s.pickup_name) + field('pickupPhone', 'Phone', s.pickup_phone) +
+        '</div>' +
+        field('pickupLine1', 'Address Line 1', s.pickup_line1) + field('pickupLine2', 'Address Line 2 (optional)', s.pickup_line2) +
+        '<div class="form-row">' +
+          field('pickupCity', 'City', s.pickup_city) + field('pickupState', 'State', s.pickup_state) +
+        '</div>' +
+        field('pickupPincode', 'PIN Code', s.pickup_pincode) +
+        '<p class="login-error" id="pickupAddressError"></p>' +
+        '<button type="button" class="btn-primary btn-sm" id="savePickupAddressBtn">Save Pickup Address</button>';
+
+      function field(id, label, val) {
+        return '<div class="form-field"><label for="' + id + '">' + label + '</label><input type="text" id="' + id + '" value="' + esc(val || '') + '"></div>';
+      }
+
+      document.getElementById('savePickupAddressBtn').addEventListener('click', function () {
+        var payload = {
+          name: document.getElementById('pickupName').value.trim(), phone: document.getElementById('pickupPhone').value.trim(),
+          line1: document.getElementById('pickupLine1').value.trim(), line2: document.getElementById('pickupLine2').value.trim(),
+          city: document.getElementById('pickupCity').value.trim(), state: document.getElementById('pickupState').value.trim(),
+          pincode: document.getElementById('pickupPincode').value.trim()
+        };
+        var errorEl = document.getElementById('pickupAddressError');
+        errorEl.textContent = '';
+        AdminAPI.settings.savePickupAddress(payload)
+          .then(function () { errorEl.style.color = 'var(--sage)'; errorEl.textContent = 'Saved ✓'; })
+          .catch(function (err) { errorEl.style.color = ''; errorEl.textContent = err.message; });
+      });
+    }).catch(function (err) {
+      var card = document.getElementById('pickupAddressLoading').closest('.panel-card');
+      card.innerHTML = '<h3>Pickup Address</h3><p class="empty-state">Not available yet — ' + esc(err.message) + '</p>';
+    });
   };
 
   /* ---------- 14. New-order notifications (polling) ---------- */

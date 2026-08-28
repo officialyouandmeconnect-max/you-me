@@ -1394,8 +1394,10 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .badge-packing, .badge-ready_to_ship { background: var(--color-blue-soft); color: #3E6E8E; }
 .badge-shipped, .badge-out_for_delivery { background: #E4E0F5; color: #6952A3; }
 .badge-delivered { background: var(--color-sage-soft); color: #4C7A43; }
-.badge-cancelled, .badge-failed, .badge-draft { background: #FBEAEC; color: #C5677A; }
-.badge-refunded { background: #EDEDED; color: #666; }
+.badge-cancelled, .badge-failed, .badge-draft, .badge-delivery_failed { background: #FBEAEC; color: #C5677A; }
+.badge-refunded, .badge-returned { background: #EDEDED; color: #666; }
+.badge-shipment_created, .badge-pickup_scheduled { background: #FBEFDC; color: #C9862B; }
+.badge-picked_up, .badge-in_transit { background: #E4E0F5; color: #6952A3; }
 
 /* ---- Order detail ---- */
 .order-detail-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 12px 0 18px; flex-wrap: wrap; }

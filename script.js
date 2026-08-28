@@ -1567,14 +1567,33 @@
       };
     }
 
+    // Once a real Amazon Shipping shipment exists, Amazon's own normalized_status is the
+    // source of truth for the timeline — never the generic order_status one above. Every step
+    // here reflects something Amazon itself reported (via the amazon-shipping Edge Function),
+    // nothing synthesized on the customer's own browser.
+    var AMAZON_TRACKING_STEPS = [
+      { key: 'confirmed', label: 'Order Confirmed' },
+      { key: 'packed', label: 'Packed' },
+      { key: 'handed', label: 'Handed to Amazon Shipping' },
+      { key: 'in_transit', label: 'In Transit' },
+      { key: 'out_for_delivery', label: 'Out for Delivery' },
+      { key: 'delivered', label: 'Delivered' }
+    ];
+    var AMAZON_STATUS_RANK = { shipment_created: 0, pickup_scheduled: 0, picked_up: 1, in_transit: 2, out_for_delivery: 3, delivered: 4 };
+    function amazonTrackingStepsDone(shipment) {
+      var rank = AMAZON_STATUS_RANK[shipment.normalized_status] != null ? AMAZON_STATUS_RANK[shipment.normalized_status] : 0;
+      return { confirmed: true, packed: true, handed: rank >= 1, in_transit: rank >= 2, out_for_delivery: rank >= 3, delivered: rank >= 4 };
+    }
+
     function renderOrderDetail(id) {
       content().innerHTML = '<p class="account-dash-loading">Loading order…</p>';
-      supabaseClient.from('orders').select('*, order_items(*), order_status_history(*), shipments(*)').eq('id', id).single()
+      supabaseClient.from('orders').select('*, order_items(*), order_status_history(*), shipments(*, shipment_events(*))').eq('id', id).single()
         .then(function (res) {
           if (res.error || !res.data) throw new Error('Order not found.');
           var o = res.data;
           var shipment = (o.shipments || [])[0] || null;
-          var done = o.order_status === 'cancelled' ? null : trackingStepsDone(o);
+          var isAmazon = shipment && shipment.provider === 'amazon_shipping';
+          var done = o.order_status === 'cancelled' ? null : (isAmazon ? amazonTrackingStepsDone(shipment) : trackingStepsDone(o));
 
           content().innerHTML =
             '<button type="button" class="link-btn" id="orderDetailBack">&#8592; Back to My Orders</button>' +
@@ -1605,14 +1624,12 @@
             '</div>' +
             (o.order_status === 'cancelled'
               ? '<div class="panel-card"><h4>Order Status</h4><p><span class="badge badge-cancelled">Cancelled</span></p></div>'
-              : '<div class="panel-card"><h4>Order Status</h4>' + trackingTimelineHtml(done) + '</div>') +
-            '<div class="panel-card"><h4>Shipping</h4>' +
-              (shipment && shipment.awb
-                ? '<p>Courier Partner: <strong>' + escapeHtml(shipment.courier || '—') + '</strong></p>' +
-                  '<p>Tracking ID: <strong>' + escapeHtml(shipment.awb) + '</strong></p>' +
-                  (shipment.estimated_delivery ? '<p>Estimated Delivery: <strong>' + formatDate(shipment.estimated_delivery) + '</strong></p>' : '') +
-                  (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track Package</a>' : '')
-                : '<p>Preparing your order &hearts;</p><p class="account-payment-note">Tracking information will appear here once your order has been shipped.</p>') +
+              : '<div class="panel-card"><h4>Order Status</h4>' +
+                  (isAmazon && ['delivery_failed', 'returned', 'cancelled'].indexOf(shipment.normalized_status) !== -1
+                    ? '<p><span class="badge badge-' + escapeHtml(shipment.normalized_status) + '">' + statusLabel(shipment.normalized_status) + '</span></p>'
+                    : trackingTimelineHtml(done, isAmazon ? AMAZON_TRACKING_STEPS : TRACKING_STEPS)) +
+                '</div>') +
+            '<div class="panel-card"><h4>Shipping</h4>' + shippingSectionHtml(shipment) +
             '</div>';
 
           var back = document.getElementById('orderDetailBack');
@@ -1625,10 +1642,34 @@
         });
     }
 
-    function trackingTimelineHtml(done) {
-      return '<div class="tracking-timeline">' + TRACKING_STEPS.map(function (step) {
+    function trackingTimelineHtml(done, steps) {
+      return '<div class="tracking-timeline">' + (steps || TRACKING_STEPS).map(function (step) {
         return '<div class="tracking-step' + (done[step.key] ? ' done' : '') + '"><span class="tracking-dot">' + (done[step.key] ? '&#10003;' : '') + '</span><span>' + step.label + '</span></div>';
       }).join('') + '</div>';
+    }
+
+    function shippingSectionHtml(shipment) {
+      if (!shipment) {
+        return '<p>Preparing your order &hearts;</p><p class="account-payment-note">Tracking information will appear here once your order has been shipped.</p>';
+      }
+      if (shipment.provider === 'amazon_shipping') {
+        if (!shipment.provider_shipment_id) {
+          // A shipment attempt exists but Amazon hasn't confirmed one yet (e.g. still being
+          // created, or the last attempt failed) — never show a technical API error here.
+          return '<p>Preparing your order &hearts;</p><p class="account-payment-note">Tracking information will appear here once your order has been shipped.</p>';
+        }
+        return '<p>Shipped with <strong>Amazon Shipping</strong></p>' +
+          '<p>Tracking ID: <strong>' + (shipment.tracking_id ? escapeHtml(shipment.tracking_id) : 'Unavailable') + '</strong></p>' +
+          (shipment.estimated_delivery ? '<p>Estimated Delivery: <strong>' + formatDate(shipment.estimated_delivery) + '</strong></p>' : '') +
+          (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track Package</a>' : '');
+      }
+      // Manual Shipping
+      return shipment.tracking_id
+        ? '<p>Courier Partner: <strong>' + escapeHtml(shipment.courier || '—') + '</strong></p>' +
+          '<p>Tracking ID: <strong>' + escapeHtml(shipment.tracking_id) + '</strong></p>' +
+          (shipment.estimated_delivery ? '<p>Estimated Delivery: <strong>' + formatDate(shipment.estimated_delivery) + '</strong></p>' : '') +
+          (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track Package</a>' : '')
+        : '<p>Preparing your order &hearts;</p><p class="account-payment-note">Tracking information will appear here once your order has been shipped.</p>';
     }
 
     /* ---- Addresses ---- */

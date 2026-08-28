@@ -215,8 +215,10 @@ input, select, textarea { font-family: inherit; }
 .badge-packing, .badge-ready_to_ship { background: var(--blue-soft); color: var(--blue-dark); }
 .badge-shipped, .badge-out_for_delivery { background: var(--lavender-soft); color: var(--lavender-dark); }
 .badge-delivered { background: var(--sage-soft); color: var(--sage-dark); }
-.badge-cancelled, .badge-failed, .badge-draft { background: var(--red-soft); color: var(--red); }
-.badge-refunded { background: #EDEDED; color: #666; }
+.badge-cancelled, .badge-failed, .badge-draft, .badge-delivery_failed { background: var(--red-soft); color: var(--red); }
+.badge-refunded, .badge-returned { background: #EDEDED; color: #666; }
+.badge-shipment_created, .badge-pickup_scheduled { background: var(--amber-soft); color: var(--amber); }
+.badge-picked_up, .badge-in_transit { background: var(--lavender-soft); color: var(--lavender-dark); }
 
 .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; align-items: center; }
 .filter-chip { border: 1.5px solid var(--border); background: var(--surface); padding: 7px 15px; border-radius: var(--radius-pill); font-size: 0.78rem; font-weight: 700; color: var(--text-soft); cursor: pointer; }
@@ -272,6 +274,32 @@ input, select, textarea { font-family: inherit; }
 .status-select-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
 .status-select-row select { border-radius: 10px; border: 1.5px solid var(--border); padding: 8px 10px; }
 #paymentStatusSelect, #orderStatusSelect { border-radius: 10px; border: 1.5px solid var(--border); padding: 8px 10px; width: 100%; }
+#shipProviderSelect, #amzPaymentType { border-radius: 10px; border: 1.5px solid var(--border); padding: 8px 10px; width: 100%; }
+
+/* ---- Shipping: provider-aware (Manual / Amazon) ---- */
+.shipping-provider-warning { font-size: 0.78rem; color: var(--amber); background: var(--amber-soft); border-radius: var(--radius-sm); padding: 8px 12px; margin: 4px 0 14px; }
+.amazon-shipping-hint { font-size: 0.76rem; color: var(--text-soft); margin: 6px 0 14px; }
+.shipping-error-box { background: var(--red-soft); border-radius: var(--radius-sm); padding: 14px; margin: 10px 0 14px; }
+.shipping-error-box strong { color: var(--red); font-size: 0.86rem; }
+.shipping-error-box p { font-size: 0.82rem; color: var(--text); margin: 6px 0 10px; }
+.shipping-error-inline { font-size: 0.78rem; color: var(--red); margin-top: 10px; }
+
+.amazon-shipping-card { padding-top: 4px; }
+.amazon-shipping-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.amazon-shipping-head strong { font-size: 0.82rem; letter-spacing: 0.04em; color: var(--text-soft); }
+.amazon-shipping-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 10px; }
+.amazon-shipping-grid > div { display: flex; flex-direction: column; gap: 3px; }
+.amazon-shipping-grid span { font-size: 0.72rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.amazon-shipping-grid strong { font-size: 0.9rem; }
+.amazon-sync-note { font-size: 0.72rem; color: var(--text-faint); margin: 0 0 10px; }
+.amazon-shipping-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.tracking-events { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
+.tracking-events h4 { font-size: 0.82rem; margin-bottom: 10px; }
+.tracking-event-row { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+.tracking-event-row:last-child { border-bottom: none; }
+.tracking-event-row strong { display: block; }
+.tracking-event-row span { color: var(--text-soft); font-size: 0.74rem; }
+.tracking-event-row p { margin: 4px 0 0; color: var(--text-soft); }
 
 /* ---- Modal ---- */
 .admin-scrim { position: fixed; inset: 0; background: rgba(51,41,31,0.4); z-index: 200; }
