@@ -1328,13 +1328,21 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .account-welcome h3 { font-size: 1.15rem; margin-bottom: 4px; }
 .account-welcome p { color: var(--color-text-soft); font-size: 0.86rem; margin: 0; }
 
+/* Matches Google's own sign-in button guidelines (white/#dadce0 border/sentence case) rather
+   than the site's pill-shaped, uppercase .btn styling — Google's brand button can't be
+   restyled to match arbitrary site chrome, so this deliberately overrides every .btn default
+   that would otherwise leak in (uppercase, letter-spacing, pill radius, bold weight). */
 .btn-google {
-  display: flex; align-items: center; justify-content: center; gap: 10px;
-  background: var(--color-surface); color: var(--color-text); border: 1.5px solid rgba(64,46,33,0.16);
-  border-radius: var(--radius-sm); padding: 11px; font-size: 0.86rem; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  background: #fff; color: #3c4043; border: 1px solid #dadce0;
+  border-radius: var(--radius-sm); height: 48px; padding: 0 16px;
+  font-size: 0.95rem; font-weight: 500; letter-spacing: normal; text-transform: none;
+  box-shadow: none;
 }
-.btn-google:hover { background: var(--color-cream); }
+.btn-google:hover { background: #f7f8f8; border-color: #c6c6c6; box-shadow: 0 1px 2px rgba(60,64,67,0.15); }
+.btn-google:active { background: #f1f3f4; }
 .btn-google[disabled] { opacity: 0.6; pointer-events: none; }
+.btn-google .google-g-icon { width: 18px; height: 18px; flex-shrink: 0; }
 .account-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--color-text-soft); font-size: 0.76rem; }
 .account-divider::before, .account-divider::after { content: ''; flex: 1; height: 1px; background: rgba(64,46,33,0.14); }
 

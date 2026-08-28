@@ -973,18 +973,61 @@
       });
     }
 
-    return { check: check, getUser: getUser, login: login, register: register, logout: logout, loginWithGoogle: loginWithGoogle };
+    // Sends a real Supabase Auth reset email — resetPasswordForEmail deliberately never
+    // reveals whether the address has an account (resolves the same either way), which is
+    // exactly the neutral, enumeration-safe behaviour the UI relies on.
+    function resetPassword(email) {
+      return supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + BASE_PATH + '/reset-password'
+      }).then(function (res) { if (res.error) throw res.error; return res; });
+    }
+
+    // Only ever callable with a valid password-recovery session already in place (the
+    // customer arrived via the emailed link, which signs them in via a recovery token) —
+    // see openResetPassword() in AccountPanel and the /reset-password handling in Init.
+    function updatePassword(newPassword) {
+      return supabaseClient.auth.updateUser({ password: newPassword });
+    }
+
+    return { check: check, getUser: getUser, login: login, register: register, logout: logout, loginWithGoogle: loginWithGoogle, resetPassword: resetPassword, updatePassword: updatePassword };
   })();
 
   /* ---------- 16. Account panel ---------- */
   // This panel is the sign-in/create-account gate — the only place any customer authenticates.
   // A logged-in customer never sees it (the header Account icon goes straight to the /account
   // dashboard instead, and this panel redirects there itself if somehow opened while signed in).
+  // Turns a raw Supabase Auth error into something safe and useful to show a customer —
+  // never the technical message verbatim (matches Checkout/Orders' own "never trust/never
+  // expose raw provider errors to the customer" pattern used elsewhere in this file).
+  function friendlyAuthError(err) {
+    var msg = (err && err.message) || '';
+    if (/password/i.test(msg) && /(least|short|6 char|8 char)/i.test(msg)) return 'Password is too short — use at least 8 characters.';
+    if (/network|fetch/i.test(msg)) return 'Network error — please check your connection and try again.';
+    if (/(expired|invalid).*(token|session|link)|token.*(expired|invalid)/i.test(msg)) return 'This link has expired. Please request a new one.';
+    if (/invalid login|invalid.*credentials/i.test(msg)) return 'Incorrect email or password.';
+    return 'Something went wrong. Please try again.';
+  }
+
+  // Google's own official multicolor "G" mark (the standard four-path logo from Google's
+  // sign-in button guidelines) — not a single-color approximation, not an emoji.
+  var GOOGLE_G_ICON =
+    '<svg class="google-g-icon" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">' +
+      '<path fill="#4285F4" d="M17.64 9.2045c0-.6381-.0573-1.2518-.1636-1.8409H9v3.4814h4.8436c-.2086 1.125-.8427 2.0782-1.7959 2.7164v2.2581h2.9087c1.7018-1.5668 2.6836-3.874 2.6836-6.615z"/>' +
+      '<path fill="#34A853" d="M9 18c2.43 0 4.4673-.806 5.9564-2.1805l-2.9087-2.2581c-.8059.54-1.8368.859-3.0477.859-2.344 0-4.3282-1.5831-5.036-3.7104H.9573v2.3318C2.4382 15.9832 5.4818 18 9 18z"/>' +
+      '<path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.2822-1.1168-.2822-1.71s.1023-1.17.2822-1.71V4.9582H.9573C.3477 6.1732 0 7.5477 0 9s.3477 2.8268.9573 4.0418L3.964 10.71z"/>' +
+      '<path fill="#EA4335" d="M9 3.5795c1.3214 0 2.5077.4541 3.4405 1.346l2.5813-2.5814C13.4632.8918 11.426 0 9 0 5.4818 0 2.4382 2.0168.9573 4.9582L3.964 7.29C4.6718 5.1627 6.656 3.5795 9 3.5795z"/>' +
+    '</svg>';
+
   var AccountPanel = (function () {
     function panel() { return document.getElementById('accountPanel'); }
     function body() { return document.getElementById('accountPanelBody'); }
-    var mode = 'login';
-    var message = ''; // optional context line shown above the form, e.g. "Sign in to continue your order."
+    var mode = 'login'; // login | signup | forgot | forgotSent | newPassword | newPasswordDone | resetInvalid
+    var message = ''; // optional context line shown above the login/signup form, e.g. "Sign in to continue your order."
+    var lastForgotEmail = '';
+
+    function field(id, label, type) {
+      return '<div class="form-field"><label for="' + id + '">' + label + '</label><input type="' + type + '" id="' + id + '"></div>';
+    }
 
     function open(customMessage) {
       if (SessionService.getUser()) { window.location.href = BASE_PATH + '/account'; return; }
@@ -993,14 +1036,30 @@
       render();
       openPanel(panel());
     }
+    // Entry points for the /reset-password landing page (see the Init section) — always
+    // opened directly, never via the header Account icon.
+    function openResetPassword() { mode = 'newPassword'; render(); openPanel(panel()); }
+    function openResetInvalid() { mode = 'resetInvalid'; render(); openPanel(panel()); }
     function close() { closePanel(panel()); }
 
     function render() {
       var b = body();
       if (!b) return;
+      // A logged-in user should never see the login/signup form — but a password-recovery
+      // session (mode 'newPassword'/'newPasswordDone') is ALSO a signed-in session, so this
+      // guard only applies to the pre-login modes, not the reset-password ones.
       var user = SessionService.getUser();
-      if (user) { window.location.href = BASE_PATH + '/account'; return; }
+      if (user && mode !== 'newPassword' && mode !== 'newPasswordDone') { window.location.href = BASE_PATH + '/account'; return; }
 
+      if (mode === 'forgot') return renderForgot(b);
+      if (mode === 'forgotSent') return renderForgotSent(b);
+      if (mode === 'newPassword') return renderNewPassword(b);
+      if (mode === 'newPasswordDone') return renderNewPasswordDone(b);
+      if (mode === 'resetInvalid') return renderResetInvalid(b);
+      renderLoginOrSignup(b);
+    }
+
+    function renderLoginOrSignup(b) {
       var heading =
         '<div class="account-welcome">' +
           '<h3>Welcome to You &amp; Me &hearts;</h3>' +
@@ -1008,9 +1067,8 @@
         '</div>';
 
       var googleBtn =
-        '<button type="button" class="btn btn-google btn-block" id="googleSignInBtn">' +
-          '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.28-1.66 3.76-5.5 3.76-3.31 0-6.02-2.74-6.02-6.12s2.7-6.12 6.02-6.12c1.89 0 3.15.8 3.87 1.5l2.64-2.55C16.86 2.98 14.66 2 12 2 6.98 2 2.9 6.06 2.9 11s4.08 9 9.1 9c5.25 0 8.74-3.69 8.74-8.89 0-.6-.07-1.05-.15-1.5z"/></svg>' +
-          'Continue with Google' +
+        '<button type="button" class="btn-google btn-block" id="googleSignInBtn">' +
+          GOOGLE_G_ICON + '<span>Continue with Google</span>' +
         '</button>' +
         '<div class="account-divider"><span>or</span></div>';
 
@@ -1041,17 +1099,13 @@
 
       b.innerHTML = heading + googleBtn + tabs + formHtml + '<p class="account-submit-feedback" id="accountFeedback"></p>';
 
-      function field(id, label, type) {
-        return '<div class="form-field"><label for="' + id + '">' + label + '</label><input type="' + type + '" id="' + id + '"></div>';
-      }
-
       var googleBtnEl = document.getElementById('googleSignInBtn');
       if (googleBtnEl) googleBtnEl.addEventListener('click', function () {
         googleBtnEl.disabled = true;
         SessionService.loginWithGoogle().catch(function (err) {
           googleBtnEl.disabled = false;
           var feedback = document.getElementById('accountFeedback');
-          if (feedback) feedback.textContent = err.message || 'Could not start Google sign-in.';
+          if (feedback) feedback.textContent = friendlyAuthError(err);
         });
       });
 
@@ -1059,10 +1113,90 @@
       if (form) form.addEventListener('submit', onSubmit);
 
       var forgot = document.getElementById('forgotPasswordBtn');
-      if (forgot) forgot.addEventListener('click', function () {
+      if (forgot) forgot.addEventListener('click', function () { mode = 'forgot'; render(); });
+    }
+
+    function renderForgot(b) {
+      b.innerHTML =
+        '<div class="account-welcome">' +
+          '<h3>Reset your password</h3>' +
+          '<p>Enter the email address linked to your You &amp; Me account. We\'ll send you a secure password reset link.</p>' +
+        '</div>' +
+        '<form id="forgotForm">' +
+          field('forgotEmail', 'Email Address', 'email') +
+          '<button type="submit" class="btn btn-primary btn-block" style="margin-top:16px;">Send Reset Link</button>' +
+        '</form>' +
+        '<div class="account-forgot" style="text-align:center;margin-top:14px;"><button type="button" id="backToSignInBtn">Back to Sign In</button></div>' +
+        '<p class="account-submit-feedback" id="accountFeedback"></p>';
+
+      document.getElementById('forgotForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var email = document.getElementById('forgotEmail').value.trim();
         var feedback = document.getElementById('accountFeedback');
-        if (feedback) feedback.textContent = 'Password reset isn\'t available yet — contact us on WhatsApp for help.';
+        var submitBtn = e.target.querySelector('button[type="submit"]');
+        if (!email) { feedback.textContent = 'Please enter your email address.'; return; }
+        submitBtn.disabled = true;
+        SessionService.resetPassword(email)
+          // Supabase's resetPasswordForEmail intentionally never reveals whether the account
+          // exists — treat any resolved call as success, exactly matching that neutral
+          // behaviour, so this UI can't be used to enumerate registered emails either.
+          .then(function () { lastForgotEmail = email; mode = 'forgotSent'; render(); })
+          .catch(function (err) { submitBtn.disabled = false; feedback.textContent = friendlyAuthError(err); });
       });
+      document.getElementById('backToSignInBtn').addEventListener('click', function () { mode = 'login'; render(); });
+    }
+
+    function renderForgotSent(b) {
+      b.innerHTML =
+        '<div class="account-welcome">' +
+          '<h3>Check your inbox &hearts;</h3>' +
+          '<p>We\'ve sent a password reset link to:<br><strong>' + escapeHtml(lastForgotEmail) + '</strong></p>' +
+          '<p>Open the email and follow the link to create a new password.</p>' +
+        '</div>' +
+        '<button type="button" class="btn btn-outline btn-block" id="backToSignInBtn">Back to Sign In</button>';
+      document.getElementById('backToSignInBtn').addEventListener('click', function () { mode = 'login'; render(); });
+    }
+
+    function renderNewPassword(b) {
+      b.innerHTML =
+        '<div class="account-welcome"><h3>Create a new password</h3></div>' +
+        '<form id="newPasswordForm">' +
+          field('newPassword1', 'New Password', 'password') +
+          field('newPassword2', 'Confirm New Password', 'password') +
+          '<button type="submit" class="btn btn-primary btn-block" style="margin-top:16px;">Update Password</button>' +
+        '</form>' +
+        '<p class="account-submit-feedback" id="accountFeedback"></p>';
+
+      document.getElementById('newPasswordForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var pw1 = document.getElementById('newPassword1').value;
+        var pw2 = document.getElementById('newPassword2').value;
+        var feedback = document.getElementById('accountFeedback');
+        var submitBtn = e.target.querySelector('button[type="submit"]');
+        if (!pw1 || !pw2) { feedback.textContent = 'Please fill in both fields.'; return; }
+        if (pw1.length < 8) { feedback.textContent = 'Password is too short — use at least 8 characters.'; return; }
+        if (pw1 !== pw2) { feedback.textContent = 'Passwords do not match.'; return; }
+        submitBtn.disabled = true;
+        SessionService.updatePassword(pw1)
+          .then(function (r) { if (r.error) throw r.error; mode = 'newPasswordDone'; render(); })
+          .catch(function (err) { submitBtn.disabled = false; feedback.textContent = friendlyAuthError(err); });
+      });
+    }
+
+    function renderNewPasswordDone(b) {
+      b.innerHTML =
+        '<div class="account-welcome"><h3>Password updated &hearts;</h3><p>Your password has been changed successfully.</p></div>' +
+        '<button type="button" class="btn btn-primary btn-block" id="goToAccountBtn">Sign In</button>';
+      // The password-recovery link already left this browser signed in with the new password —
+      // no reason to make the customer type it again right away.
+      document.getElementById('goToAccountBtn').addEventListener('click', function () { window.location.href = BASE_PATH + '/account'; });
+    }
+
+    function renderResetInvalid(b) {
+      b.innerHTML =
+        '<div class="account-welcome"><h3>This link has expired</h3><p>Password reset links are valid for a limited time. Request a new one below.</p></div>' +
+        '<button type="button" class="btn btn-primary btn-block" id="requestNewResetBtn">Request New Link</button>';
+      document.getElementById('requestNewResetBtn').addEventListener('click', function () { mode = 'forgot'; render(); });
     }
 
     function onSubmit(event) {
@@ -1123,7 +1257,7 @@
       if (b) b.addEventListener('click', onTabClick);
     }
 
-    return { open: open, close: close, render: render, init: init };
+    return { open: open, close: close, render: render, init: init, openResetPassword: openResetPassword, openResetInvalid: openResetInvalid };
   })();
 
   /* ---------- 17. Checkout ---------- */
@@ -2104,7 +2238,18 @@
       // panel first and letting the router run after would just have it slammed shut again.
       SessionService.check().then(function (user) {
         var path = window.location.pathname;
-        var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account';
+        var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account', resetPasswordPath = BASE_PATH + '/reset-password';
+
+        // A Supabase password-recovery link lands here with its token already exchanged for a
+        // session by SessionService.check() above (detectSessionInUrl parses it from the URL on
+        // load) — if that produced a user, let them set a new password; otherwise the link was
+        // invalid or had already expired. Checked before the checkout-resume/account/login
+        // branches below since a recovery session is a real session and would otherwise match
+        // the "logged in" paths meant for normal browsing.
+        if (path === resetPasswordPath) {
+          if (user) AccountPanel.openResetPassword(); else AccountPanel.openResetInvalid();
+          return;
+        }
 
         // A checkout interrupted by the login requirement resumes here — this is also how
         // Google Sign-In finishes: it's a full-page redirect away and back, so this is the
