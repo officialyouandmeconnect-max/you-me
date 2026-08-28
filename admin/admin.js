@@ -1216,7 +1216,7 @@
   // Same wording as the customer-facing COURIER_STATUS_LABELS in script.js — Admin and the
   // customer should describe the exact same Delhivery-reported state identically.
   var NORMALIZED_STATUS_LABELS = {
-    shipment_created: 'Shipment Created', pickup_scheduled: 'Ready for Pickup', picked_up: 'Picked Up',
+    shipment_created: 'Preparing for Pickup', pickup_scheduled: 'Ready for Pickup', picked_up: 'Picked Up',
     in_transit: 'In Transit', out_for_delivery: 'Out for Delivery', delivered: 'Delivered',
     delivery_failed: 'Delivery Attempt Failed', returned: 'Return to Origin', cancelled: 'Cancelled'
   };

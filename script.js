@@ -1703,34 +1703,66 @@
 
     // Once a real courier shipment exists (Amazon Shipping or Delhivery — any provider whose
     // shipments table row has a normalized_status), that provider's own normalized_status is
-    // the source of truth for the timeline — never the generic order_status one above. Every
-    // step here reflects something the provider itself reported (via its own Edge Function),
-    // nothing synthesized on the customer's own browser. Every provider shares the same
-    // normalized_status vocabulary (see supabase/migrations/0003_shipping_providers.sql), so
-    // one rank map and one "steps done" function work for all of them — only the label for the
-    // handoff-to-courier step differs per provider.
+    // the source of truth for courier movement (Ready for Pickup → Picked Up → In Transit →
+    // Out for Delivery → Delivered) — never inferred from order_status, and never from just
+    // "a shipment/AWB exists". A shipment being *created* is not the same as it being *shipped*
+    // — see the bug-fix note on courierTrackingStepsDone below. Every provider shares the same
+    // normalized_status vocabulary (see supabase/migrations/0003_shipping_providers.sql), so one
+    // shared 9-step timeline (order-placement steps + courier steps) works for all of them.
     var COURIER_TRACKING_STEPS = {
       amazon_shipping: [
-        { key: 'confirmed', label: 'Order Confirmed' },
+        { key: 'placed', label: 'Order Placed' },
+        { key: 'paid', label: 'Payment Confirmed' },
+        { key: 'confirmed', label: 'Confirmed' },
         { key: 'packed', label: 'Packed' },
-        { key: 'handed', label: 'Handed to Amazon Shipping' },
+        { key: 'ready_for_pickup', label: 'Ready for Pickup' },
+        { key: 'picked_up', label: 'Picked Up' },
         { key: 'in_transit', label: 'In Transit' },
         { key: 'out_for_delivery', label: 'Out for Delivery' },
         { key: 'delivered', label: 'Delivered' }
       ],
       delhivery: [
-        { key: 'confirmed', label: 'Order Confirmed' },
+        { key: 'placed', label: 'Order Placed' },
+        { key: 'paid', label: 'Payment Confirmed' },
+        { key: 'confirmed', label: 'Confirmed' },
         { key: 'packed', label: 'Packed' },
-        { key: 'handed', label: 'Shipped' },
+        { key: 'ready_for_pickup', label: 'Ready for Pickup' },
+        { key: 'picked_up', label: 'Picked Up' },
         { key: 'in_transit', label: 'In Transit' },
         { key: 'out_for_delivery', label: 'Out for Delivery' },
         { key: 'delivered', label: 'Delivered' }
       ]
     };
+    // shipment_created and pickup_scheduled share rank 0 ("Ready for Pickup" — Delhivery has the
+    // AWB but hasn't actually collected the parcel yet); only picked_up and later count as real
+    // courier movement.
     var COURIER_STATUS_RANK = { shipment_created: 0, pickup_scheduled: 0, picked_up: 1, in_transit: 2, out_for_delivery: 3, delivered: 4 };
-    function courierTrackingStepsDone(shipment) {
-      var rank = COURIER_STATUS_RANK[shipment.normalized_status] != null ? COURIER_STATUS_RANK[shipment.normalized_status] : 0;
-      return { confirmed: true, packed: true, handed: rank >= 1, in_transit: rank >= 2, out_for_delivery: rank >= 3, delivered: rank >= 4 };
+    // BUG FIX: this used to return `handed: rank >= 1` collapsed under a single "confirmed:
+    // true, packed: true" pair, which (combined with a since-fixed server bug that wrongly
+    // advanced order_status to 'shipped' the moment an AWB was created) let "Shipped ✓" show up
+    // before Delhivery had actually picked up the parcel. Every step below is now computed
+    // explicitly — never a blind `index <= currentIndex` sweep — combining You & Me's own
+    // internal prep status (order.order_status, Admin-owned) with Delhivery's real courier
+    // status (shipment.normalized_status) as two genuinely separate signals.
+    function courierTrackingStepsDone(o, shipment) {
+      var internalRank = ORDER_STATUS_RANK[o.order_status] != null ? ORDER_STATUS_RANK[o.order_status] : 0;
+      var courierRank = COURIER_STATUS_RANK[shipment.normalized_status] != null ? COURIER_STATUS_RANK[shipment.normalized_status] : 0;
+      // A shipment record existing at all means Admin already moved this order through prep
+      // (Delhivery shipments are only ever created from "Ready to Ship" — see
+      // supabase/README-delhivery.md) — so confirmed/packed read as done even if this
+      // particular order's order_status history happens to be missing those intermediate rows.
+      var courierStarted = true;
+      return {
+        placed: true,
+        paid: o.payment_status === 'paid',
+        confirmed: internalRank >= 1 || courierStarted,
+        packed: internalRank >= 2 || courierStarted,
+        ready_for_pickup: courierRank >= 0,
+        picked_up: courierRank >= 1,
+        in_transit: courierRank >= 2,
+        out_for_delivery: courierRank >= 3,
+        delivered: courierRank >= 4
+      };
     }
 
     function renderOrderDetail(id) {
@@ -1754,7 +1786,7 @@
         })
         .then(function (ctx) {
           var o = ctx.o, shipment = ctx.shipment, isCourier = ctx.isCourier, courierSteps = ctx.courierSteps;
-          var done = o.order_status === 'cancelled' ? null : (isCourier ? courierTrackingStepsDone(shipment) : trackingStepsDone(o));
+          var done = o.order_status === 'cancelled' ? null : (isCourier ? courierTrackingStepsDone(o, shipment) : trackingStepsDone(o));
 
           content().innerHTML =
             '<button type="button" class="link-btn" id="orderDetailBack">&#8592; Back to My Orders</button>' +
@@ -1816,11 +1848,14 @@
     // read better in the courier's own vocabulary (e.g. "Ready for Pickup", not "Pickup
     // Scheduled"). Falls back to statusLabel() for anything not explicitly listed.
     var COURIER_STATUS_LABELS = {
-      shipment_created: 'Shipment Created', pickup_scheduled: 'Ready for Pickup', picked_up: 'Picked Up',
+      shipment_created: 'Preparing for Pickup', pickup_scheduled: 'Ready for Pickup', picked_up: 'Picked Up',
       in_transit: 'In Transit', out_for_delivery: 'Out for Delivery', delivered: 'Delivered',
       delivery_failed: 'Delivery Attempt Failed', returned: 'Return to Origin', cancelled: 'Cancelled'
     };
     function courierStatusLabel(normalized) { return COURIER_STATUS_LABELS[normalized] || statusLabel(normalized); }
+    // States where a real AWB exists but the courier hasn't actually collected the parcel yet —
+    // must never be described as "Shipped".
+    var PRE_PICKUP_STATUSES = ['shipment_created', 'pickup_scheduled'];
 
     function shippingSectionHtml(shipment) {
       if (!shipment) return PREPARING_MESSAGE;
@@ -1831,18 +1866,28 @@
           // being created, or the last attempt failed) — never show a technical API error here.
           return PREPARING_MESSAGE;
         }
+        var isPrePickup = PRE_PICKUP_STATUSES.indexOf(shipment.normalized_status) !== -1;
         // "Latest Update" is the most recent real scan/status-change event the courier reported
         // (shipment_events, synced server-side) — never fabricated client-side.
         var events = shipment.shipment_events || [];
         var latestEvent = events.length
           ? events.slice().sort(function (a, b) { return new Date(b.event_time || 0) - new Date(a.event_time || 0); })[0]
           : null;
-        return '<p>Shipped with <strong>' + COURIER_PROVIDER_LABELS[shipment.provider] + '</strong></p>' +
+        // BUG FIX: this used to say "Shipped with <Provider>" unconditionally the moment an AWB
+        // existed — wrong, an AWB existing just means the shipment was created, not that the
+        // courier has actually collected the parcel. Never say "shipped" or "tracking
+        // unavailable" here when a real AWB already exists — the pre-pickup state gets its own
+        // honest heading + explanatory message instead.
+        return (isPrePickup
+            ? '<p>Shipping Partner: <strong>' + COURIER_PROVIDER_LABELS[shipment.provider] + '</strong></p>'
+            : '<p>Shipped with <strong>' + COURIER_PROVIDER_LABELS[shipment.provider] + '</strong></p>') +
           '<p>AWB: <strong>' + (shipment.tracking_id ? escapeHtml(shipment.tracking_id) : 'Unavailable') + '</strong></p>' +
           '<p>Current Status: <strong><span class="badge badge-' + escapeHtml(shipment.normalized_status) + '">' + courierStatusLabel(shipment.normalized_status) + '</span></strong></p>' +
           (shipment.estimated_delivery ? '<p>Estimated Delivery: <strong>' + formatDate(shipment.estimated_delivery) + '</strong></p>' : '') +
-          (latestEvent && latestEvent.description ? '<p>Latest Update: <strong>' + escapeHtml(latestEvent.description) + (latestEvent.event_location ? ' — ' + escapeHtml(latestEvent.event_location) : '') + '</strong></p>' : '') +
-          (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track Package</a>' : '');
+          (isPrePickup
+            ? '<p class="account-payment-note">Your shipment has been created with ' + COURIER_PROVIDER_LABELS[shipment.provider] + '. Pickup will be scheduled soon.</p>'
+            : (latestEvent && latestEvent.description ? '<p>Latest Update: <strong>' + escapeHtml(latestEvent.description) + (latestEvent.event_location ? ' — ' + escapeHtml(latestEvent.event_location) : '') + '</strong></p>' : '')) +
+          (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track with ' + COURIER_PROVIDER_LABELS[shipment.provider] + '</a>' : '');
       }
 
       // Manual Shipping
