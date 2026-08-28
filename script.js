@@ -1519,18 +1519,21 @@
     loadProducts().then(function () {
       renderProductGrid(grid, PRODUCTS.filter(function (p) { return p.featured; }));
       Router.init();
-    });
 
-    // /login and /account are real, bookmarkable URLs (this same index.html serves both, via
-    // the GitHub Pages 404.html SPA fallback) — on load, check the session once and open the
-    // right view. An admin who lands on either is sent straight to /admin.
-    SessionService.check().then(function (user) {
-      var path = window.location.pathname;
-      var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account';
-      if (path !== loginPath && path !== accountPath) return;
-      if (user && user.role === 'admin') { window.location.href = BASE_PATH + '/admin'; return; }
-      if (path === accountPath && !user) { window.location.href = loginPath; return; }
-      AccountPanel.open();
+      // /login and /account are real, bookmarkable URLs (this same index.html serves both,
+      // via the GitHub Pages 404.html SPA fallback) — on load, check the session once and
+      // open the right view. An admin who lands on either is sent straight to /admin. This
+      // runs strictly after Router.init() above (not in parallel with it) because the
+      // router's own initial-route handling closes every open panel — opening the account
+      // panel first and letting the router run after would just have it slammed shut again.
+      SessionService.check().then(function (user) {
+        var path = window.location.pathname;
+        var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account';
+        if (path !== loginPath && path !== accountPath) return;
+        if (user && user.role === 'admin') { window.location.href = BASE_PATH + '/admin'; return; }
+        if (path === accountPath && !user) { window.location.href = loginPath; return; }
+        AccountPanel.open();
+      });
     });
   });
 })();
