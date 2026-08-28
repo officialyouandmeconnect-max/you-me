@@ -42,14 +42,18 @@
   var PRODUCTS = [];
 
   function loadProducts() {
-    return fetch('/api/products')
-      .then(function (res) { if (!res.ok) throw new Error('Failed to load products'); return res.json(); })
-      .then(function (data) {
+    return supabaseClient
+      .from('products')
+      .select(PRODUCT_SELECT)
+      .eq('status', 'active')
+      .order('id', { ascending: true })
+      .then(function (res) {
+        if (res.error) throw res.error;
         PRODUCTS.length = 0;
-        data.forEach(function (p) { PRODUCTS.push(p); });
+        (res.data || []).forEach(function (row) { PRODUCTS.push(mapSupabaseProduct(row)); });
       })
       .catch(function (err) {
-        console.error('Could not load products from the store API:', err);
+        console.error('Could not load products from Supabase:', err);
       });
   }
 
@@ -900,38 +904,54 @@
 
   /* ---------- 15b. Session service ---------- */
   // One real authentication system for the whole site — customers and admins log in through
-  // the exact same POST /api/auth/login. The server decides `role` from the database; this
-  // service just reflects whatever the server says, it never invents or trusts a role itself.
+  // the exact same Supabase Auth call. The `profiles` table decides `role`, enforced by RLS;
+  // this service just reflects whatever the database says, it never invents or trusts a role itself.
   var SessionService = (function () {
     var current = null; // null = unknown/unauthenticated, else { email, name, role }
 
+    // Every profile lookup goes through the `profiles` table (id/email/name/role), which is
+    // what actually decides `role` — never trust anything the client itself claims about it.
+    function loadProfile(authUser) {
+      return supabaseClient.from('profiles').select('name, role').eq('id', authUser.id).single()
+        .then(function (res) {
+          if (res.error) throw res.error;
+          return { id: authUser.id, email: authUser.email, name: res.data.name, role: res.data.role };
+        });
+    }
+
     function check() {
-      return fetch('/api/auth/session', { credentials: 'include' })
-        .then(function (res) { return res.json(); })
-        .then(function (data) { current = data.authenticated ? data.user : null; return current; })
+      return supabaseClient.auth.getSession()
+        .then(function (res) {
+          var session = res.data && res.data.session;
+          if (!session) { current = null; return null; }
+          return loadProfile(session.user).then(function (u) { current = u; return current; });
+        })
         .catch(function () { current = null; return null; });
     }
     function getUser() { return current; }
 
     function login(email, password) {
-      return fetch('/api/auth/login', {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email, password: password })
-      }).then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
-        .then(function (r) { if (r.ok) current = r.data.user; return r; });
+      return supabaseClient.auth.signInWithPassword({ email: email, password: password })
+        .then(function (res) {
+          if (res.error) return { ok: false, data: { error: res.error.message } };
+          return loadProfile(res.data.user).then(function (u) { current = u; return { ok: true, data: { user: u } }; });
+        });
     }
 
     function register(name, email, password) {
-      return fetch('/api/auth/register', {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name, email: email, password: password })
-      }).then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
-        .then(function (r) { if (r.ok) current = r.data.user; return r; });
+      return supabaseClient.auth.signUp({ email: email, password: password, options: { data: { name: name } } })
+        .then(function (res) {
+          if (res.error) return { ok: false, data: { error: res.error.message } };
+          if (!res.data.session) {
+            // Email confirmation is required before a session exists — nothing to log in with yet.
+            return { ok: false, data: { error: 'Check your email to confirm your account, then log in.' } };
+          }
+          return loadProfile(res.data.user).then(function (u) { current = u; return { ok: true, data: { user: u } }; });
+        });
     }
 
     function logout() {
-      return fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
-        .then(function () { current = null; });
+      return supabaseClient.auth.signOut().then(function () { current = null; });
     }
 
     return { check: check, getUser: getUser, login: login, register: register, logout: logout };
@@ -1008,7 +1028,7 @@
       var logoutBtn = document.getElementById('accountLogoutBtn');
       if (logoutBtn) logoutBtn.addEventListener('click', function () {
         SessionService.logout().then(function () {
-          if (window.location.pathname === '/account') window.location.href = '/';
+          if (window.location.pathname === BASE_PATH + '/account') window.location.href = BASE_PATH + '/';
           else render();
         });
       });
@@ -1040,8 +1060,8 @@
     }
 
     function redirectAfterLogin(user) {
-      if (user.role === 'admin') { window.location.href = '/admin'; return; }
-      if (window.location.pathname === '/login') { window.location.href = '/account'; return; }
+      if (user.role === 'admin') { window.location.href = BASE_PATH + '/admin'; return; }
+      if (window.location.pathname === BASE_PATH + '/login') { window.location.href = BASE_PATH + '/account'; return; }
       showToast('Welcome back, ' + user.name + '!');
       close();
     }
@@ -1176,11 +1196,9 @@
       var values = collectValues();
       var items = CartService.getItems();
 
-      var payload = {
-        customer: { name: values.coFullName, phone: values.coMobile, email: values.coEmail || null },
-        address: { house: values.coHouse, street: values.coStreet, landmark: values.coLandmark || null, city: values.coCity, state: values.coState, pincode: values.coPin },
-        items: items.map(function (it) { return { productId: it.productId, size: it.size, color: it.color, quantity: it.qty }; })
-      };
+      var customer = { name: values.coFullName, phone: values.coMobile, email: values.coEmail || null };
+      var address = { house: values.coHouse, street: values.coStreet, landmark: values.coLandmark || null, city: values.coCity, state: values.coState, pincode: values.coPin };
+      var rpcItems = items.map(function (it) { return { productId: it.productId, size: it.size, color: it.color, quantity: it.qty }; });
 
       var submitBtn = document.querySelector('.whatsapp-place-order-btn');
       var errorEl = document.getElementById('checkoutSubmitError');
@@ -1189,15 +1207,21 @@
 
       // The order is saved to the database FIRST — WhatsApp only opens once that succeeds, so
       // the store's own records are always the source of truth, never dependent on WhatsApp.
-      fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
-        .then(function (result) {
-          if (!result.ok) throw new Error(result.data.error || 'Could not place your order. Please try again.');
-          var savedOrder = result.data;
+      // create_order() is a SECURITY DEFINER Postgres function: it independently re-validates
+      // stock and recomputes every price itself, ignoring anything the client sends here.
+      supabaseClient.rpc('create_order', { p_customer: customer, p_address: address, p_items: rpcItems })
+        .then(function (res) {
+          if (res.error) throw new Error(res.error.message || 'Could not place your order. Please try again.');
+          var rpcResult = res.data;
+          // The function only returns id/orderNumber/totals (it doesn't echo back item names or
+          // photos) — build the full shape the WhatsApp message needs from the cart + the
+          // already-loaded product catalog, which is fine here since the order is already saved.
+          var fullItems = items.map(function (it) {
+            var product = findProduct(it.productId) || {};
+            var unitPrice = product.price || 0;
+            return { name: product.name || 'Item', image: (product.images || [])[0] || null, size: it.size, color: it.color, quantity: it.qty, totalPrice: unitPrice * it.qty };
+          });
+          var savedOrder = { orderNumber: rpcResult.orderNumber, items: fullItems, totals: rpcResult.totals, customer: customer, address: address };
           var whatsappUrl = OrderService.placeOrder('whatsapp', savedOrder).url;
           close();
           CartService.clear();
@@ -1217,9 +1241,9 @@
   /* ---------- 18. Order service (pluggable payment methods) ---------- */
   var OrderService = {
     methods: {
-      // `order` here is the response returned by POST /api/orders — the order already exists
-      // in the database (with its real order number and server-computed prices) by the time
-      // this ever runs. WhatsApp is purely the communication channel, never the source of truth.
+      // `order` here is built right after create_order() (a SECURITY DEFINER Postgres function)
+      // already saved the order — with its real order number and server-computed prices — by the
+      // time this ever runs. WhatsApp is purely the communication channel, never the source of truth.
       whatsapp: function (order) {
         var lines = [];
         lines.push('Hi You & Me 👋', '', 'I would like to place an order.', '', 'Order ID: ' + order.orderNumber, '', '🛍 ORDER DETAILS', '');
@@ -1497,15 +1521,15 @@
       Router.init();
     });
 
-    // /login and /account are real, bookmarkable URLs (server.js serves this same page for
-    // both) — on load, check the session once and open the right view. An admin who lands on
-    // either is sent straight to /admin; the server would bounce them there anyway via /admin's
-    // own check, this just skips the extra hop.
+    // /login and /account are real, bookmarkable URLs (this same index.html serves both, via
+    // the GitHub Pages 404.html SPA fallback) — on load, check the session once and open the
+    // right view. An admin who lands on either is sent straight to /admin.
     SessionService.check().then(function (user) {
       var path = window.location.pathname;
-      if (path !== '/login' && path !== '/account') return;
-      if (user && user.role === 'admin') { window.location.href = '/admin'; return; }
-      if (path === '/account' && !user) { window.location.href = '/login'; return; }
+      var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account';
+      if (path !== loginPath && path !== accountPath) return;
+      if (user && user.role === 'admin') { window.location.href = BASE_PATH + '/admin'; return; }
+      if (path === accountPath && !user) { window.location.href = loginPath; return; }
       AccountPanel.open();
     });
   });

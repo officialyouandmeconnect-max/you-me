@@ -3,7 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>
+  // GitHub Pages 404.html SPA fallback (see /404.html): a hard load/refresh of a route like
+  // /you-me/admin/orders/12 404s on Pages, gets bounced here, and stashes the real path.
+  // Restore it via history.replaceState BEFORE admin.js's Router reads window.location.pathname.
+  (function () {
+    try {
+      var saved = sessionStorage.getItem('ym_redirect_path');
+      if (saved) { sessionStorage.removeItem('ym_redirect_path'); window.history.replaceState(null, '', saved); }
+    } catch (e) { /* sessionStorage unavailable (private mode etc.) — worst case, dashboard loads */ }
+  })();
+</script>
 <title>You &amp; Me — Admin</title>
+<link rel="icon" href="favicon.png" type="image/png">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="admin.css">
 </head>
@@ -23,16 +35,19 @@
       <span class="sidebar-logo">Y&amp;M</span>
       <span>You &amp; Me<br><small>Admin</small></span>
     </div>
+    <!-- These hrefs are hardcoded with the /you-me GitHub Pages subpath (see BASE_PATH in
+         supabase-client.js) since static HTML can't read that JS constant. If BASE_PATH ever
+         changes (custom domain, user/org repo), update these 9 links to match. -->
     <nav class="sidebar-nav">
-      <a href="/admin/dashboard" data-route="dashboard">📊 Dashboard</a>
-      <a href="/admin/products" data-route="products">👕 Products</a>
-      <a href="/admin/orders" data-route="orders">🧾 Orders</a>
-      <a href="/admin/customers" data-route="customers">👤 Customers</a>
-      <a href="/admin/inventory" data-route="inventory">📦 Inventory</a>
-      <a href="/admin/shipping" data-route="shipping">🚚 Shipping</a>
-      <a href="/admin/categories" data-route="categories">🏷️ Categories</a>
-      <a href="/admin/media" data-route="media">🖼️ Media Library</a>
-      <a href="/admin/settings" data-route="settings">⚙️ Settings</a>
+      <a href="/you-me/admin/dashboard" data-route="dashboard">📊 Dashboard</a>
+      <a href="/you-me/admin/products" data-route="products">👕 Products</a>
+      <a href="/you-me/admin/orders" data-route="orders">🧾 Orders</a>
+      <a href="/you-me/admin/customers" data-route="customers">👤 Customers</a>
+      <a href="/you-me/admin/inventory" data-route="inventory">📦 Inventory</a>
+      <a href="/you-me/admin/shipping" data-route="shipping">🚚 Shipping</a>
+      <a href="/you-me/admin/categories" data-route="categories">🏷️ Categories</a>
+      <a href="/you-me/admin/media" data-route="media">🖼️ Media Library</a>
+      <a href="/you-me/admin/settings" data-route="settings">⚙️ Settings</a>
     </nav>
     <button type="button" class="sidebar-logout" id="logoutBtn">🚪 Logout</button>
   </aside>
@@ -69,6 +84,8 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="supabase-client.js"></script>
 <script src="admin.js"></script>
 </body>
 </html>

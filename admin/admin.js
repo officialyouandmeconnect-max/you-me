@@ -1,6 +1,6 @@
 /* =========================================================
    YOU & ME — Admin Panel
-   1. API helper
+   1. AdminAPI (Supabase-backed data layer)
    2. Auth (login/logout/session)
    3. Router + shell chrome
    4. Dashboard
@@ -18,26 +18,6 @@
    ========================================================= */
 (function () {
   'use strict';
-
-  /* ---------- 1. API helper ---------- */
-  function api(path, options) {
-    options = options || {};
-    return fetch('/api' + path, Object.assign({
-      credentials: 'include',
-      headers: options.body ? { 'Content-Type': 'application/json' } : {}
-    }, options)).then(function (res) {
-      if (res.status === 401 || res.status === 403) { window.location.href = '/login'; throw new Error('Not authenticated'); }
-      return res.json().then(function (data) {
-        if (!res.ok) throw new Error(data.error || 'Request failed');
-        return data;
-      });
-    });
-  }
-  function apiGet(path) { return api(path); }
-  function apiPost(path, body) { return api(path, { method: 'POST', body: JSON.stringify(body) }); }
-  function apiPut(path, body) { return api(path, { method: 'PUT', body: JSON.stringify(body) }); }
-  function apiPatch(path, body) { return api(path, { method: 'PATCH', body: JSON.stringify(body) }); }
-  function apiDelete(path) { return api(path, { method: 'DELETE' }); }
 
   function fmtPrice(n) { return '₹' + Number(n || 0).toLocaleString('en-IN'); }
   function fmtDate(iso) { if (!iso) return '—'; var d = new Date(iso.replace(' ', 'T') + (iso.indexOf('Z') === -1 && iso.indexOf('+') === -1 ? 'Z' : '')); return isNaN(d) ? iso : d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); }
@@ -58,12 +38,339 @@
     return '<img class="' + sizeClass + '" src="' + esc(url) + '" alt="">';
   }
 
+  function throwIfError(res) { if (res.error) throw new Error(res.error.message || 'Request failed'); return res; }
+
+  /* ---------- 1. AdminAPI (Supabase-backed data layer) ---------- */
+  // Every read/write below runs through the same anon-key Supabase client the customer site
+  // uses — what it's actually allowed to do is entirely decided by Row Level Security policies
+  // (see supabase/migrations/0001_init.sql), gated on the signed-in user's profiles.role being
+  // 'admin'. There is no separate "admin API" server — the database itself is the boundary.
+  var AdminAPI = {
+    auth: {
+      session: function () {
+        return supabaseClient.auth.getSession().then(function (res) {
+          var session = res.data && res.data.session;
+          if (!session) return { authenticated: false };
+          return supabaseClient.from('profiles').select('name, role, email').eq('id', session.user.id).single()
+            .then(function (r) {
+              if (r.error || !r.data) return { authenticated: false };
+              return { authenticated: true, user: { id: session.user.id, email: r.data.email, name: r.data.name, role: r.data.role } };
+            });
+        }).catch(function () { return { authenticated: false }; });
+      },
+      logout: function () { return supabaseClient.auth.signOut(); }
+    },
+
+    dashboard: function () {
+      return Promise.all([
+        supabaseClient.from('orders').select('id, order_number, customer_name, total, payment_status, order_status, created_at').order('created_at', { ascending: false }),
+        supabaseClient.from('products').select('id, stock, status'),
+        supabaseClient.from('order_items').select('order_id, product_image').order('id', { ascending: true })
+      ]).then(function (results) {
+        var ordersRes = throwIfError(results[0]), productsRes = throwIfError(results[1]), itemsRes = throwIfError(results[2]);
+        var orders = ordersRes.data || [], products = productsRes.data || [], items = itemsRes.data || [];
+
+        var firstImageByOrder = {};
+        items.forEach(function (it) { if (!(it.order_id in firstImageByOrder)) firstImageByOrder[it.order_id] = it.product_image; });
+
+        var now = new Date();
+        var startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        var startOfWeek = new Date(startOfDay); startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+        var startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        var counts = { total: orders.length, new: 0, confirmed: 0, packing: 0, shipped: 0, delivered: 0, cancelled: 0, today: 0, thisWeek: 0, thisMonth: 0 };
+        var revenuePaid = 0, revenuePending = 0;
+        orders.forEach(function (o) {
+          if (counts.hasOwnProperty(o.order_status)) counts[o.order_status]++;
+          var created = new Date(o.created_at);
+          if (created >= startOfDay) counts.today++;
+          if (created >= startOfWeek) counts.thisWeek++;
+          if (created >= startOfMonth) counts.thisMonth++;
+          // Revenue only ever counts orders actually marked Paid — never just placed.
+          if (o.payment_status === 'paid') revenuePaid += o.total;
+          else if (o.payment_status === 'pending') revenuePending += o.total;
+        });
+
+        var uniquePhones = {};
+        // customers.total is computed from orders below (see AdminAPI.customers.list); keep this
+        // cheap here by reusing the same order rows rather than a second round trip.
+        orders.forEach(function () {});
+
+        return {
+          orders: counts,
+          revenue: { paid: revenuePaid, pending: revenuePending },
+          customers: { total: 0 }, // filled in by the dashboard renderer via customers.list()
+          products: {
+            total: products.length,
+            lowStock: products.filter(function (p) { return p.stock > 0 && p.stock <= 5; }).length,
+            outOfStock: products.filter(function (p) { return p.stock <= 0; }).length
+          },
+          recentOrders: orders.slice(0, 8).map(function (o) {
+            return { id: o.id, orderNumber: o.order_number, customerName: o.customer_name, thumbnail: firstImageByOrder[o.id] || null, total: o.total, paymentStatus: o.payment_status, orderStatus: o.order_status, createdAt: o.created_at };
+          })
+        };
+      });
+    },
+
+    products: {
+      list: function () {
+        return supabaseClient.from('products').select(PRODUCT_SELECT).order('id', { ascending: false })
+          .then(function (res) { throwIfError(res); return (res.data || []).map(mapSupabaseProduct); });
+      },
+      get: function (id) {
+        return supabaseClient.from('products').select(PRODUCT_SELECT).eq('id', id).single()
+          .then(function (res) { throwIfError(res); return mapSupabaseProduct(res.data); });
+      },
+      create: function (payload) {
+        return supabaseClient.from('products').insert({
+          sku: payload.sku, name: payload.name, description: payload.description || '', fabric: payload.fabric || '',
+          category: payload.category, subcategory: payload.subcategory || null, age_group: payload.ageGroup || null,
+          price: payload.price, sale_price: payload.salePrice, stock: 0,
+          featured: !!payload.featured, new_arrival: !!payload.newArrival, status: payload.status || 'active'
+        }).select().single().then(function (res) {
+          throwIfError(res);
+          var product = res.data;
+          return writeProductChildren(product, payload).then(function () { return AdminAPI.products.get(product.id); });
+        });
+      },
+      update: function (id, payload) {
+        return supabaseClient.from('products').update({
+          sku: payload.sku, name: payload.name, description: payload.description || '', fabric: payload.fabric || '',
+          category: payload.category, subcategory: payload.subcategory || null, age_group: payload.ageGroup || null,
+          price: payload.price, sale_price: payload.salePrice,
+          featured: !!payload.featured, new_arrival: !!payload.newArrival, status: payload.status || 'active',
+          updated_at: new Date().toISOString()
+        }).eq('id', id).select().single().then(function (res) {
+          throwIfError(res);
+          var product = res.data;
+          return Promise.all([
+            supabaseClient.from('product_images').delete().eq('product_id', id),
+            supabaseClient.from('product_sizes').delete().eq('product_id', id),
+            supabaseClient.from('product_colors').delete().eq('product_id', id)
+          ]).then(function () { return writeProductChildren(product, payload, true); })
+            .then(function () { return recomputeProductStock(id); })
+            .then(function () { return AdminAPI.products.get(id); });
+        });
+      },
+      duplicate: function (id) {
+        return AdminAPI.products.get(id).then(function (p) {
+          var sku = p.sku + '-COPY-' + Date.now().toString().slice(-5);
+          return AdminAPI.products.create({
+            sku: sku, name: p.name + ' (Copy)', description: p.description, fabric: p.fabric,
+            category: p.category, subcategory: p.subcategory, ageGroup: p.ageGroup,
+            price: p.oldPrice || p.price, salePrice: p.oldPrice ? p.price : null,
+            images: p.images, sizes: p.sizes, colors: p.colors,
+            featured: false, newArrival: false, status: 'draft'
+          });
+        });
+      },
+      setStatus: function (id, status) {
+        return supabaseClient.from('products').update({ status: status, updated_at: new Date().toISOString() }).eq('id', id)
+          .then(throwIfError);
+      },
+      remove: function (id) {
+        return supabaseClient.from('order_items').select('id', { count: 'exact', head: true }).eq('product_id', id)
+          .then(function (res) {
+            throwIfError(res);
+            if (res.count && res.count > 0) return AdminAPI.products.setStatus(id, 'draft');
+            return supabaseClient.from('products').delete().eq('id', id).then(throwIfError);
+          });
+      },
+      setVariantStock: function (productId, variantId, stock) {
+        return supabaseClient.from('product_variants').update({ stock: stock }).eq('id', variantId)
+          .then(throwIfError).then(function () { return recomputeProductStock(productId); });
+      }
+    },
+
+    orders: {
+      list: function (filters) {
+        var q = supabaseClient.from('orders').select('id, order_number, customer_name, phone, total, payment_status, order_status, created_at, order_items(product_image)').order('created_at', { ascending: false });
+        if (filters && filters.status && filters.status !== 'all') q = q.eq('order_status', filters.status);
+        if (filters && filters.q) {
+          var term = filters.q.replace(/[%,]/g, '');
+          q = q.or('order_number.ilike.%' + term + '%,customer_name.ilike.%' + term + '%,phone.ilike.%' + term + '%');
+        }
+        return q.then(function (res) {
+          throwIfError(res);
+          return (res.data || []).map(function (o) {
+            return {
+              id: o.id, orderNumber: o.order_number, createdAt: o.created_at, customerName: o.customer_name, phone: o.phone,
+              thumbnails: (o.order_items || []).slice(0, 3).map(function (it) { return it.product_image; }),
+              itemCount: (o.order_items || []).length, total: o.total, paymentStatus: o.payment_status, orderStatus: o.order_status
+            };
+          });
+        });
+      },
+      get: function (id) {
+        return supabaseClient.from('orders').select('*, order_items(*), order_status_history(*)').eq('id', id).single()
+          .then(function (res) {
+            throwIfError(res);
+            var o = res.data;
+            var history = (o.order_status_history || []).slice().sort(function (a, b) { return new Date(a.created_at) - new Date(b.created_at); });
+            return {
+              id: o.id, orderNumber: o.order_number,
+              customer: { name: o.customer_name, phone: o.phone, email: o.email },
+              address: { house: o.house, street: o.street, landmark: o.landmark, city: o.city, state: o.state, pincode: o.pincode },
+              items: (o.order_items || []).map(function (it) { return { image: it.product_image, name: it.product_name, sku: it.sku, size: it.size, color: it.color, quantity: it.quantity, unitPrice: it.unit_price, totalPrice: it.total_price }; }),
+              totals: { subtotal: o.subtotal, delivery: o.delivery_charge, discount: o.discount, total: o.total },
+              paymentMethod: o.payment_method, paymentStatus: o.payment_status, paymentReference: o.payment_reference, paymentNotes: o.payment_notes,
+              orderStatus: o.order_status, statusHistory: history
+            };
+          });
+      },
+      setPayment: function (id, payload) {
+        var patch = { payment_status: payload.paymentStatus, payment_notes: payload.paymentNotes };
+        if (payload.paymentStatus === 'paid') patch.paid_at = new Date().toISOString();
+        return supabaseClient.from('orders').update(patch).eq('id', id).then(throwIfError);
+      },
+      setStatus: function (id, status) {
+        return supabaseClient.from('orders').update({ order_status: status, updated_at: new Date().toISOString() }).eq('id', id).then(throwIfError)
+          .then(function () { return supabaseClient.from('order_status_history').insert({ order_id: id, status: status }).then(throwIfError); });
+      }
+    },
+
+    shipments: {
+      get: function (orderId) {
+        return supabaseClient.from('shipments').select('*').eq('order_id', orderId).maybeSingle()
+          .then(function (res) { throwIfError(res); return res.data; });
+      },
+      save: function (orderId, payload) {
+        return supabaseClient.from('shipments').upsert({
+          order_id: orderId, courier: payload.courier || null, awb: payload.awb || null, tracking_url: payload.trackingUrl || null,
+          shipping_cost: payload.shippingCost, pickup_date: payload.pickupDate, estimated_delivery: payload.estimatedDelivery,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'order_id' }).then(throwIfError);
+      }
+    },
+
+    customers: {
+      list: function () {
+        return supabaseClient.from('orders').select('customer_name, phone, email, total, created_at').order('created_at', { ascending: false })
+          .then(function (res) {
+            throwIfError(res);
+            return groupByCustomer(res.data || []).sort(function (a, b) { return new Date(b.lastOrderAt) - new Date(a.lastOrderAt); });
+          });
+      },
+      get: function (phone) {
+        return Promise.all([
+          supabaseClient.from('orders').select('id, order_number, customer_name, phone, email, house, street, landmark, city, state, pincode, total, order_status, created_at').eq('phone', phone).order('created_at', { ascending: false }),
+        ]).then(function (results) {
+          var res = results[0]; throwIfError(res);
+          var rows = res.data || [];
+          if (rows.length === 0) throw new Error('Customer not found');
+          var seen = {}, addresses = [];
+          rows.forEach(function (r) {
+            var key = r.house + '|' + r.street + '|' + r.city;
+            if (!seen[key]) { seen[key] = true; addresses.push({ house: r.house, street: r.street, landmark: r.landmark, city: r.city, state: r.state, pincode: r.pincode }); }
+          });
+          return {
+            name: rows[0].customer_name, phone: rows[0].phone, email: rows[0].email,
+            orderCount: rows.length, totalValue: rows.reduce(function (s, r) { return s + r.total; }, 0),
+            addresses: addresses,
+            orders: rows.map(function (r) { return { id: r.id, orderNumber: r.order_number, createdAt: r.created_at, total: r.total, orderStatus: r.order_status }; })
+          };
+        });
+      }
+    },
+
+    media: {
+      list: function () {
+        return Promise.all([
+          supabaseClient.from('media').select('*').order('uploaded_at', { ascending: false }),
+          supabaseClient.from('product_images').select('image_url')
+        ]).then(function (results) {
+          var mediaRes = throwIfError(results[0]), imagesRes = throwIfError(results[1]);
+          var inUseUrls = {};
+          (imagesRes.data || []).forEach(function (r) { inUseUrls[r.image_url] = true; });
+          return (mediaRes.data || []).map(function (m) { return { id: m.id, url: m.url, filename: m.filename, inUse: !!inUseUrls[m.url] }; });
+        });
+      },
+      remove: function (id) {
+        return supabaseClient.from('media').select('url').eq('id', id).single().then(function (res) {
+          throwIfError(res);
+          var url = res.data.url;
+          return supabaseClient.from('media').delete().eq('id', id).then(throwIfError).then(function () {
+            var path = storagePathFromUrl(url);
+            if (path) supabaseClient.storage.from('product-images').remove([path]).catch(function () {});
+          });
+        });
+      },
+      upload: function (file) {
+        var path = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '-' + file.name.replace(/[^a-zA-Z0-9.\-_]/g, '');
+        return supabaseClient.storage.from('product-images').upload(path, file, { cacheControl: '3600', upsert: false })
+          .then(function (res) {
+            throwIfError(res);
+            var publicUrl = supabaseClient.storage.from('product-images').getPublicUrl(path).data.publicUrl;
+            return supabaseClient.from('media').insert({ url: publicUrl, filename: file.name }).select().single()
+              .then(function (r) { throwIfError(r); return { url: publicUrl }; });
+          });
+      }
+    }
+  };
+
+  function storagePathFromUrl(url) {
+    var marker = '/product-images/';
+    var idx = url.indexOf(marker);
+    return idx === -1 ? null : url.slice(idx + marker.length);
+  }
+
+  function groupByCustomer(orderRows) {
+    var byPhone = {};
+    orderRows.forEach(function (o) {
+      if (!byPhone[o.phone]) byPhone[o.phone] = { name: o.customer_name, phone: o.phone, email: o.email, orderCount: 0, totalValue: 0, lastOrderAt: o.created_at };
+      var c = byPhone[o.phone];
+      c.orderCount++; c.totalValue += o.total;
+      if (new Date(o.created_at) > new Date(c.lastOrderAt)) { c.lastOrderAt = o.created_at; c.name = o.customer_name; c.email = o.email; }
+    });
+    return Object.keys(byPhone).map(function (k) { return byPhone[k]; });
+  }
+
+  function writeProductChildren(product, payload) {
+    var tasks = [];
+    var images = (payload.images || []).map(function (url, i) { return { product_id: product.id, image_url: url, sort_order: i, is_primary: i === 0 }; });
+    if (images.length) tasks.push(supabaseClient.from('product_images').insert(images).then(throwIfError));
+
+    var sizes = (payload.sizes || []).map(function (s, i) { return { product_id: product.id, size: s, sort_order: i }; });
+    if (sizes.length) tasks.push(supabaseClient.from('product_sizes').insert(sizes).then(throwIfError));
+
+    var colors = (payload.colors || []).map(function (c, i) { return { product_id: product.id, name: c.name, hex: c.hex, sort_order: i }; });
+    if (colors.length) tasks.push(supabaseClient.from('product_colors').insert(colors).then(throwIfError));
+
+    return Promise.all(tasks).then(function () {
+      // Fill in any size×color variant combos that don't exist yet — existing ones (with real
+      // stock history) are left untouched rather than being wiped and recreated on every save.
+      return supabaseClient.from('product_variants').select('size, color').eq('product_id', product.id).then(function (res) {
+        throwIfError(res);
+        var existing = {};
+        (res.data || []).forEach(function (v) { existing[v.size + '|' + v.color] = true; });
+        var toInsert = [];
+        (payload.sizes || []).forEach(function (size) {
+          (payload.colors || []).forEach(function (color) {
+            var key = size + '|' + color.name;
+            if (existing[key]) return;
+            var variantSku = product.sku + '-' + color.name.toUpperCase().replace(/\s+/g, '') + '-' + size.replace(/\s+/g, '');
+            toInsert.push({ product_id: product.id, variant_sku: variantSku, size: size, color: color.name, stock: 0 });
+          });
+        });
+        if (!toInsert.length) return null;
+        return supabaseClient.from('product_variants').insert(toInsert).then(throwIfError);
+      });
+    });
+  }
+
+  function recomputeProductStock(productId) {
+    return supabaseClient.from('product_variants').select('stock').eq('product_id', productId).then(function (res) {
+      throwIfError(res);
+      var total = (res.data || []).reduce(function (s, v) { return s + v.stock; }, 0);
+      return supabaseClient.from('products').update({ stock: total }).eq('id', productId).then(throwIfError);
+    });
+  }
+
   /* ---------- 2. Auth ---------- */
-  // There is no login form on this page — the server itself already refuses to serve this
-  // shell to anyone without an admin session (see the /admin route in server.js), so by the
-  // time this script runs we're either looking at a confirmed admin or something's gone wrong
-  // client-side (e.g. the session expired between page load and this check). Either way, the
-  // one and only thing to do is re-verify with the server and bounce to /login if it disagrees.
+  // There is no login form on this page — the website's own /login page (you-and-me-site) is
+  // the single place anyone, customer or admin, signs in via Supabase Auth. This script just
+  // re-checks the session + profiles.role on load and bounces anyone who isn't an admin — the
+  // real enforcement is the RLS policies every AdminAPI call above runs through, not this check.
   function showApp(user) {
     document.getElementById('checkingSession').hidden = true;
     document.getElementById('adminApp').hidden = false;
@@ -71,18 +378,18 @@
   }
 
   function initAuth() {
-    apiGet('/auth/session').then(function (data) {
+    AdminAPI.auth.session().then(function (data) {
       if (data.authenticated && data.user.role === 'admin') {
         showApp(data.user);
         Router.start();
         startNotifications();
       } else {
-        window.location.href = '/login';
+        window.location.href = BASE_PATH + '/login';
       }
-    }).catch(function () { window.location.href = '/login'; });
+    }).catch(function () { window.location.href = BASE_PATH + '/login'; });
 
     document.getElementById('logoutBtn').addEventListener('click', function () {
-      apiPost('/auth/logout', {}).then(function () { window.location.href = '/login'; });
+      AdminAPI.auth.logout().then(function () { window.location.href = BASE_PATH + '/login'; });
     });
   }
 
@@ -96,11 +403,11 @@
   // Real URLs (/admin/dashboard, /admin/products/12, …) via the History API — not hash
   // fragments. Internal navigation (sidebar links + every dynamically-generated "View"/"Edit"
   // link the renderers below produce) is intercepted so it feels like an SPA, but every one of
-  // those URLs also works as a real, bookmarkable, refresh-safe address, and a full page load
-  // of any of them re-runs the same server-side admin check in server.js.
+  // those URLs also works as a real, bookmarkable, refresh-safe address.
   var Router = (function () {
     function segments() {
-      var path = window.location.pathname.replace(/^\/admin\/?/, '');
+      var prefix = BASE_PATH + '/admin';
+      var path = window.location.pathname.slice(window.location.pathname.indexOf(prefix) === 0 ? prefix.length : 0).replace(/^\/?/, '');
       return path.split('/').filter(Boolean);
     }
     function currentRoute() { return segments()[0] || 'dashboard'; }
@@ -122,7 +429,7 @@
 
     function initLinkInterception() {
       document.addEventListener('click', function (event) {
-        var link = event.target.closest('a[href^="/admin"]');
+        var link = event.target.closest('a[href^="' + BASE_PATH + '/admin"]');
         if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         navigate(link.getAttribute('href'));
@@ -167,7 +474,9 @@
   /* ---------- 4. Dashboard ---------- */
   ROUTE_RENDERERS.dashboard = function () {
     content().innerHTML = '<p class="empty-state">Loading dashboard…</p>';
-    apiGet('/admin/dashboard').then(function (d) {
+    Promise.all([AdminAPI.dashboard(), AdminAPI.customers.list()]).then(function (results) {
+      var d = results[0];
+      d.customers.total = results[1].length;
       content().innerHTML =
         '<div class="stat-grid">' +
           statCard('Total Orders', d.orders.total, 'pink') +
@@ -179,8 +488,7 @@
           statCard('Cancelled', d.orders.cancelled, 'red') +
         '</div>' +
         '<div class="stat-grid">' +
-          // Revenue only counts orders actually marked Paid — never just placed. See
-          // routes/adminDashboard.js for the exact query this comes from.
+          // Revenue only counts orders actually marked Paid — never just placed.
           statCard('Revenue (Paid)', fmtPrice(d.revenue.paid), 'sage') +
           statCard('Pending Payment', fmtPrice(d.revenue.pending), 'amber') +
           statCard('Customers', d.customers.total, 'blue') +
@@ -219,7 +527,7 @@
           '<td><span class="badge badge-' + o.paymentStatus + '">' + statusLabel(o.paymentStatus) + '</span></td>' +
           '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td>' +
           '<td>' + fmtDate(o.createdAt) + '</td>' +
-          '<td><a href="/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
+          '<td><a href="' + BASE_PATH + '/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
         '</tr>';
       }).join('') + '</tbody></table></div>';
   }
@@ -235,7 +543,7 @@
 
   function renderProductList() {
     content().innerHTML = '<p class="empty-state">Loading products…</p>';
-    apiGet('/admin/products').then(function (products) {
+    AdminAPI.products.list().then(function (products) {
       var filtered = productListState.q
         ? products.filter(function (p) { return (p.name + ' ' + p.sku).toLowerCase().indexOf(productListState.q.toLowerCase()) !== -1; })
         : products;
@@ -243,7 +551,7 @@
       content().innerHTML =
         '<div class="section-heading-row">' +
           '<div class="search-box"><input type="text" id="productSearch" placeholder="Search by name or SKU…" value="' + esc(productListState.q) + '"></div>' +
-          '<a href="/admin/products/new" class="btn-primary">+ Add Product</a>' +
+          '<a href="' + BASE_PATH + '/admin/products/new" class="btn-primary">+ Add Product</a>' +
         '</div>' +
         '<div class="table-wrap"><table class="data-table"><thead><tr>' +
           '<th>Image</th><th>Name</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Featured</th><th>New</th><th></th>' +
@@ -260,7 +568,7 @@
             '<td>' + (p.featured ? '✔️' : '—') + '</td>' +
             '<td>' + (p.newArrival ? '✔️' : '—') + '</td>' +
             '<td style="white-space:nowrap;">' +
-              '<a href="/admin/products/' + p.id + '" class="btn-ghost btn-sm">Edit</a> ' +
+              '<a href="' + BASE_PATH + '/admin/products/' + p.id + '" class="btn-ghost btn-sm">Edit</a> ' +
               '<button class="btn-ghost btn-sm" data-dup="' + p.id + '">Duplicate</button> ' +
               '<button class="btn-ghost btn-sm" data-toggle-status="' + p.id + '" data-current="' + p.status + '">' + (p.status === 'active' ? 'Disable' : 'Activate') + '</button> ' +
               '<button class="btn-danger btn-sm" data-delete="' + p.id + '">Delete</button>' +
@@ -274,18 +582,18 @@
         productListState.q = e.target.value; renderProductList();
       });
       content().querySelectorAll('[data-dup]').forEach(function (btn) {
-        btn.addEventListener('click', function () { apiPost('/admin/products/' + btn.dataset.dup + '/duplicate', {}).then(renderProductList); });
+        btn.addEventListener('click', function () { AdminAPI.products.duplicate(btn.dataset.dup).then(renderProductList); });
       });
       content().querySelectorAll('[data-toggle-status]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           var next = btn.dataset.current === 'active' ? 'draft' : 'active';
-          apiPatch('/admin/products/' + btn.dataset.toggleStatus + '/status', { status: next }).then(renderProductList);
+          AdminAPI.products.setStatus(btn.dataset.toggleStatus, next).then(renderProductList);
         });
       });
       content().querySelectorAll('[data-delete]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           if (!window.confirm('Delete this product? If it appears in past orders it will be set to Draft instead.')) return;
-          apiDelete('/admin/products/' + btn.dataset.delete).then(renderProductList);
+          AdminAPI.products.remove(btn.dataset.delete).then(renderProductList);
         });
       });
     });
@@ -293,14 +601,14 @@
 
   function renderProductForm(id) {
     var isNew = !id;
-    var load = isNew ? Promise.resolve({ id: null, sku: '', name: '', description: '', fabric: '', category: 'kids', subcategory: '', ageGroup: '', price: '', oldPrice: '', images: [], sizes: [], colors: [], variants: [], featured: false, newArrival: false, status: 'active' }) : apiGet('/admin/products/' + id);
+    var load = isNew ? Promise.resolve({ id: null, sku: '', name: '', description: '', fabric: '', category: 'kids', subcategory: '', ageGroup: '', price: '', oldPrice: '', images: [], sizes: [], colors: [], variants: [], featured: false, newArrival: false, status: 'active' }) : AdminAPI.products.get(id);
 
     load.then(function (p) {
       var state = { images: p.images.slice(), sizes: p.sizes.slice(), colors: p.colors.slice(), variants: p.variants || [] };
 
       content().innerHTML =
         '<div class="section-heading-row"><h3 style="font-size:1.05rem;">' + (isNew ? 'Add Product' : 'Edit Product') + '</h3>' +
-          '<a href="/admin/products" class="btn-ghost btn-sm">← Back to Products</a></div>' +
+          '<a href="' + BASE_PATH + '/admin/products" class="btn-ghost btn-sm">← Back to Products</a></div>' +
         '<form id="productForm">' +
           '<div class="panel-card">' +
             '<h3>Images</h3>' +
@@ -374,7 +682,7 @@
               '<button type="button" data-remove-img="' + i + '">Remove</button>' +
             '</div></div>';
         }).join('') +
-          '<label class="image-slot image-slot-add"><span>📷</span><span>Add Image</span><input type="file" accept="image/*" id="imageFileInput" multiple></label>';
+          '<label class="image-slot image-slot-add"><span>📷</span><span id="imageUploadLabel">Add Image</span><input type="file" accept="image/*" id="imageFileInput" multiple></label>';
 
         grid.querySelectorAll('[data-set-main]').forEach(function (btn) {
           btn.addEventListener('click', function () {
@@ -388,15 +696,12 @@
         });
         document.getElementById('imageFileInput').addEventListener('change', function (e) {
           var files = Array.prototype.slice.call(e.target.files || []);
+          var label = document.getElementById('imageUploadLabel');
+          if (label && files.length) label.textContent = 'Uploading…';
           files.forEach(function (file) {
-            var formData = new FormData();
-            formData.append('image', file);
-            fetch('/api/admin/upload', { method: 'POST', credentials: 'include', body: formData })
-              .then(function (r) { return r.json(); })
-              .then(function (data) {
-                if (data.url) { state.images.push(data.url); renderImageGrid(); }
-                else window.alert(data.error || 'Upload failed');
-              });
+            AdminAPI.media.upload(file)
+              .then(function (data) { state.images.push(data.url); renderImageGrid(); })
+              .catch(function (err) { window.alert(err.message || 'Upload failed'); if (label) label.textContent = 'Add Image'; });
           });
         });
       }
@@ -450,7 +755,7 @@
         wrap.querySelectorAll('[data-save-variant]').forEach(function (btn) {
           btn.addEventListener('click', function () {
             var input = wrap.querySelector('.variant-stock-input[data-variant-id="' + btn.dataset.saveVariant + '"]');
-            apiPatch('/admin/products/' + p.id + '/variant-stock', { variantId: Number(btn.dataset.saveVariant), stock: Number(input.value) })
+            AdminAPI.products.setVariantStock(p.id, Number(btn.dataset.saveVariant), Number(input.value))
               .then(function () { btn.textContent = 'Saved ✓'; window.setTimeout(function () { btn.textContent = 'Update'; }, 1200); });
           });
         });
@@ -477,8 +782,8 @@
         };
         var errorEl = document.getElementById('productFormError');
         errorEl.textContent = '';
-        var req = isNew ? apiPost('/admin/products', payload) : apiPut('/admin/products/' + p.id, payload);
-        req.then(function (saved) { Router.navigate('/admin/products/' + saved.id); })
+        var req = isNew ? AdminAPI.products.create(payload) : AdminAPI.products.update(p.id, payload);
+        req.then(function (saved) { Router.navigate(BASE_PATH + '/admin/products/' + saved.id); })
           .catch(function (err) { errorEl.textContent = err.message; });
       });
     });
@@ -496,11 +801,7 @@
 
   function renderOrderList() {
     content().innerHTML = '<p class="empty-state">Loading orders…</p>';
-    var qs = [];
-    if (orderListState.status !== 'all') qs.push('status=' + encodeURIComponent(orderListState.status));
-    if (orderListState.q) qs.push('q=' + encodeURIComponent(orderListState.q));
-
-    apiGet('/admin/orders' + (qs.length ? '?' + qs.join('&') : '')).then(function (orders) {
+    AdminAPI.orders.list({ status: orderListState.status, q: orderListState.q }).then(function (orders) {
       content().innerHTML =
         '<div class="filter-bar">' +
           ['all'].concat(ORDER_STATUSES).map(function (s) {
@@ -521,7 +822,7 @@
             '<td>' + fmtPrice(o.total) + '</td>' +
             '<td><span class="badge badge-' + o.paymentStatus + '">' + statusLabel(o.paymentStatus) + '</span></td>' +
             '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td>' +
-            '<td><a href="/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
+            '<td><a href="' + BASE_PATH + '/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td>' +
           '</tr>';
         }).join('')) + '</tbody></table></div>' +
         (orders.length === 0
@@ -543,12 +844,12 @@
 
   function renderOrderDetail(id) {
     content().innerHTML = '<p class="empty-state">Loading order…</p>';
-    apiGet('/admin/orders/' + id).then(function (o) {
-      apiGet('/admin/shipments/' + o.id).catch(function () { return null; }).then(function (shipment) {
+    AdminAPI.orders.get(id).then(function (o) {
+      AdminAPI.shipments.get(o.id).catch(function () { return null; }).then(function (shipment) {
         o.shipment = shipment || o.shipment;
         content().innerHTML =
           '<div class="section-heading-row"><h3 style="font-size:1.1rem;">Order ' + esc(o.orderNumber) + '</h3>' +
-            '<a href="/admin/orders" class="btn-ghost btn-sm">← Back to Orders</a></div>' +
+            '<a href="' + BASE_PATH + '/admin/orders" class="btn-ghost btn-sm">← Back to Orders</a></div>' +
           '<div class="order-detail-grid">' +
             '<div>' +
               '<div class="panel-card"><h3>Customer</h3>' +
@@ -596,13 +897,13 @@
           '</div>';
 
         document.getElementById('savePaymentBtn').addEventListener('click', function () {
-          apiPatch('/admin/orders/' + o.id + '/payment', {
+          AdminAPI.orders.setPayment(o.id, {
             paymentStatus: document.getElementById('paymentStatusSelect').value,
             paymentNotes: document.getElementById('paymentRefInput').value.trim() || null
           }).then(function () { renderOrderDetail(o.id); });
         });
         document.getElementById('saveStatusBtn').addEventListener('click', function () {
-          apiPatch('/admin/orders/' + o.id + '/status', { status: document.getElementById('orderStatusSelect').value })
+          AdminAPI.orders.setStatus(o.id, document.getElementById('orderStatusSelect').value)
             .then(function () { renderOrderDetail(o.id); });
         });
         bindShippingForm(o);
@@ -636,7 +937,7 @@
   function bindShippingForm(o) {
     var saveBtn = document.getElementById('shipSaveBtn');
     if (saveBtn) saveBtn.addEventListener('click', function () {
-      apiPost('/admin/shipments/' + o.id, {
+      AdminAPI.shipments.save(o.id, {
         courier: document.getElementById('shipCourier').value.trim(),
         awb: document.getElementById('shipAwb').value.trim(),
         trackingUrl: document.getElementById('shipUrl').value.trim(),
@@ -666,22 +967,22 @@
   ROUTE_RENDERERS.customers = function (param) {
     if (param) return renderCustomerDetail(param);
     content().innerHTML = '<p class="empty-state">Loading customers…</p>';
-    apiGet('/admin/customers').then(function (customers) {
+    AdminAPI.customers.list().then(function (customers) {
       content().innerHTML = '<div class="table-wrap"><table class="data-table"><thead><tr>' +
         '<th>Name</th><th>Phone</th><th>Email</th><th>Orders</th><th>Total Value</th><th>Last Order</th><th></th></tr></thead><tbody>' +
         (customers.length === 0 ? '' : customers.map(function (c) {
           return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.phone) + '</td><td>' + esc(c.email || '—') + '</td>' +
             '<td>' + c.orderCount + '</td><td>' + fmtPrice(c.totalValue) + '</td><td>' + fmtDate(c.lastOrderAt) + '</td>' +
-            '<td><a href="/admin/customers/' + encodeURIComponent(c.phone) + '" class="btn-ghost btn-sm">View</a></td></tr>';
+            '<td><a href="' + BASE_PATH + '/admin/customers/' + encodeURIComponent(c.phone) + '" class="btn-ghost btn-sm">View</a></td></tr>';
         }).join('')) + '</tbody></table></div>' +
         (customers.length === 0 ? '<p class="empty-state">No customers yet — they appear here after the first order.</p>' : '');
     });
   };
 
   function renderCustomerDetail(phone) {
-    apiGet('/admin/customers/' + phone).then(function (c) {
+    AdminAPI.customers.get(phone).then(function (c) {
       content().innerHTML =
-        '<div class="section-heading-row"><h3 style="font-size:1.05rem;">' + esc(c.name) + '</h3><a href="/admin/customers" class="btn-ghost btn-sm">← Back</a></div>' +
+        '<div class="section-heading-row"><h3 style="font-size:1.05rem;">' + esc(c.name) + '</h3><a href="' + BASE_PATH + '/admin/customers" class="btn-ghost btn-sm">← Back</a></div>' +
         '<div class="panel-card"><h3>Details</h3><p>Phone: ' + esc(c.phone) + '<br>Email: ' + esc(c.email || '—') + '<br>Orders: ' + c.orderCount + ' &middot; Total Spent: ' + fmtPrice(c.totalValue) + '</p></div>' +
         '<div class="panel-card"><h3>Addresses</h3>' + c.addresses.map(function (a) {
           return '<p>' + esc(a.house) + ', ' + esc(a.street) + (a.landmark ? ' (near ' + esc(a.landmark) + ')' : '') + '<br>' + esc(a.city) + ', ' + esc(a.state) + ' — ' + esc(a.pincode) + '</p>';
@@ -689,7 +990,7 @@
         '<div class="panel-card"><h3>Previous Orders</h3><div class="table-wrap"><table class="data-table"><thead><tr><th>Order</th><th>Date</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>' +
           c.orders.map(function (o) {
             return '<tr><td>' + esc(o.orderNumber) + '</td><td>' + fmtDate(o.createdAt) + '</td><td>' + fmtPrice(o.total) + '</td>' +
-              '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td><td><a href="/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td></tr>';
+              '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td><td><a href="' + BASE_PATH + '/admin/orders/' + o.id + '" class="btn-ghost btn-sm">View</a></td></tr>';
           }).join('') + '</tbody></table></div></div>';
     });
   }
@@ -697,7 +998,7 @@
   /* ---------- 8. Inventory ---------- */
   ROUTE_RENDERERS.inventory = function () {
     content().innerHTML = '<p class="empty-state">Loading inventory…</p>';
-    apiGet('/admin/products').then(function (products) {
+    AdminAPI.products.list().then(function (products) {
       var rows = [];
       products.forEach(function (p) {
         (p.variants || []).forEach(function (v) {
@@ -719,12 +1020,12 @@
           rows.map(function (r) {
             return '<tr><td>' + esc(r.productName) + '</td><td>' + esc(r.sku) + '</td><td>' + esc(r.size) + '</td><td>' + esc(r.color) + '</td>' +
               '<td><input type="number" min="0" class="inv-stock-input" data-pid="' + r.productId + '" data-vid="' + r.variantId + '" value="' + r.stock + '" style="width:70px;padding:4px 6px;"></td>' +
-              '<td><a href="/admin/products/' + r.productId + '" class="btn-ghost btn-sm">Edit Product</a></td></tr>';
+              '<td><a href="' + BASE_PATH + '/admin/products/' + r.productId + '" class="btn-ghost btn-sm">Edit Product</a></td></tr>';
           }).join('') + '</tbody></table></div></div>';
 
       content().querySelectorAll('.inv-stock-input').forEach(function (input) {
         input.addEventListener('change', function () {
-          apiPatch('/admin/products/' + input.dataset.pid + '/variant-stock', { variantId: Number(input.dataset.vid), stock: Number(input.value) });
+          AdminAPI.products.setVariantStock(input.dataset.pid, Number(input.dataset.vid), Number(input.value));
         });
       });
     });
@@ -733,7 +1034,7 @@
   /* ---------- 9. Shipping (overview across orders) ---------- */
   ROUTE_RENDERERS.shipping = function () {
     content().innerHTML = '<p class="empty-state">Loading…</p>';
-    apiGet('/admin/orders?status=all').then(function (orders) {
+    AdminAPI.orders.list({ status: 'all' }).then(function (orders) {
       var relevant = orders.filter(function (o) { return ['packing', 'ready_to_ship', 'shipped', 'out_for_delivery', 'delivered'].indexOf(o.orderStatus) !== -1; });
       content().innerHTML = '<div class="panel-card"><h3>Orders Ready for / In Shipping</h3>' +
         (relevant.length === 0 ? '<p class="empty-state">No orders in packing or shipping stages yet.</p>' :
@@ -741,7 +1042,7 @@
           relevant.map(function (o) {
             return '<tr><td>' + esc(o.orderNumber) + '</td><td>' + esc(o.customerName) + '</td>' +
               '<td><span class="badge badge-' + o.orderStatus + '">' + statusLabel(o.orderStatus) + '</span></td>' +
-              '<td><a href="/admin/orders/' + o.id + '" class="btn-ghost btn-sm">Manage Shipment</a></td></tr>';
+              '<td><a href="' + BASE_PATH + '/admin/orders/' + o.id + '" class="btn-ghost btn-sm">Manage Shipment</a></td></tr>';
           }).join('') + '</tbody></table></div>') +
         '</div>' +
         '<div class="panel-card"><h3>Courier Integrations</h3><p style="font-size:0.85rem;color:var(--text-soft);">Manual shipping is active today. Amazon Shipping, Ekart and DTDC can be connected here later — each order\'s shipment record already has a <code>carrier_code</code> field ready for that, so this won\'t require rebuilding Orders.</p></div>';
@@ -751,7 +1052,7 @@
   /* ---------- 10. Categories ---------- */
   ROUTE_RENDERERS.categories = function () {
     content().innerHTML = '<p class="empty-state">Loading…</p>';
-    apiGet('/admin/products').then(function (products) {
+    AdminAPI.products.list().then(function (products) {
       var counts = {};
       products.forEach(function (p) {
         var key = p.category + (p.subcategory ? ' / ' + p.subcategory : '');
@@ -769,7 +1070,7 @@
   /* ---------- 11. Media Library ---------- */
   ROUTE_RENDERERS.media = function () {
     content().innerHTML = '<p class="empty-state">Loading media…</p>';
-    apiGet('/admin/media').then(function (media) {
+    AdminAPI.media.list().then(function (media) {
       content().innerHTML =
         '<div class="panel-card">' +
           '<h3>Upload New Image</h3>' +
@@ -789,17 +1090,16 @@
 
       document.getElementById('mediaUploadInput').addEventListener('change', function (e) {
         var files = Array.prototype.slice.call(e.target.files || []);
-        Promise.all(files.map(function (file) {
-          var fd = new FormData(); fd.append('image', file);
-          return fetch('/api/admin/upload', { method: 'POST', credentials: 'include', body: fd }).then(function (r) { return r.json(); });
-        })).then(function () { ROUTE_RENDERERS.media(); });
+        Promise.all(files.map(function (file) { return AdminAPI.media.upload(file); }))
+          .then(function () { ROUTE_RENDERERS.media(); })
+          .catch(function (err) { window.alert(err.message || 'Upload failed'); });
       });
       content().querySelectorAll('[data-copy-url]').forEach(function (btn) {
         btn.addEventListener('click', function () { navigator.clipboard.writeText(btn.dataset.copyUrl); btn.textContent = 'Copied ✓'; window.setTimeout(function () { btn.textContent = 'Copy URL'; }, 1200); });
       });
       content().querySelectorAll('[data-delete-media]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          apiDelete('/admin/media/' + btn.dataset.deleteMedia).then(function () { ROUTE_RENDERERS.media(); }).catch(function (err) { window.alert(err.message); });
+          AdminAPI.media.remove(btn.dataset.deleteMedia).then(function () { ROUTE_RENDERERS.media(); }).catch(function (err) { window.alert(err.message); });
         });
       });
     });
@@ -809,7 +1109,7 @@
   ROUTE_RENDERERS.settings = function () {
     content().innerHTML =
       '<div class="panel-card"><h3>Account</h3><p style="font-size:0.85rem;">Logged in as <strong>' + esc(document.getElementById('topbarUsername').textContent) + '</strong>.</p></div>' +
-      '<div class="panel-card"><h3>Store Info</h3><p style="font-size:0.85rem;color:var(--text-soft);">WhatsApp number, delivery threshold and shipping cost are configured in the server\'s <code>CONFIG</code> (customer site) and route defaults — a dedicated settings form can be added here once you tell me which of these you want editable from the UI.</p></div>';
+      '<div class="panel-card"><h3>Store Info</h3><p style="font-size:0.85rem;color:var(--text-soft);">WhatsApp number, delivery threshold and shipping cost are configured in the customer site\'s <code>CONFIG</code> and in <code>create_order()</code> in the Supabase migration — a dedicated settings form can be added here once you tell me which of these you want editable from the UI.</p></div>';
   };
 
   /* ---------- 14. New-order notifications (polling) ---------- */
@@ -829,7 +1129,7 @@
     }
 
     function poll() {
-      apiGet('/admin/dashboard').then(function (d) {
+      AdminAPI.dashboard().then(function (d) {
         var newest = d.recentOrders[0];
         if (newest && newest.id > lastSeen()) {
           if (lastSeen() > 0) { // don't notify for orders that already existed before this session started polling
@@ -845,7 +1145,7 @@
       }).catch(function () { /* ignore transient poll errors */ });
     }
 
-    document.getElementById('notifBell').addEventListener('click', function () { document.getElementById('notifDot').hidden = true; Router.navigate('/admin/orders'); });
+    document.getElementById('notifBell').addEventListener('click', function () { document.getElementById('notifDot').hidden = true; Router.navigate(BASE_PATH + '/admin/orders'); });
 
     poll();
     window.setInterval(poll, 15000);

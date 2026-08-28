@@ -3,11 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>
+  // GitHub Pages 404.html SPA fallback (see /404.html): a hard load/refresh of a client-side
+  // route like /login or /account 404s on Pages, gets bounced here, and stashes the real path.
+  // Restore it via history.replaceState BEFORE script.js reads window.location.pathname below.
+  (function () {
+    try {
+      var saved = sessionStorage.getItem('ym_redirect_path');
+      if (saved) { sessionStorage.removeItem('ym_redirect_path'); window.history.replaceState(null, '', saved); }
+    } catch (e) { /* sessionStorage unavailable (private mode etc.) — worst case, home page loads */ }
+  })();
+</script>
 <title>You &amp; Me | Family. Kids. Couples. Matching in Style.</title>
 <meta name="description" content="You & Me — thoughtful matching outfits for kids, families and couples.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -522,6 +534,8 @@
 <!-- Toast notification (e.g. "Added to cart") -->
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="supabase-client.js"></script>
 <script src="script.js"></script>
 </body>
 </html>
