@@ -276,7 +276,7 @@
     var scrim = getScrim();
     if (scrim) scrim.addEventListener('click', closeTopPanel);
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeTopPanel(); });
-    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose'].forEach(function (id) {
+    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose'].forEach(function (id) {
       var btn = document.getElementById(id);
       if (btn) btn.addEventListener('click', closeTopPanel);
     });
@@ -1333,16 +1333,20 @@
         );
       }).join('');
 
+      // Branded trigger — opens #addressPickerSheet (a bottom sheet on mobile, centered modal on
+      // desktop; same .panel infra as every other overlay on this site). Never a native <select>.
+      var selectedAddressIdx = savedAddresses.length ? 0 : -1;
       var savedAddressPicker = savedAddresses.length === 0 ? '' :
-        '<div class="form-field"><label for="coSavedAddress">Use a saved address</label>' +
-          '<select id="coSavedAddress"><option value="">+ Add New Address</option>' +
-          savedAddresses.map(function (a, i) {
-            return '<option value="' + i + '">' + escapeHtml(a.name) + ' — ' + escapeHtml(a.line1) + ', ' + escapeHtml(a.city) + (a.is_default ? ' (Default)' : '') + '</option>';
-          }).join('') + '</select></div>';
+        '<div class="form-field"><label>Saved address</label>' +
+          '<button type="button" class="address-picker-trigger" id="coAddressPickerBtn">' +
+            '<span id="coAddressPickerBtnText">Choose a saved address</span>' +
+            '<svg viewBox="0 0 24 24" width="18" height="18"><polyline points="9 6 15 12 9 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+          '</button>' +
+        '</div>';
 
       b.innerHTML =
         '<form id="checkoutForm" novalidate>' +
-          '<div class="checkout-section"><h3>Customer Information</h3>' +
+          '<div class="checkout-section"><h3>Personal Information</h3>' +
             field('coFullName', 'Full Name', 'text', true) + field('coMobile', 'Mobile Number', 'tel', true) + field('coEmail', 'Email (optional)', 'email', false) +
           '</div>' +
           '<div class="checkout-section"><h3>Shipping Address</h3>' +
@@ -1393,13 +1397,57 @@
         document.getElementById('coFullName').value = user.name || '';
         document.getElementById('coEmail').value = user.email || '';
       }
-      var savedSelect = document.getElementById('coSavedAddress');
-      if (savedSelect) {
-        savedSelect.addEventListener('change', function () {
-          if (savedSelect.value === '') return;
-          applyAddress(savedAddresses[Number(savedSelect.value)]);
+      var pickerBtn = document.getElementById('coAddressPickerBtn');
+      if (pickerBtn) {
+        pickerBtn.addEventListener('click', openAddressPicker);
+        if (selectedAddressIdx >= 0) { applyAddress(savedAddresses[selectedAddressIdx]); updatePickerTriggerLabel(); }
+      }
+
+      function updatePickerTriggerLabel() {
+        var el = document.getElementById('coAddressPickerBtnText');
+        if (!el) return;
+        el.textContent = selectedAddressIdx >= 0 ? (savedAddresses[selectedAddressIdx].label || 'Home') + ' — ' + savedAddresses[selectedAddressIdx].city : 'Add a new address';
+      }
+
+      function addressLineHtml(a) {
+        return escapeHtml(a.line1) + (a.line2 ? ', ' + escapeHtml(a.line2) : '') + (a.landmark ? ' (near ' + escapeHtml(a.landmark) + ')' : '') +
+          '<br>' + escapeHtml(a.city) + (a.district ? ', ' + escapeHtml(a.district) : '') + ', ' + escapeHtml(a.state) + ' — ' + escapeHtml(a.pincode);
+      }
+
+      function openAddressPicker() {
+        var body = document.getElementById('addressPickerBody');
+        body.innerHTML =
+          '<label class="address-picker-option">' +
+            '<input type="radio" name="addrPick" value="new"' + (selectedAddressIdx === -1 ? ' checked' : '') + '>' +
+            '<span class="address-picker-option-body"><strong>+ Add New Address</strong></span>' +
+          '</label>' +
+          savedAddresses.map(function (a, i) {
+            return '<label class="address-picker-option">' +
+              '<input type="radio" name="addrPick" value="' + i + '"' + (i === selectedAddressIdx ? ' checked' : '') + '>' +
+              '<span class="address-picker-option-body">' +
+                '<span class="address-picker-option-head"><strong>' + escapeHtml(a.label || 'Home') + '</strong>' + (a.is_default ? '<span class="badge badge-active">Default</span>' : '') + '</span>' +
+                '<span class="address-picker-option-lines">' + addressLineHtml(a) + '</span>' +
+              '</span>' +
+            '</label>';
+          }).join('');
+        body.querySelectorAll('input[name="addrPick"]').forEach(function (radio) {
+          radio.addEventListener('change', function () {
+            selectedAddressIdx = radio.value === 'new' ? -1 : Number(radio.value);
+            if (selectedAddressIdx >= 0) applyAddress(savedAddresses[selectedAddressIdx]);
+            else clearAddressFields();
+            updatePickerTriggerLabel();
+            closePanel(document.getElementById('addressPickerSheet'));
+          });
         });
-        if (savedAddresses.length > 0) { savedSelect.value = '0'; applyAddress(savedAddresses[0]); }
+        openPanel(document.getElementById('addressPickerSheet'));
+        var firstRadio = body.querySelector('input[name="addrPick"]:checked') || body.querySelector('input[name="addrPick"]');
+        if (firstRadio) firstRadio.focus();
+      }
+
+      function clearAddressFields() {
+        ['coHouse', 'coStreet', 'coLandmark', 'coCity', 'coDistrict', 'coState', 'coPin'].forEach(function (id) {
+          var el = document.getElementById(id); if (el) el.value = '';
+        });
       }
 
       var form = document.getElementById('checkoutForm');
@@ -2102,10 +2150,10 @@
 
     function addressCardHtml(a) {
       return '<div class="address-card">' +
-        '<div class="address-card-head"><strong>' + escapeHtml(a.name) + '</strong>' + (a.is_default ? '<span class="badge badge-active">Default</span>' : '') + '</div>' +
+        '<div class="address-card-head"><strong>' + escapeHtml(a.label || 'Home') + '</strong>' + (a.is_default ? '<span class="badge badge-active">Default</span>' : '') + '</div>' +
         '<p>' + escapeHtml(a.line1) + (a.line2 ? ', ' + escapeHtml(a.line2) : '') + (a.landmark ? ' (near ' + escapeHtml(a.landmark) + ')' : '') +
-        '<br>' + escapeHtml(a.city) + (a.district ? ', ' + escapeHtml(a.district) : '') + ', ' + escapeHtml(a.state) + ' — ' + escapeHtml(a.pincode) +
-        '<br>Phone: ' + escapeHtml(a.phone) + '</p>' +
+        '<br>' + escapeHtml(a.city) + (a.district ? ', ' + escapeHtml(a.district) : '') + ', ' + escapeHtml(a.state) + ' — ' + escapeHtml(a.pincode) + '</p>' +
+        '<p class="address-card-contact">' + escapeHtml(a.name) + ' &middot; ' + escapeHtml(a.phone) + '</p>' +
         '<div class="address-card-actions">' +
           (a.is_default ? '' : '<button type="button" class="btn btn-sm btn-outline" data-default-address="' + a.id + '">Set Default</button>') +
           '<button type="button" class="btn btn-sm btn-outline" data-edit-address="' + a.id + '">Edit</button>' +
@@ -2121,17 +2169,28 @@
       document.getElementById('addressFormTitle').textContent = address ? 'Edit Address' : 'Add Address';
       body.innerHTML =
         '<form id="addressForm">' +
-          field('addrName', 'Full Name', 'text') + field('addrPhone', 'Phone', 'tel') +
-          field('addrLine1', 'Address Line 1', 'text') + field('addrLine2', 'Address Line 2 (optional)', 'text') +
+          '<div class="form-field"><label for="addrLabel">Address Label</label><select id="addrLabel">' +
+            ['Home', 'Work', 'Other'].map(function (l) { return '<option value="' + l + '">' + l + '</option>'; }).join('') +
+          '</select></div>' +
+          field('addrLine1', 'House / Building', 'text') + field('addrLine2', 'Street / Area (optional)', 'text') +
           field('addrLandmark', 'Landmark (optional)', 'text') +
           '<div class="form-row">' + field('addrCity', 'City', 'text') + field('addrDistrict', 'District (optional)', 'text') + '</div>' +
           '<div class="form-row">' + field('addrState', 'State', 'text') + field('addrPincode', 'PIN Code', 'text') + '</div>' +
+          '<p class="account-payment-note" style="margin:14px 0 4px;">Recipient (only needed if different from your account)</p>' +
+          field('addrName', 'Full Name', 'text') + field('addrPhone', 'Phone', 'tel') +
           '<div class="toggle-row" style="display:flex;align-items:center;gap:8px;margin:10px 0;"><input type="checkbox" id="addrDefault"><label for="addrDefault">Set as default address</label></div>' +
           '<p class="account-submit-feedback" id="addressFormFeedback"></p>' +
           '<button type="submit" class="btn btn-primary btn-block">' + (address ? 'Save Changes' : 'Add Address') + '</button>' +
         '</form>';
 
       function field(id, label, type) { return '<div class="form-field"><label for="' + id + '">' + label + '</label><input type="' + type + '" id="' + id + '"></div>'; }
+
+      // Recipient defaults to the account holder's own name/phone unless editing an address that
+      // already has its own — never forced, just a sane starting point (spec #9/#10).
+      var user = SessionService.getUser();
+      document.getElementById('addrName').value = (address && address.name) || (user && user.name) || '';
+      document.getElementById('addrPhone').value = (address && address.phone) || (user && user.phone) || '';
+      document.getElementById('addrLabel').value = (address && address.label) || 'Home';
 
       if (address) {
         document.getElementById('addrName').value = address.name || '';
@@ -2150,6 +2209,7 @@
         e.preventDefault();
         var payload = {
           user_id: SessionService.getUser().id,
+          label: document.getElementById('addrLabel').value,
           name: document.getElementById('addrName').value.trim(),
           phone: document.getElementById('addrPhone').value.trim(),
           line1: document.getElementById('addrLine1').value.trim(),

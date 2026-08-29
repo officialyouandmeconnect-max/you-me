@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260829">
+<link rel="stylesheet" href="style.css?v=20260829c">
 </head>
 <body>
 
@@ -530,6 +530,15 @@
   <div class="checkout-modal-body" id="checkoutModalBody"><!-- injected --></div>
 </div>
 
+<!-- Address Picker: branded bottom sheet (mobile) / centered modal (desktop) — never a native select -->
+<div class="panel address-picker-sheet" id="addressPickerSheet" role="dialog" aria-modal="true" aria-labelledby="addressPickerTitle" hidden>
+  <div class="address-picker-header">
+    <h2 id="addressPickerTitle">Choose delivery address</h2>
+    <button class="panel-close" id="addressPickerClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="address-picker-body" id="addressPickerBody" role="radiogroup" aria-labelledby="addressPickerTitle"><!-- injected --></div>
+</div>
+
 <!-- Order Success Modal -->
 <div class="panel success-modal" id="successModal" role="dialog" aria-modal="true" aria-labelledby="successTitle" hidden>
   <button class="panel-close" id="successModalClose" aria-label="Close">&times;</button>
@@ -591,6 +600,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="supabase-client.js?v=20260829"></script>
-<script src="script.js?v=20260829b"></script>
+<script src="script.js?v=20260829c"></script>
 </body>
 </html>
