@@ -2464,6 +2464,211 @@
     if (navLogo && footerLogo) footerLogo.src = navLogo.src;
   }
 
+  /* ---------- 20.5 Seasonal Campaign & Offer ---------- */
+  // The ONLY place this site reads campaign data — no second, hardcoded campaign anywhere else.
+  // public.live_campaign (a plain view, still governed by RLS — see
+  // supabase/migrations/0007_campaigns.sql) already resolves "which campaign, if any, is
+  // currently live" server-side: enabled, not paused, and inside its start/end window, computed
+  // fresh on every request. If Admin turns a campaign off, pauses it, or its schedule lapses,
+  // the very next load of this site simply gets nothing back — no cache to bust, no separate
+  // "is it still live" check needed here.
+  var CampaignService = (function () {
+    function load() {
+      return supabaseClient.from('live_campaign').select('*').maybeSingle()
+        .then(function (res) { return res.data || null; })
+        .then(function (campaign) {
+          if (!campaign) return null;
+          return Promise.all([
+            supabaseClient.from('campaign_content').select('*').eq('campaign_id', campaign.id).maybeSingle().then(function (r) { return r.data || {}; }),
+            supabaseClient.from('campaign_media').select('*').eq('campaign_id', campaign.id).maybeSingle().then(function (r) { return r.data || {}; }),
+            supabaseClient.from('campaign_products').select('*').eq('campaign_id', campaign.id).order('sort_order').then(function (r) { return r.data || []; })
+          ]).then(function (parts) {
+            return { campaign: campaign, content: parts[0], media: parts[1], products: parts[2] };
+          });
+        })
+        .catch(function () { return null; }); // a campaigns table not yet migrated, or any read hiccup, just means "no campaign" — never breaks the normal homepage.
+    }
+    return { load: load };
+  })();
+
+  var CAMPAIGN_CTA_HREF = {
+    new_arrivals: function () { return '#new-arrivals'; },
+    all_products: function () { return '#all'; },
+    category: function (v) { return '#kids?category=' + encodeURIComponent(v || ''); },
+    collection: function (v) { return '#shop-by-collection'; },
+    product: function (v) { return '#'; }, // opened via JS (ProductModal) below, not a plain href
+    custom: function (v) { return v || '#'; }
+  };
+  function campaignCtaAttrs(targetType, targetValue) {
+    if (targetType === 'product' && targetValue) return 'data-open-product="' + escapeHtml(targetValue) + '"';
+    var hrefFn = CAMPAIGN_CTA_HREF[targetType] || CAMPAIGN_CTA_HREF.custom;
+    return 'href="' + escapeHtml(hrefFn(targetValue)) + '"';
+  }
+
+  function renderAnnouncementBar(content) {
+    var bar = document.querySelector('.announcement-bar');
+    if (!bar) return;
+    if (!content || !content.announcement_enabled || !content.announcement_text) {
+      bar.hidden = false; // restore the real, non-fabricated default bar (Free Shipping) — never left blank.
+      bar.removeAttribute('style');
+      bar.classList.remove('campaign-announcement');
+      var p = bar.querySelector('p');
+      if (p && bar.dataset.campaignOverride) { bar.innerHTML = bar.dataset.originalHtml || bar.innerHTML; delete bar.dataset.campaignOverride; }
+      return;
+    }
+    if (!bar.dataset.campaignOverride) { bar.dataset.originalHtml = bar.innerHTML; bar.dataset.campaignOverride = '1'; }
+    bar.classList.add('campaign-announcement');
+    if (content.announcement_bg_color) bar.style.background = content.announcement_bg_color;
+    if (content.announcement_text_color) bar.style.color = content.announcement_text_color;
+    var animClass = content.announcement_animation === 'scrolling' ? 'announcement-scroll' : content.announcement_animation === 'fade' ? 'announcement-fade' : '';
+    bar.innerHTML = '<p class="' + animClass + '">' + escapeHtml(content.announcement_text) +
+      (content.announcement_cta_text ? ' <a href="' + escapeHtml(content.announcement_link || '#') + '" style="text-decoration:underline;font-weight:700;">' + escapeHtml(content.announcement_cta_text) + '</a>' : '') +
+      '</p>';
+  }
+
+  function bannerInnerHtml(media, content) {
+    var isMobile = window.matchMedia('(max-width: 720px)').matches;
+    // Mobile-specific asset if provided; otherwise the desktop asset responsively — never
+    // distorted, never a separately-cropped desktop-only frame forced onto a phone screen.
+    var url = (isMobile && media.mobile_url) || media.desktop_url;
+    var ctaAttrs = campaignCtaAttrs(media.text_cta_target_type, media.text_cta_target_value);
+
+    if (media.banner_type === 'video' && url) {
+      return '<video class="campaign-banner-media" src="' + escapeHtml(url) + '"' +
+        (media.poster_url ? ' poster="' + escapeHtml(media.poster_url) + '"' : '') +
+        (media.video_autoplay !== false ? ' autoplay' : '') + (media.video_loop !== false ? ' loop' : '') +
+        (media.video_muted !== false ? ' muted' : '') + (media.video_controls ? ' controls' : '') +
+        ' playsinline></video>';
+    }
+    if (url && media.banner_type !== 'animated_text') {
+      // GIFs need no special handling — an <img> plays them natively, no extra library needed.
+      var textOverlay = media.banner_type === 'image_text' && (media.text_headline || media.text_cta_text)
+        ? '<div class="campaign-banner-overlay campaign-banner-align-' + escapeHtml(media.text_align || 'center') + '">' +
+            (media.text_headline ? '<h2>' + escapeHtml(media.text_headline) + '</h2>' : '') +
+            (media.text_subheadline ? '<p>' + escapeHtml(media.text_subheadline) + '</p>' : '') +
+            (media.text_cta_text ? '<a class="btn btn-primary" ' + ctaAttrs + '>' + escapeHtml(media.text_cta_text) + '</a>' : '') +
+          '</div>'
+        : '';
+      return '<img class="campaign-banner-media" src="' + escapeHtml(url) + '" alt="' + escapeHtml(media.text_headline || 'Campaign banner') + '">' + textOverlay;
+    }
+    // Animated text mode — no image/video at all.
+    var animClass = 'campaign-text-anim-' + (media.text_animation || 'fade');
+    return '<div class="campaign-banner-text ' + animClass + ' campaign-banner-align-' + escapeHtml(media.text_align || 'center') + '"' +
+      (media.text_bg_image_url ? ' style="background-image:url(\'' + escapeHtml(media.text_bg_image_url) + '\');"' : '') + '>' +
+      (media.text_headline ? '<h2>' + escapeHtml(media.text_headline) + '</h2>' : '') +
+      (media.text_subheadline ? '<p class="campaign-subheadline">' + escapeHtml(media.text_subheadline) + '</p>' : '') +
+      (media.text_description ? '<p class="campaign-description">' + escapeHtml(media.text_description) + '</p>' : '') +
+      (media.text_cta_text ? '<a class="btn btn-primary" ' + ctaAttrs + '>' + escapeHtml(media.text_cta_text) + '</a>' : '') +
+    '</div>';
+  }
+
+  var CAMPAIGN_BANNER_ID = 'campaignBanner';
+  function removeCampaignBanner() {
+    var el = document.getElementById(CAMPAIGN_BANNER_ID);
+    if (el) el.remove();
+    var hero = document.querySelector('.hero');
+    if (hero) hero.hidden = false; // undo a previous "replace_hero" placement, if any.
+  }
+  function renderBanner(media, content) {
+    removeCampaignBanner();
+    if (!media || !media.banner_enabled) return;
+    var html = bannerInnerHtml(media, content);
+    if (!html) return;
+    var wrapped = '<div class="campaign-banner campaign-banner-' + escapeHtml(media.banner_type || 'image') + '" id="' + CAMPAIGN_BANNER_ID + '">' + html + '</div>';
+
+    var home = document.getElementById('viewHome');
+    var hero = document.querySelector('.hero');
+    var featured = document.getElementById('featured-products');
+    var footer = document.querySelector('.site-footer');
+    var placement = media.placement || 'above_hero';
+
+    if (placement === 'replace_hero' && hero) {
+      hero.hidden = true;
+      hero.insertAdjacentHTML('beforebegin', wrapped);
+    } else if (placement === 'below_hero' && hero) {
+      hero.insertAdjacentHTML('afterend', wrapped);
+    } else if (placement === 'before_featured' && featured) {
+      featured.insertAdjacentHTML('beforebegin', wrapped);
+    } else if (placement === 'before_footer' && footer) {
+      footer.insertAdjacentHTML('beforebegin', wrapped);
+    } else if (hero) {
+      // above_hero / below_header / top_announcement all land here — right after the header,
+      // immediately before the hero, which covers the recommended default and every placement
+      // that doesn't have a more specific anchor point above.
+      hero.insertAdjacentHTML('beforebegin', wrapped);
+    } else if (home) {
+      home.insertAdjacentHTML('afterbegin', wrapped);
+    }
+
+    if ((media.text_cta_target_type || (media.banner_type === 'image_text' && media.text_cta_target_type)) === 'product') {
+      var el = document.getElementById(CAMPAIGN_BANNER_ID);
+      if (el) el.querySelectorAll('[data-open-product]').forEach(function (a) {
+        a.addEventListener('click', function (e) { e.preventDefault(); ProductModal.open(Number(a.dataset.openProduct)); });
+      });
+    }
+  }
+
+  var CAMPAIGN_OFFER_ID = 'campaignOfferSection';
+  function removeCampaignOffer() {
+    var el = document.getElementById(CAMPAIGN_OFFER_ID);
+    if (el) el.remove();
+  }
+  function renderOfferSection(content, campaignProducts) {
+    removeCampaignOffer();
+    if (!content || !content.offer_section_enabled) return;
+
+    // Only real, currently-catalogued products — a campaign_products row referencing a product
+    // that's since been removed/deactivated is simply skipped, never a fabricated placeholder.
+    var products = campaignProducts
+      .map(function (cp) {
+        var p = PRODUCTS.filter(function (x) { return x.id === cp.product_id; })[0];
+        if (!p) return null;
+        // Campaign pricing is shown here as the advertised offer price — Add to Cart/Buy Now
+        // still use the product's own real price (never silently under-charge at checkout;
+        // wiring campaign pricing into order totals is a deliberate follow-up, not done here).
+        var displayPrice = cp.campaign_price != null ? cp.campaign_price
+          : cp.discount_percentage != null ? Math.round(p.price * (1 - cp.discount_percentage / 100))
+          : p.price;
+        var clone = Object.assign({}, p);
+        if (displayPrice !== p.price) { clone.price = displayPrice; clone.oldPrice = p.price; }
+        return clone;
+      })
+      .filter(Boolean);
+    if (!products.length) return;
+
+    var featured = document.getElementById('featured-products');
+    var html = '<section class="section campaign-offer-section" id="' + CAMPAIGN_OFFER_ID + '">' +
+      '<div class="section-heading">' +
+        (content.offer_label ? '<span class="campaign-offer-label">' + escapeHtml(content.offer_label) + '</span>' : '') +
+        (content.offer_heading ? '<h2>' + escapeHtml(content.offer_heading) + '</h2>' : '') +
+        (content.offer_description ? '<p>' + escapeHtml(content.offer_description) + '</p>' : '') +
+        (content.offer_coupon_code ? '<p class="campaign-coupon">Use code <strong>' + escapeHtml(content.offer_coupon_code) + '</strong></p>' : '') +
+      '</div>' +
+      '<div class="product-grid">' + products.map(renderProductCard).join('') + '</div>' +
+      (content.offer_cta_text ? '<div style="text-align:center;margin-top:24px;"><a class="btn btn-outline" ' + campaignCtaAttrs(content.offer_cta_target_type, content.offer_cta_target_value) + '>' + escapeHtml(content.offer_cta_text) + '</a></div>' : '') +
+    '</section>';
+
+    if (featured) featured.insertAdjacentHTML('beforebegin', html);
+    else { var home = document.getElementById('viewHome'); if (home) home.insertAdjacentHTML('beforeend', html); }
+
+    var section = document.getElementById(CAMPAIGN_OFFER_ID);
+    if (section) {
+      section.querySelectorAll('[data-wishlist]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var active = WishlistService.toggle(btn.dataset.wishlist);
+          document.querySelectorAll('[data-wishlist="' + btn.dataset.wishlist + '"]').forEach(function (b) { b.classList.toggle('active', active); b.innerHTML = heartIconSVG(active); });
+        });
+      });
+    }
+  }
+
+  function renderCampaign(data) {
+    if (!data) { renderAnnouncementBar(null); removeCampaignBanner(); removeCampaignOffer(); return; }
+    renderAnnouncementBar(data.content);
+    renderBanner(data.media, data.content);
+    renderOfferSection(data.content, data.products);
+  }
+
   /* ---------- 21. Init ---------- */
   document.addEventListener('DOMContentLoaded', function () {
     // Chrome that doesn't depend on product data can wire up immediately.
@@ -2493,6 +2698,12 @@
     // New Arrivals / Search all filter the same live array) waits for the store API first.
     loadProducts().then(function () {
       renderProductGrid(grid, PRODUCTS.filter(function (p) { return p.featured; }));
+
+      // The one and only campaign read for the whole homepage — see CampaignService above.
+      // Runs after PRODUCTS is loaded (the offer section needs real product data), but never
+      // blocks the rest of the page: no campaign, or any read failure, just renders nothing.
+      CampaignService.load().then(renderCampaign).catch(function () {});
+
       Router.init();
 
       // /login and /account are real, bookmarkable URLs (this same index.html serves both,

@@ -1642,3 +1642,68 @@ a.footer-social-icon:hover { background: var(--color-surface); transform: transl
   .footer-newsletter-form { flex-direction: column; }
   .footer-bottom { flex-direction: column; align-items: flex-start; }
 }
+
+/* =========================================================
+   13. SEASONAL CAMPAIGNS & OFFERS
+   Everything here is populated at runtime from Supabase (CampaignService in script.js) — no
+   campaign content is ever hardcoded here, only the tasteful, reusable presentation for
+   whatever Admin has published.
+   ========================================================= */
+
+.campaign-announcement p { display: inline-flex; align-items: center; gap: 10px; }
+@keyframes campaignAnnouncementScroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+.announcement-scroll { display: inline-block; white-space: nowrap; animation: campaignAnnouncementScroll 16s linear infinite; }
+@keyframes campaignAnnouncementFade { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+.announcement-fade { animation: campaignAnnouncementFade 3s ease-in-out infinite; }
+
+.campaign-banner { width: 100%; overflow: hidden; position: relative; }
+.campaign-banner-media { width: 100%; display: block; max-height: 560px; object-fit: cover; }
+.campaign-banner-overlay {
+  position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center;
+  padding: 32px 48px; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,0.35);
+}
+.campaign-banner-overlay h2 { font-size: 2rem; margin: 0 0 8px; }
+.campaign-banner-overlay p { margin: 0 0 16px; font-size: 1.05rem; }
+.campaign-banner-align-left { align-items: flex-start; text-align: left; }
+.campaign-banner-align-center { align-items: center; text-align: center; }
+.campaign-banner-align-right { align-items: flex-end; text-align: right; }
+
+.campaign-banner-text {
+  padding: 56px 32px;
+  background-size: cover;
+  background-position: center;
+  display: flex; flex-direction: column;
+}
+.campaign-banner-text h2 { font-size: 2.1rem; margin: 0 0 10px; }
+.campaign-banner-text .campaign-subheadline { font-size: 1.15rem; margin: 0 0 6px; font-weight: 600; }
+.campaign-banner-text .campaign-description { font-size: 0.95rem; margin: 0 0 18px; max-width: 560px; }
+.campaign-banner-text.campaign-banner-align-center { align-items: center; text-align: center; }
+.campaign-banner-text.campaign-banner-align-center .campaign-description { margin-left: auto; margin-right: auto; }
+.campaign-banner-text.campaign-banner-align-left { align-items: flex-start; text-align: left; }
+.campaign-banner-text.campaign-banner-align-right { align-items: flex-end; text-align: right; }
+
+@keyframes campaignFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes campaignSlideUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes campaignSoftReveal { from { opacity: 0; letter-spacing: 0.15em; } to { opacity: 1; letter-spacing: normal; } }
+.campaign-text-anim-fade { animation: campaignFade 0.8s ease both; }
+.campaign-text-anim-slide_up { animation: campaignSlideUp 0.7s ease both; }
+.campaign-text-anim-soft_reveal h2 { animation: campaignSoftReveal 1.1s ease both; }
+.campaign-text-anim-marquee h2 { display: inline-block; white-space: nowrap; animation: campaignAnnouncementScroll 14s linear infinite; }
+
+.campaign-offer-section .campaign-offer-label {
+  display: inline-block; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em;
+  color: var(--color-pink); text-transform: uppercase; margin-bottom: 6px;
+}
+.campaign-offer-section .campaign-coupon { font-size: 0.85rem; color: var(--color-text-soft); margin-top: 6px; }
+.campaign-offer-section .campaign-coupon strong { color: var(--color-pink); letter-spacing: 0.04em; }
+
+/* Mobile: full-width, no overflow, readable text, tappable CTA — never a squeezed desktop banner. */
+@media (max-width: 720px) {
+  .campaign-banner-media { max-height: 340px; }
+  .campaign-banner-overlay { padding: 20px 20px; }
+  .campaign-banner-overlay h2, .campaign-banner-text h2 { font-size: 1.4rem; }
+  .campaign-banner-text { padding: 36px 20px; }
+  .campaign-banner-text .campaign-subheadline { font-size: 1rem; }
+  .campaign-banner-text .campaign-description { font-size: 0.88rem; }
+  .campaign-banner-overlay .btn, .campaign-banner-text .btn { min-height: 44px; padding: 10px 22px; }
+}

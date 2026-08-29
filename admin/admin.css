@@ -336,3 +336,20 @@ input, select, textarea { font-family: inherit; }
   .quick-actions-grid { grid-template-columns: 1fr; }
   .order-status-legend { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ---- Campaigns & Offers ---- */
+.switch { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch-track { position: absolute; inset: 0; background: #ddd; border-radius: 999px; transition: background 0.2s ease; cursor: pointer; }
+.switch-track::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform 0.2s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+.switch input:checked + .switch-track { background: var(--coral, #E68A98); }
+.switch input:checked + .switch-track::before { transform: translateX(18px); }
+
+.campaign-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.campaign-card-flags { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.78rem; color: var(--text-soft); }
+.campaign-card-flags strong { color: var(--text); }
+
+.campaign-preview-cols { display: flex; gap: 20px; margin-top: 10px; flex-wrap: wrap; }
+.campaign-preview-frame { border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; overflow: hidden; background: #fff; }
+.campaign-preview-frame.desktop { width: 420px; max-width: 100%; }
+.campaign-preview-frame.mobile { width: 200px; max-width: 100%; }

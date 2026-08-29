@@ -49,7 +49,8 @@
     box: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" y1="22" x2="12" y2="12"/>',
     plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
     pencil: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
-    activity: '<path d="M3 12h4l3 8 4-16 3 8h4"/>'
+    activity: '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
+    campaigns: '<path d="M20 12V4a1 1 0 0 0-1.7-.7L14 7H5a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h1l1 6h2l-1-6h1l9.3 3.7A1 1 0 0 0 20 16v-4Z"/>'
   };
   function svgIcon(name) { return '<svg viewBox="0 0 24 24">' + (ICON_PATHS[name] || '') + '</svg>'; }
   function icon(name) { return '<span class="icon icon-' + name + '">' + svgIcon(name) + '</span>'; }
@@ -448,6 +449,62 @@
               .then(function (r) { throwIfError(r); return { url: publicUrl }; });
           });
       }
+    },
+
+    // Seasonal Campaign & Offer Management. Four tables (campaigns / campaign_content /
+    // campaign_media / campaign_products), one JS module — every write here is the ONLY way any
+    // of those rows change; the customer site only ever reads (see supabase-client.js's
+    // CampaignService, and the public.live_campaign view + RLS in
+    // supabase/migrations/0007_campaigns.sql for what "reads" actually means: highest-priority
+    // campaign that's enabled, not paused, and inside its start/end window, computed live on
+    // every request — no stored status to drift, no admin action needed at midnight).
+    campaigns: {
+      list: function () {
+        return supabaseClient.from('campaigns')
+          .select('*, campaign_content(offer_section_enabled, announcement_enabled), campaign_media(banner_enabled), campaign_products(id)')
+          .order('priority', { ascending: true })
+          .then(throwIfError).then(function (res) { return res.data || []; });
+      },
+      get: function (id) {
+        return supabaseClient.from('campaigns')
+          .select('*, campaign_content(*), campaign_media(*), campaign_products(*, products(id, name, price, sale_price, sku))')
+          .eq('id', id).single()
+          .then(throwIfError).then(function (res) { return res.data; });
+      },
+      create: function (payload) {
+        return supabaseClient.from('campaigns').insert(payload).select().single().then(throwIfError).then(function (r) { return r.data; });
+      },
+      update: function (id, payload) {
+        payload.updated_at = new Date().toISOString();
+        return supabaseClient.from('campaigns').update(payload).eq('id', id).then(throwIfError);
+      },
+      remove: function (id) {
+        return supabaseClient.from('campaigns').delete().eq('id', id).then(throwIfError);
+      },
+      // upsert (not insert) — campaign_content/campaign_media are one row per campaign
+      // (campaign_id is their primary key), so saving the editor form again just updates the
+      // same row, never creates a duplicate.
+      saveContent: function (campaignId, payload) {
+        payload.campaign_id = campaignId;
+        payload.updated_at = new Date().toISOString();
+        return supabaseClient.from('campaign_content').upsert(payload, { onConflict: 'campaign_id' }).then(throwIfError);
+      },
+      saveMedia: function (campaignId, payload) {
+        payload.campaign_id = campaignId;
+        payload.updated_at = new Date().toISOString();
+        return supabaseClient.from('campaign_media').upsert(payload, { onConflict: 'campaign_id' }).then(throwIfError);
+      },
+      // Replaces the full product list in one go (delete-then-insert) — simple and safe for a
+      // single-admin, low-frequency edit like this; never duplicates a product_id (unique
+      // constraint on (campaign_id, product_id) backs this up regardless).
+      setProducts: function (campaignId, rows) {
+        return supabaseClient.from('campaign_products').delete().eq('campaign_id', campaignId).then(throwIfError).then(function () {
+          if (!rows.length) return;
+          return supabaseClient.from('campaign_products').insert(rows.map(function (r, i) {
+            return { campaign_id: campaignId, product_id: r.product_id, campaign_price: r.campaign_price, discount_percentage: r.discount_percentage, sort_order: i };
+          })).then(throwIfError);
+        });
+      }
     }
   };
 
@@ -550,6 +607,7 @@
     { route: 'shipping', label: 'Shipping', icon: 'shipping' },
     { route: 'categories', label: 'Categories', icon: 'categories' },
     { route: 'media', label: 'Media Library', icon: 'media' },
+    { route: 'campaigns', label: 'Campaigns & Offers', icon: 'campaigns' },
     { route: 'settings', label: 'Settings', icon: 'settings' }
   ];
   var ROUTE_TITLES = {}, ROUTE_SUBTITLES = {
@@ -561,6 +619,7 @@
     shipping: 'Manage shipments and tracking for orders in transit.',
     categories: 'A live summary of your catalog structure.',
     media: 'Every image uploaded across the store.',
+    campaigns: 'Seasonal banners, offers and campaign pricing — fully controlled from here, no code changes needed.',
     settings: 'Account and store configuration.'
   };
   NAV_ITEMS.forEach(function (item) { ROUTE_TITLES[item.route] = item.label; });
@@ -1823,6 +1882,415 @@
       });
     });
   };
+
+  /* ---------- 11.5 Campaigns & Offers ---------- */
+  // "Effective status" is never read from a stored column — computed live from
+  // is_enabled/is_paused/start_at/end_at, exactly matching the SQL in the RLS policies
+  // (supabase/migrations/0007_campaigns.sql), so this label can never drift out of sync with
+  // what the customer site is actually showing.
+  var CAMPAIGN_TYPE_LABELS = {
+    onam: 'Onam Sale', christmas: 'Christmas Sale', eid: 'Eid / Bakrid Offer', new_year: 'New Year Sale',
+    kids_day: 'Kids Day Special', summer: 'Summer Sale', flash_sale: 'Flash Sale', custom: 'Custom Campaign'
+  };
+  function computeCampaignStatus(c) {
+    if (!c.is_enabled) return { label: 'Disabled', tone: 'cancelled' };
+    if (c.is_paused) return { label: 'Paused', tone: 'refunded' };
+    var now = new Date();
+    if (c.start_at && new Date(c.start_at) > now) return { label: 'Scheduled', tone: 'blue' };
+    if (c.end_at && new Date(c.end_at) < now) return { label: 'Expired', tone: 'cancelled' };
+    if (!c.start_at && !c.end_at) return { label: 'Draft', tone: 'new' };
+    return { label: 'Live', tone: 'delivered' };
+  }
+  function campaignDateRangeLabel(c) {
+    if (!c.start_at && !c.end_at) return 'No schedule set';
+    var s = c.start_at ? fmtDate(c.start_at) : '—';
+    var e = c.end_at ? fmtDate(c.end_at) : '—';
+    return s + ' — ' + e;
+  }
+
+  ROUTE_RENDERERS.campaigns = function (param) {
+    if (param) return renderCampaignEditor(param);
+    renderCampaignList();
+  };
+
+  function renderCampaignList() {
+    content().innerHTML = '<p class="empty-state">Loading campaigns…</p>';
+    AdminAPI.campaigns.list().then(function (campaigns) {
+      content().innerHTML =
+        '<div class="section-heading-row"><h3 style="font-size:1.1rem;">Campaigns &amp; Offers</h3>' +
+          '<button type="button" class="btn-primary btn-sm" id="newCampaignBtn">+ Create Campaign</button></div>' +
+        (campaigns.length === 0
+          ? '<div class="empty-state"><p><strong>No campaigns yet</strong></p><p>Create a seasonal campaign (Onam, Christmas, a Flash Sale, ...) — nothing appears on the website until you publish one.</p></div>'
+          : campaigns.map(function (c) {
+              var status = computeCampaignStatus(c);
+              var content_ = (c.campaign_content || [])[0] || {};
+              var media = (c.campaign_media || [])[0] || {};
+              var productCount = (c.campaign_products || []).length;
+              return '<div class="panel-card campaign-card">' +
+                '<div class="campaign-card-head">' +
+                  '<div><strong style="font-size:1.05rem;">' + esc(c.name) + '</strong>' +
+                    '<div style="font-size:0.78rem;color:var(--text-soft);">' + esc(CAMPAIGN_TYPE_LABELS[c.campaign_type] || c.campaign_type) + '</div></div>' +
+                  '<span class="badge badge-' + status.tone + '">' + status.label + '</span>' +
+                '</div>' +
+                '<p style="font-size:0.82rem;color:var(--text-soft);margin:8px 0;">' + esc(campaignDateRangeLabel(c)) + '</p>' +
+                '<div class="campaign-card-flags">' +
+                  '<span>Banner <strong>' + (media.banner_enabled ? 'ON' : 'OFF') + '</strong></span>' +
+                  '<span>Offer Section <strong>' + (content_.offer_section_enabled ? 'ON' : 'OFF') + '</strong></span>' +
+                  '<span>Announcement <strong>' + (content_.announcement_enabled ? 'ON' : 'OFF') + '</strong></span>' +
+                '</div>' +
+                '<p style="font-size:0.82rem;margin:8px 0;">' + productCount + ' product' + (productCount === 1 ? '' : 's') + '</p>' +
+                '<div class="amazon-shipping-actions">' +
+                  '<a href="' + BASE_PATH + '/admin/campaigns/' + c.id + '" class="btn-secondary btn-sm">Edit</a>' +
+                  (c.is_enabled
+                    ? '<button type="button" class="btn-secondary btn-sm" data-toggle-enabled="' + c.id + '" data-next="false">Disable</button>'
+                    : '<button type="button" class="btn-primary btn-sm" data-toggle-enabled="' + c.id + '" data-next="true">Enable</button>') +
+                  (c.is_enabled && !c.is_paused ? '<button type="button" class="btn-secondary btn-sm" data-toggle-paused="' + c.id + '" data-next="true">Pause</button>' : '') +
+                  (c.is_enabled && c.is_paused ? '<button type="button" class="btn-secondary btn-sm" data-toggle-paused="' + c.id + '" data-next="false">Resume</button>' : '') +
+                  '<button type="button" class="btn-danger btn-sm" data-delete-campaign="' + c.id + '">Delete</button>' +
+                '</div>' +
+              '</div>';
+            }).join(''));
+
+      var newBtn = document.getElementById('newCampaignBtn');
+      if (newBtn) newBtn.addEventListener('click', function () { Router.navigate(BASE_PATH + '/admin/campaigns/new'); });
+      content().querySelectorAll('[data-toggle-enabled]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          AdminAPI.campaigns.update(btn.dataset.toggleEnabled, { is_enabled: btn.dataset.next === 'true' }).then(renderCampaignList);
+        });
+      });
+      content().querySelectorAll('[data-toggle-paused]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          AdminAPI.campaigns.update(btn.dataset.togglePaused, { is_paused: btn.dataset.next === 'true' }).then(renderCampaignList);
+        });
+      });
+      content().querySelectorAll('[data-delete-campaign]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (!window.confirm('Delete this campaign permanently? This cannot be undone.')) return;
+          AdminAPI.campaigns.remove(btn.dataset.deleteCampaign).then(renderCampaignList).catch(function (err) { window.alert(err.message); });
+        });
+      });
+    });
+  }
+
+  var CAMPAIGN_CTA_TARGET_LABELS = {
+    product: 'Specific Product', category: 'Category', collection: 'Product Collection',
+    new_arrivals: 'New Arrivals', all_products: 'All Products', custom: 'Custom internal route'
+  };
+
+  function renderCampaignEditor(param) {
+    content().innerHTML = '<p class="empty-state">Loading…</p>';
+    var isNew = param === 'new';
+    var loadCampaign = isNew
+      ? Promise.resolve({ id: null, name: '', internal_name: '', slug: '', campaign_type: 'custom', is_enabled: false, is_paused: false, start_at: null, end_at: null, priority: 100, campaign_content: [{}], campaign_media: [{}], campaign_products: [] })
+      : AdminAPI.campaigns.get(param);
+    var loadProducts = supabaseClient.from('products').select('id, name, price, sale_price, sku').eq('status', 'active').order('name').then(throwIfError).then(function (r) { return r.data || []; });
+
+    Promise.all([loadCampaign, loadProducts]).then(function (results) {
+      var c = results[0], allProducts = results[1];
+      var cc = (c.campaign_content || [])[0] || {};
+      var cm = (c.campaign_media || [])[0] || {};
+      var selected = {}; // product_id -> { campaign_price, discount_percentage }
+      (c.campaign_products || []).forEach(function (cp) { selected[cp.product_id] = { campaign_price: cp.campaign_price, discount_percentage: cp.discount_percentage }; });
+
+      function toLocalInput(iso) {
+        if (!iso) return '';
+        var d = new Date(iso);
+        var pad = function (n) { return String(n).padStart(2, '0'); };
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      }
+
+      content().innerHTML =
+        '<div class="section-heading-row"><h3 style="font-size:1.1rem;">' + (isNew ? 'Create Campaign' : 'Edit — ' + esc(c.name)) + '</h3>' +
+          '<a href="' + BASE_PATH + '/admin/campaigns" class="btn-ghost btn-sm">← Back to Campaigns</a></div>' +
+
+        '<div class="panel-card"><h3>Overview</h3>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Campaign Name</label><input type="text" id="cName" value="' + esc(c.name) + '" placeholder="Onam Sale 2026"></div>' +
+            '<div class="form-field"><label>Internal Campaign Name</label><input type="text" id="cInternalName" value="' + esc(c.internal_name || '') + '" placeholder="onam-2026-internal"></div>' +
+          '</div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Campaign Type</label><select id="cType">' +
+              Object.keys(CAMPAIGN_TYPE_LABELS).map(function (k) { return '<option value="' + k + '"' + (k === c.campaign_type ? ' selected' : '') + '>' + CAMPAIGN_TYPE_LABELS[k] + '</option>'; }).join('') +
+            '</select></div>' +
+            '<div class="form-field"><label>Priority (1 = highest, used if multiple campaigns are Live at once)</label><input type="number" id="cPriority" value="' + (c.priority != null ? c.priority : 100) + '"></div>' +
+          '</div>' +
+          '<div class="form-field" style="flex-direction:row;align-items:center;gap:10px;">' +
+            '<label style="margin:0;">Campaign Active</label>' +
+            '<label class="switch"><input type="checkbox" id="cEnabled"' + (c.is_enabled ? ' checked' : '') + '><span class="switch-track"></span></label>' +
+            '<span style="font-size:0.78rem;color:var(--text-soft);">OFF completely hides this campaign from the website — nothing is deleted.</span>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="panel-card"><h3>Schedule</h3>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Start Date &amp; Time</label><input type="datetime-local" id="cStart" value="' + toLocalInput(c.start_at) + '"></div>' +
+            '<div class="form-field"><label>End Date &amp; Time</label><input type="datetime-local" id="cEnd" value="' + toLocalInput(c.end_at) + '"></div>' +
+          '</div>' +
+          '<p style="font-size:0.78rem;color:var(--text-soft);">Leave both blank for a campaign with no fixed schedule (shows whenever Campaign Active is ON). The website updates automatically at these times — no admin action needed.</p>' +
+          (!isNew ? '<div class="amazon-shipping-actions">' +
+            (c.is_enabled && !c.is_paused ? '<button type="button" class="btn-secondary btn-sm" id="pauseNowBtn">Pause Campaign</button>' : '') +
+            (c.is_enabled && c.is_paused ? '<button type="button" class="btn-secondary btn-sm" id="resumeNowBtn">Resume Campaign</button>' : '') +
+            '<button type="button" class="btn-danger btn-sm" id="endNowBtn">End Campaign Now</button>' +
+          '</div>' : '') +
+        '</div>' +
+
+        '<div class="panel-card"><h3>Website Banner</h3>' +
+          '<div class="form-field" style="flex-direction:row;align-items:center;gap:10px;">' +
+            '<label style="margin:0;">Show Banner</label>' +
+            '<label class="switch"><input type="checkbox" id="mEnabled"' + (cm.banner_enabled ? ' checked' : '') + '><span class="switch-track"></span></label>' +
+          '</div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Banner Type</label><select id="mType">' +
+              ['image', 'gif', 'video', 'animated_text', 'image_text'].map(function (t) { return '<option value="' + t + '"' + (t === cm.banner_type ? ' selected' : '') + '>' + t.replace('_', ' + ').replace(/\b\w/g, function (ch) { return ch.toUpperCase(); }) + '</option>'; }).join('') +
+            '</select></div>' +
+            '<div class="form-field"><label>Placement</label><select id="mPlacement">' +
+              ['top_announcement', 'below_header', 'above_hero', 'replace_hero', 'below_hero', 'before_featured', 'before_footer'].map(function (p) { return '<option value="' + p + '"' + (p === (cm.placement || 'above_hero') ? ' selected' : '') + '>' + p.replace(/_/g, ' ').replace(/\b\w/g, function (ch) { return ch.toUpperCase(); }) + '</option>'; }).join('') +
+            '</select></div>' +
+          '</div>' +
+          '<p style="font-size:0.78rem;color:var(--text-soft);margin-bottom:6px;">Image / GIF / Video — upload straight from here (goes to the same Media Library as product photos) or paste an existing Media Library URL.</p>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Desktop Media URL</label><input type="text" id="mDesktopUrl" value="' + esc(cm.desktop_url || '') + '" placeholder="https://…"></div>' +
+            '<div class="form-field"><label>Upload Desktop</label><input type="file" id="mDesktopUpload" accept="image/*,video/*"></div>' +
+          '</div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Mobile Media URL (optional — falls back to Desktop if blank)</label><input type="text" id="mMobileUrl" value="' + esc(cm.mobile_url || '') + '" placeholder="https://…"></div>' +
+            '<div class="form-field"><label>Upload Mobile</label><input type="file" id="mMobileUpload" accept="image/*,video/*"></div>' +
+          '</div>' +
+          '<div class="form-row" id="mVideoOptionsRow">' +
+            '<div class="form-field" style="flex-direction:row;gap:6px;align-items:center;"><input type="checkbox" id="mAutoplay"' + (cm.video_autoplay !== false ? ' checked' : '') + '><label style="margin:0;">Autoplay</label></div>' +
+            '<div class="form-field" style="flex-direction:row;gap:6px;align-items:center;"><input type="checkbox" id="mLoop"' + (cm.video_loop !== false ? ' checked' : '') + '><label style="margin:0;">Loop</label></div>' +
+            '<div class="form-field" style="flex-direction:row;gap:6px;align-items:center;"><input type="checkbox" id="mMuted"' + (cm.video_muted !== false ? ' checked' : '') + '><label style="margin:0;">Muted</label></div>' +
+            '<div class="form-field" style="flex-direction:row;gap:6px;align-items:center;"><input type="checkbox" id="mControls"' + (cm.video_controls ? ' checked' : '') + '><label style="margin:0;">Show Controls</label></div>' +
+          '</div>' +
+          '<h4 style="font-size:0.85rem;margin:16px 0 8px;">Animated Text Mode (used when no image/video is set, or Banner Type = Animated Text)</h4>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Headline</label><input type="text" id="mHeadline" value="' + esc(cm.text_headline || '') + '" placeholder="HAPPY ONAM 🌼"></div>' +
+            '<div class="form-field"><label>Subheadline</label><input type="text" id="mSubheadline" value="' + esc(cm.text_subheadline || '') + '" placeholder="Celebrate Together"></div>' +
+          '</div>' +
+          '<div class="form-field"><label>Description</label><textarea id="mDescription" rows="2">' + esc(cm.text_description || '') + '</textarea></div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>CTA Text</label><input type="text" id="mCtaText" value="' + esc(cm.text_cta_text || '') + '" placeholder="Shop Onam Collection"></div>' +
+            '<div class="form-field"><label>Alignment</label><select id="mAlign">' + ['left', 'center', 'right'].map(function (a) { return '<option value="' + a + '"' + (a === (cm.text_align || 'center') ? ' selected' : '') + '>' + a + '</option>'; }).join('') + '</select></div>' +
+          '</div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Background Color</label><input type="text" id="mBgColor" value="' + esc(cm.text_bg_color || '') + '" placeholder="#F7DEE1"></div>' +
+            '<div class="form-field"><label>Text Color</label><input type="text" id="mTextColor" value="' + esc(cm.text_color || '') + '" placeholder="#2E2A26"></div>' +
+            '<div class="form-field"><label>Animation</label><select id="mAnimation">' + ['none', 'fade', 'slide_up', 'soft_reveal', 'marquee'].map(function (a) { return '<option value="' + a + '"' + (a === (cm.text_animation || 'fade') ? ' selected' : '') + '>' + a.replace('_', ' ') + '</option>'; }).join('') + '</select></div>' +
+          '</div>' +
+          '<div class="amazon-shipping-actions"><button type="button" class="btn-secondary btn-sm" id="previewBannerBtn">Preview Desktop / Mobile</button></div>' +
+          '<div id="bannerPreviewArea"></div>' +
+        '</div>' +
+
+        '<div class="panel-card"><h3>Offer Section</h3>' +
+          '<div class="form-field" style="flex-direction:row;align-items:center;gap:10px;">' +
+            '<label style="margin:0;">Show Offer Section</label>' +
+            '<label class="switch"><input type="checkbox" id="oEnabled"' + (cc.offer_section_enabled ? ' checked' : '') + '><span class="switch-track"></span></label>' +
+          '</div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Small Label</label><input type="text" id="oLabel" value="' + esc(cc.offer_label || '') + '" placeholder="ONAM SPECIAL"></div>' +
+            '<div class="form-field"><label>Heading</label><input type="text" id="oHeading" value="' + esc(cc.offer_heading || '') + '" placeholder="Celebrate Onam Together ♡"></div>' +
+          '</div>' +
+          '<div class="form-field"><label>Description</label><textarea id="oDescription" rows="2">' + esc(cc.offer_description || '') + '</textarea></div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>CTA Text</label><input type="text" id="oCtaText" value="' + esc(cc.offer_cta_text || '') + '" placeholder="Shop Onam Collection"></div>' +
+            '<div class="form-field"><label>CTA Destination</label><select id="oCtaType">' +
+              Object.keys(CAMPAIGN_CTA_TARGET_LABELS).map(function (k) { return '<option value="' + k + '"' + (k === cc.offer_cta_target_type ? ' selected' : '') + '>' + CAMPAIGN_CTA_TARGET_LABELS[k] + '</option>'; }).join('') +
+            '</select></div>' +
+          '</div>' +
+          '<div class="form-field"><label>CTA Destination Value (product ID / category or collection slug / custom path — depends on the type above)</label><input type="text" id="oCtaValue" value="' + esc(cc.offer_cta_target_value || '') + '"></div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Offer Percentage (optional — leave blank for no discount)</label><input type="number" id="oPercentage" value="' + (cc.offer_percentage != null ? cc.offer_percentage : '') + '"></div>' +
+            '<div class="form-field"><label>Coupon Code (optional)</label><input type="text" id="oCoupon" value="' + esc(cc.offer_coupon_code || '') + '"></div>' +
+            '<div class="form-field"><label>Offer End Date (optional)</label><input type="datetime-local" id="oEndAt" value="' + toLocalInput(cc.offer_end_at) + '"></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="panel-card"><h3>Top Announcement Bar</h3>' +
+          '<div class="form-field" style="flex-direction:row;align-items:center;gap:10px;">' +
+            '<label style="margin:0;">Enable Announcement Bar</label>' +
+            '<label class="switch"><input type="checkbox" id="aEnabled"' + (cc.announcement_enabled ? ' checked' : '') + '><span class="switch-track"></span></label>' +
+          '</div>' +
+          '<div class="form-field"><label>Text</label><input type="text" id="aText" value="' + esc(cc.announcement_text || '') + '" placeholder="🌼 ONAM SPECIAL — UP TO 20% OFF — SHOP NOW"></div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>CTA Text (optional)</label><input type="text" id="aCtaText" value="' + esc(cc.announcement_cta_text || '') + '"></div>' +
+            '<div class="form-field"><label>Link (optional)</label><input type="text" id="aLink" value="' + esc(cc.announcement_link || '') + '"></div>' +
+          '</div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Background Color</label><input type="text" id="aBg" value="' + esc(cc.announcement_bg_color || '') + '" placeholder="#F7DEE1"></div>' +
+            '<div class="form-field"><label>Text Color</label><input type="text" id="aTextColor" value="' + esc(cc.announcement_text_color || '') + '" placeholder="#2E2A26"></div>' +
+            '<div class="form-field"><label>Animation</label><select id="aAnimation">' + ['static', 'scrolling', 'fade'].map(function (a) { return '<option value="' + a + '"' + (a === (cc.announcement_animation || 'static') ? ' selected' : '') + '>' + a + '</option>'; }).join('') + '</select></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="panel-card"><h3>Campaign Products</h3>' +
+          '<p style="font-size:0.78rem;color:var(--text-soft);margin-bottom:10px;">Select real products from your catalog for this campaign. Optional campaign price/discount is stored separately — the product\'s normal price is never overwritten, and returns automatically once the campaign ends.</p>' +
+          '<div class="table-wrap"><table class="data-table"><thead><tr><th></th><th>Product</th><th>Normal Price</th><th>Campaign Price</th><th>Discount %</th></tr></thead><tbody>' +
+            allProducts.map(function (p) {
+              var sel = selected[p.id];
+              return '<tr>' +
+                '<td><input type="checkbox" class="campaign-product-check" data-product-id="' + p.id + '"' + (sel ? ' checked' : '') + '></td>' +
+                '<td>' + esc(p.name) + ' <span style="color:var(--text-soft);font-size:0.75rem;">' + esc(p.sku || '') + '</span></td>' +
+                '<td>' + fmtPrice(p.sale_price || p.price) + '</td>' +
+                '<td><input type="number" class="campaign-product-price" data-product-id="' + p.id + '" value="' + (sel && sel.campaign_price != null ? sel.campaign_price : '') + '" placeholder="—" style="width:90px;"></td>' +
+                '<td><input type="number" class="campaign-product-discount" data-product-id="' + p.id + '" value="' + (sel && sel.discount_percentage != null ? sel.discount_percentage : '') + '" placeholder="—" style="width:70px;"></td>' +
+              '</tr>';
+            }).join('') +
+          '</tbody></table></div>' +
+        '</div>' +
+
+        '<div class="amazon-shipping-actions" style="margin:16px 0 40px;">' +
+          '<button type="button" class="btn-primary btn-sm" id="saveCampaignBtn">' + (isNew ? 'Create Campaign' : 'Save Changes') + '</button>' +
+        '</div>';
+
+      function updateVideoOptionsVisibility() {
+        var type = document.getElementById('mType').value;
+        document.getElementById('mVideoOptionsRow').style.display = type === 'video' ? 'flex' : 'none';
+      }
+      updateVideoOptionsVisibility();
+      document.getElementById('mType').addEventListener('change', updateVideoOptionsVisibility);
+
+      function wireUpload(inputId, targetInputId) {
+        var input = document.getElementById(inputId);
+        if (!input) return;
+        input.addEventListener('change', function () {
+          var file = input.files && input.files[0];
+          if (!file) return;
+          input.disabled = true;
+          AdminAPI.media.upload(file).then(function (res) {
+            document.getElementById(targetInputId).value = res.url;
+            input.disabled = false;
+          }).catch(function (err) { input.disabled = false; window.alert(err.message || 'Upload failed.'); });
+        });
+      }
+      wireUpload('mDesktopUpload', 'mDesktopUrl');
+      wireUpload('mMobileUpload', 'mMobileUrl');
+
+      document.getElementById('previewBannerBtn').addEventListener('click', function () {
+        var draftMedia = collectMediaPayload();
+        var draftContent = collectContentPayload();
+        document.getElementById('bannerPreviewArea').innerHTML =
+          '<div class="campaign-preview-cols">' +
+            '<div><h4 style="font-size:0.78rem;color:var(--text-soft);">Desktop Preview</h4><div class="campaign-preview-frame desktop">' + renderCampaignBannerPreviewHtml(draftMedia, draftContent, false) + '</div></div>' +
+            '<div><h4 style="font-size:0.78rem;color:var(--text-soft);">Mobile Preview</h4><div class="campaign-preview-frame mobile">' + renderCampaignBannerPreviewHtml(draftMedia, draftContent, true) + '</div></div>' +
+          '</div>';
+      });
+
+      function collectContentPayload() {
+        return {
+          offer_section_enabled: document.getElementById('oEnabled').checked,
+          offer_label: document.getElementById('oLabel').value.trim() || null,
+          offer_heading: document.getElementById('oHeading').value.trim() || null,
+          offer_description: document.getElementById('oDescription').value.trim() || null,
+          offer_cta_text: document.getElementById('oCtaText').value.trim() || null,
+          offer_cta_target_type: document.getElementById('oCtaType').value || null,
+          offer_cta_target_value: document.getElementById('oCtaValue').value.trim() || null,
+          offer_percentage: document.getElementById('oPercentage').value ? Number(document.getElementById('oPercentage').value) : null,
+          offer_coupon_code: document.getElementById('oCoupon').value.trim() || null,
+          offer_end_at: document.getElementById('oEndAt').value ? new Date(document.getElementById('oEndAt').value).toISOString() : null,
+          announcement_enabled: document.getElementById('aEnabled').checked,
+          announcement_text: document.getElementById('aText').value.trim() || null,
+          announcement_cta_text: document.getElementById('aCtaText').value.trim() || null,
+          announcement_link: document.getElementById('aLink').value.trim() || null,
+          announcement_bg_color: document.getElementById('aBg').value.trim() || null,
+          announcement_text_color: document.getElementById('aTextColor').value.trim() || null,
+          announcement_animation: document.getElementById('aAnimation').value
+        };
+      }
+      function collectMediaPayload() {
+        return {
+          banner_enabled: document.getElementById('mEnabled').checked,
+          banner_type: document.getElementById('mType').value,
+          placement: document.getElementById('mPlacement').value,
+          desktop_url: document.getElementById('mDesktopUrl').value.trim() || null,
+          mobile_url: document.getElementById('mMobileUrl').value.trim() || null,
+          video_autoplay: document.getElementById('mAutoplay').checked,
+          video_loop: document.getElementById('mLoop').checked,
+          video_muted: document.getElementById('mMuted').checked,
+          video_controls: document.getElementById('mControls').checked,
+          text_headline: document.getElementById('mHeadline').value.trim() || null,
+          text_subheadline: document.getElementById('mSubheadline').value.trim() || null,
+          text_description: document.getElementById('mDescription').value.trim() || null,
+          text_cta_text: document.getElementById('mCtaText').value.trim() || null,
+          text_align: document.getElementById('mAlign').value,
+          text_bg_color: document.getElementById('mBgColor').value.trim() || null,
+          text_color: document.getElementById('mTextColor').value.trim() || null,
+          text_animation: document.getElementById('mAnimation').value
+        };
+      }
+
+      document.getElementById('saveCampaignBtn').addEventListener('click', function () {
+        var btn = document.getElementById('saveCampaignBtn');
+        btn.disabled = true;
+        var name = document.getElementById('cName').value.trim();
+        if (!name) { window.alert('Campaign Name is required.'); btn.disabled = false; return; }
+        var slug = (isNew ? name : c.slug || name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + (isNew ? '-' + Date.now().toString(36) : '');
+        var payload = {
+          name: name,
+          internal_name: document.getElementById('cInternalName').value.trim() || null,
+          campaign_type: document.getElementById('cType').value,
+          priority: Number(document.getElementById('cPriority').value) || 100,
+          is_enabled: document.getElementById('cEnabled').checked,
+          start_at: document.getElementById('cStart').value ? new Date(document.getElementById('cStart').value).toISOString() : null,
+          end_at: document.getElementById('cEnd').value ? new Date(document.getElementById('cEnd').value).toISOString() : null
+        };
+        if (isNew) payload.slug = slug;
+
+        var products = [];
+        content().querySelectorAll('.campaign-product-check:checked').forEach(function (chk) {
+          var pid = chk.dataset.productId;
+          var priceEl = content().querySelector('.campaign-product-price[data-product-id="' + pid + '"]');
+          var discEl = content().querySelector('.campaign-product-discount[data-product-id="' + pid + '"]');
+          products.push({
+            product_id: Number(pid),
+            campaign_price: priceEl.value ? Number(priceEl.value) : null,
+            discount_percentage: discEl.value ? Number(discEl.value) : null
+          });
+        });
+
+        var savePromise = isNew ? AdminAPI.campaigns.create(payload) : AdminAPI.campaigns.update(c.id, payload).then(function () { return c; });
+        savePromise.then(function (savedCampaign) {
+          var campaignId = savedCampaign.id || c.id;
+          return Promise.all([
+            AdminAPI.campaigns.saveContent(campaignId, collectContentPayload()),
+            AdminAPI.campaigns.saveMedia(campaignId, collectMediaPayload()),
+            AdminAPI.campaigns.setProducts(campaignId, products)
+          ]).then(function () { Router.navigate(BASE_PATH + '/admin/campaigns/' + campaignId); });
+        }).catch(function (err) { btn.disabled = false; window.alert(err.message || 'Could not save the campaign.'); });
+      });
+
+      if (!isNew) {
+        var pauseBtn = document.getElementById('pauseNowBtn');
+        if (pauseBtn) pauseBtn.addEventListener('click', function () { AdminAPI.campaigns.update(c.id, { is_paused: true }).then(function () { renderCampaignEditor(c.id); }); });
+        var resumeBtn = document.getElementById('resumeNowBtn');
+        if (resumeBtn) resumeBtn.addEventListener('click', function () { AdminAPI.campaigns.update(c.id, { is_paused: false }).then(function () { renderCampaignEditor(c.id); }); });
+        var endBtn = document.getElementById('endNowBtn');
+        if (endBtn) endBtn.addEventListener('click', function () {
+          if (!window.confirm('End this campaign right now? It will disappear from the website immediately.')) return;
+          AdminAPI.campaigns.update(c.id, { end_at: new Date().toISOString() }).then(function () { renderCampaignEditor(c.id); });
+        });
+      }
+    });
+  }
+
+  // A simplified, admin-only preview of the banner (not the exact live component — good enough
+  // to sanity-check headline/colors/media before publishing without leaving Admin).
+  function renderCampaignBannerPreviewHtml(media, content_, isMobile) {
+    var url = (isMobile && media.mobile_url) || media.desktop_url;
+    if (media.banner_type === 'video' && url) {
+      return '<video src="' + esc(url) + '" style="width:100%;display:block;" muted autoplay loop playsinline></video>';
+    }
+    if (url && media.banner_type !== 'animated_text') {
+      return '<img src="' + esc(url) + '" style="width:100%;display:block;" alt="">';
+    }
+    var bg = media.text_bg_color || '#F7DEE1';
+    var fg = media.text_color || '#2E2A26';
+    return '<div style="background:' + esc(bg) + ';color:' + esc(fg) + ';padding:32px 20px;text-align:' + esc(media.text_align || 'center') + ';">' +
+      (media.text_headline ? '<div style="font-size:1.3rem;font-weight:700;">' + esc(media.text_headline) + '</div>' : '') +
+      (media.text_subheadline ? '<div style="font-size:0.95rem;margin-top:4px;">' + esc(media.text_subheadline) + '</div>' : '') +
+      (media.text_description ? '<div style="font-size:0.8rem;margin-top:8px;">' + esc(media.text_description) + '</div>' : '') +
+      (media.text_cta_text ? '<div style="margin-top:14px;"><span style="background:#E68A98;color:#fff;padding:8px 18px;border-radius:999px;font-size:0.8rem;font-weight:600;">' + esc(media.text_cta_text) + '</span></div>' : '') +
+    '</div>';
+  }
 
   /* ---------- 12. Settings ---------- */
   ROUTE_RENDERERS.settings = function () {
