@@ -1892,6 +1892,22 @@
     onam: 'Onam Sale', christmas: 'Christmas Sale', eid: 'Eid / Bakrid Offer', new_year: 'New Year Sale',
     kids_day: 'Kids Day Special', summer: 'Summer Sale', flash_sale: 'Flash Sale', custom: 'Custom Campaign'
   };
+  // BUG FIX: campaign_content.campaign_id and campaign_media.campaign_id are each the PRIMARY
+  // KEY of their table (not just a foreign key) — a genuine 1:1 relationship with campaigns.
+  // PostgREST/supabase-js embeds a 1:1 relation as a plain OBJECT, not an array wrapped in [ ].
+  // Every read site here used to assume an array shape — `(c.campaign_content || [])[0]` — so
+  // `[0]` on the real object always came back undefined, silently falling back to `{}`, which
+  // made every Banner/Offer Section/Announcement toggle read as OFF regardless of what was
+  // actually saved (the save itself, and the database, were correct the whole time — this was
+  // purely a read-side bug). Handles either shape, so it stays correct even if a future
+  // PostgREST/schema change ever returns an array here instead.
+  function unwrapOne(x) {
+    if (!x) return {};
+    return Array.isArray(x) ? (x[0] || {}) : x;
+  }
+  // Set right before navigating back into the (freshly re-fetched) editor after a save, so the
+  // confirmation survives the re-render instead of vanishing with the old DOM.
+  var campaignSaveFeedback = null;
   function computeCampaignStatus(c) {
     if (!c.is_enabled) return { label: 'Disabled', tone: 'cancelled' };
     if (c.is_paused) return { label: 'Paused', tone: 'refunded' };
@@ -1923,8 +1939,8 @@
           ? '<div class="empty-state"><p><strong>No campaigns yet</strong></p><p>Create a seasonal campaign (Onam, Christmas, a Flash Sale, ...) — nothing appears on the website until you publish one.</p></div>'
           : campaigns.map(function (c) {
               var status = computeCampaignStatus(c);
-              var content_ = (c.campaign_content || [])[0] || {};
-              var media = (c.campaign_media || [])[0] || {};
+              var content_ = unwrapOne(c.campaign_content);
+              var media = unwrapOne(c.campaign_media);
               var productCount = (c.campaign_products || []).length;
               return '<div class="panel-card campaign-card">' +
                 '<div class="campaign-card-head">' +
@@ -1987,8 +2003,8 @@
 
     Promise.all([loadCampaign, loadProducts]).then(function (results) {
       var c = results[0], allProducts = results[1];
-      var cc = (c.campaign_content || [])[0] || {};
-      var cm = (c.campaign_media || [])[0] || {};
+      var cc = unwrapOne(c.campaign_content);
+      var cm = unwrapOne(c.campaign_media);
       var selected = {}; // product_id -> { campaign_price, discount_percentage }
       (c.campaign_products || []).forEach(function (cp) { selected[cp.product_id] = { campaign_price: cp.campaign_price, discount_percentage: cp.discount_percentage }; });
 
@@ -2000,6 +2016,7 @@
       }
 
       content().innerHTML =
+        (campaignSaveFeedback ? '<p class="campaign-save-feedback ' + (campaignSaveFeedback.ok ? 'ok' : 'err') + '">' + esc(campaignSaveFeedback.message) + '</p>' : '') +
         '<div class="section-heading-row"><h3 style="font-size:1.1rem;">' + (isNew ? 'Create Campaign' : 'Edit — ' + esc(c.name)) + '</h3>' +
           '<a href="' + BASE_PATH + '/admin/campaigns" class="btn-ghost btn-sm">← Back to Campaigns</a></div>' +
 
@@ -2141,6 +2158,7 @@
         '<div class="amazon-shipping-actions" style="margin:16px 0 40px;">' +
           '<button type="button" class="btn-primary btn-sm" id="saveCampaignBtn">' + (isNew ? 'Create Campaign' : 'Save Changes') + '</button>' +
         '</div>';
+      campaignSaveFeedback = null; // shown once, right after the re-fetch-driven re-render that follows a save — not left behind on later visits.
 
       function updateVideoOptionsVisibility() {
         var type = document.getElementById('mType').value;
@@ -2254,8 +2272,20 @@
             AdminAPI.campaigns.saveContent(campaignId, collectContentPayload()),
             AdminAPI.campaigns.saveMedia(campaignId, collectMediaPayload()),
             AdminAPI.campaigns.setProducts(campaignId, products)
-          ]).then(function () { Router.navigate(BASE_PATH + '/admin/campaigns/' + campaignId); });
-        }).catch(function (err) { btn.disabled = false; window.alert(err.message || 'Could not save the campaign.'); });
+          ]).then(function () {
+            // Never trust the just-submitted form state as the "true" result — navigating back
+            // into the editor re-fetches the campaign from Supabase from scratch (renderCampaignEditor
+            // always does), so what's shown next is exactly what was actually saved.
+            campaignSaveFeedback = { ok: true, message: 'Campaign updated successfully ✓' };
+            Router.navigate(BASE_PATH + '/admin/campaigns/' + campaignId);
+          });
+        }).catch(function (err) {
+          btn.disabled = false;
+          var msg = 'Campaign settings could not be saved.' + (err && err.message ? ' (' + err.message + ')' : '');
+          var existing = content().querySelector('.campaign-save-feedback');
+          if (existing) existing.remove();
+          content().insertAdjacentHTML('afterbegin', '<p class="campaign-save-feedback err">' + esc(msg) + '</p>');
+        });
       });
 
       if (!isNew) {

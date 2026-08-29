@@ -353,3 +353,6 @@ input, select, textarea { font-family: inherit; }
 .campaign-preview-frame { border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; overflow: hidden; background: #fff; }
 .campaign-preview-frame.desktop { width: 420px; max-width: 100%; }
 .campaign-preview-frame.mobile { width: 200px; max-width: 100%; }
+.campaign-save-feedback { padding: 10px 16px; border-radius: 10px; font-size: 0.85rem; font-weight: 600; margin-bottom: 14px; }
+.campaign-save-feedback.ok { background: #E3EBDD; color: #3f5c37; }
+.campaign-save-feedback.err { background: #F7DEE1; color: #8a2f3f; }
