@@ -88,6 +88,14 @@
     return isNaN(d) ? iso : d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' });
   }
 
+  // Date + time (e.g. "29 Aug, 1:48 pm") for real per-stage timeline timestamps — same
+  // Asia/Kolkata pin as formatDate, applied once here.
+  function formatDateTime(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    return isNaN(d) ? iso : d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+
   function findProduct(id) {
     // Product ids come back from the API as numbers, but every data-* attribute in the DOM
     // (dataset.buyNow, dataset.openProduct, …) is always a string — compare loosely so a
@@ -113,6 +121,22 @@
     return String(str).replace(/[&<>"']/g, function (ch) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
     });
+  }
+
+  // Shared eye/eye-off line icons + password field markup — used by every password input on the
+  // site (login, signup, confirm, reset, confirm-new). Toggling only flips type
+  // password<->text; the value itself is never touched.
+  function eyeIconSVG(open) {
+    return open
+      ? '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>'
+      : '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 3l18 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M10.6 5.2A11.4 11.4 0 0 1 12 5c7 0 11 8 11 8a17.6 17.6 0 0 1-3.4 4.4M7.4 6.7C4.4 8.4 1 12 1 12s4 8 11 8c1.5 0 2.9-.3 4.1-.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  }
+  function passwordFieldHtml(id, label) {
+    return '<div class="form-field password-field"><label for="' + id + '">' + label + '</label>' +
+      '<div class="password-input-wrap">' +
+        '<input type="password" id="' + id + '">' +
+        '<button type="button" class="password-toggle-btn" data-toggle-pw="' + id + '" aria-label="Show password" aria-pressed="false">' + eyeIconSVG(true) + '</button>' +
+      '</div></div>';
   }
 
   function heartIconSVG(filled) {
@@ -276,6 +300,17 @@
     var scrim = getScrim();
     if (scrim) scrim.addEventListener('click', closeTopPanel);
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeTopPanel(); });
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-toggle-pw]');
+      if (!btn) return;
+      var input = document.getElementById(btn.dataset.togglePw);
+      if (!input) return;
+      var shown = input.type === 'text';
+      input.type = shown ? 'password' : 'text';
+      btn.innerHTML = eyeIconSVG(shown);
+      btn.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
+      btn.setAttribute('aria-pressed', String(!shown));
+    });
     ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose'].forEach(function (id) {
       var btn = document.getElementById(id);
       if (btn) btn.addEventListener('click', closeTopPanel);
@@ -1008,7 +1043,11 @@
     if (/password/i.test(msg) && /(least|short|6 char|8 char)/i.test(msg)) return 'Password is too short — use at least 8 characters.';
     if (/network|fetch/i.test(msg)) return 'Network error — please check your connection and try again.';
     if (/(expired|invalid).*(token|session|link)|token.*(expired|invalid)/i.test(msg)) return 'This link has expired. Please request a new one.';
-    if (/invalid login|invalid.*credentials/i.test(msg)) return 'Incorrect email or password.';
+    // Doesn't say "wrong password" specifically — a Google-only account has no password at
+    // all, so a plain "incorrect password" would be misleading. Points at the real fix (Google,
+    // or set one via Forgot Password) without confirming/denying whether the email has an
+    // account at all.
+    if (/invalid login|invalid.*credentials/i.test(msg)) return 'We couldn’t sign you in with that email and password. If you created your account with Google, use "Continue with Google" — or set a password with "Forgot Password?".';
     return 'Something went wrong. Please try again.';
   }
 
@@ -1086,7 +1125,8 @@
         ? (
           '<form id="accountForm">' +
             field('accEmail', 'Email', 'email') +
-            field('accPassword', 'Password', 'password') +
+            passwordFieldHtml('accPassword', 'Password') +
+            '<p class="account-google-hint">Signed up with Google? Use "Continue with Google" above.</p>' +
             '<div class="account-forgot"><button type="button" id="forgotPasswordBtn">Forgot Password?</button></div>' +
             '<button type="submit" class="btn btn-primary btn-block" style="margin-top:16px;">Sign In</button>' +
           '</form>'
@@ -1095,8 +1135,8 @@
           '<form id="accountForm">' +
             field('accFullName', 'Full Name', 'text') +
             field('accEmail', 'Email', 'email') +
-            field('accPassword2', 'Password', 'password') +
-            field('accConfirmPassword', 'Confirm Password', 'password') +
+            passwordFieldHtml('accPassword2', 'Password') +
+            passwordFieldHtml('accConfirmPassword', 'Confirm Password') +
             '<button type="submit" class="btn btn-primary btn-block" style="margin-top:8px;">Create Account</button>' +
           '</form>'
         );
@@ -1165,8 +1205,8 @@
       b.innerHTML =
         '<div class="account-welcome"><h3>Create a new password</h3></div>' +
         '<form id="newPasswordForm">' +
-          field('newPassword1', 'New Password', 'password') +
-          field('newPassword2', 'Confirm New Password', 'password') +
+          passwordFieldHtml('newPassword1', 'New Password') +
+          passwordFieldHtml('newPassword2', 'Confirm New Password') +
           '<button type="submit" class="btn btn-primary btn-block" style="margin-top:16px;">Update Password</button>' +
         '</form>' +
         '<p class="account-submit-feedback" id="accountFeedback"></p>';
@@ -1738,7 +1778,10 @@
       { key: 'out_for_delivery', label: 'Out for Delivery' },
       { key: 'delivered', label: 'Delivered' }
     ];
-    var ORDER_STATUS_RANK = { new: 0, confirmed: 1, packing: 2, packed: 2, ready_to_ship: 2, shipped: 3, out_for_delivery: 4, delivered: 5 };
+    // Matches ORDER_STATUS_RANK in delhivery-shipping/index.ts and admin.js exactly — one
+    // real rank per internal stage, not several statuses sharing a slot, so each stage can get
+    // its own real order_status_history timestamp instead of stages bleeding together.
+    var ORDER_STATUS_RANK = { new: 0, confirmed: 1, packing: 2, packed: 3, ready_to_ship: 4, shipped: 5, out_for_delivery: 6, delivered: 7 };
 
     function trackingStepsDone(o) {
       var rank = ORDER_STATUS_RANK[o.order_status] != null ? ORDER_STATUS_RANK[o.order_status] : 0;
@@ -1747,10 +1790,37 @@
         paid: o.payment_status === 'paid',
         confirmed: rank >= 1,
         packing: rank >= 2,
-        shipped: rank >= 3,
-        out_for_delivery: rank >= 4,
-        delivered: rank >= 5
+        shipped: rank >= 5,
+        out_for_delivery: rank >= 6,
+        delivered: rank >= 7
       };
+    }
+
+    // Real timestamp for one timeline stage — never order.updated_at, never fabricated. Internal
+    // stages come from order_status_history (a real row per change, inserted by Admin's own
+    // Update button or the Delhivery auto-sync — see supabase/migrations/0001_init.sql and
+    // delhivery-shipping/index.ts's syncOrderStatusFromShipment). Courier stages come from
+    // shipment_events (real Delhivery scans). If a stage is done but genuinely has no recorded
+    // time (an old order predating this), the caller shows "Time unavailable" rather than
+    // guessing — see trackingTimelineHtml below.
+    function findHistoryTime(history, status) {
+      var rows = (history || []).filter(function (h) { return h.status === status; });
+      if (!rows.length) return null;
+      rows.sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
+      return rows[0].created_at;
+    }
+    function findEventTime(events, normalizedStatuses) {
+      var rows = (events || []).filter(function (e) { return normalizedStatuses.indexOf(e.normalized_status) !== -1; });
+      if (!rows.length) return null;
+      rows.sort(function (a, b) { return new Date(a.event_time || 0) - new Date(b.event_time || 0); });
+      return rows[0].event_time;
+    }
+    function stageTime(key, o, shipment, isCourier) {
+      if (key === 'placed') return o.created_at;
+      if (key === 'paid') return o.payment_status === 'paid' ? o.paid_at : null;
+      if (isCourier && key === 'ready_for_pickup') return findEventTime(shipment && shipment.shipment_events, ['shipment_created', 'pickup_scheduled']);
+      if (isCourier && ['picked_up', 'in_transit', 'out_for_delivery', 'delivered'].indexOf(key) !== -1) return findEventTime(shipment && shipment.shipment_events, [key]);
+      return findHistoryTime(o.order_status_history, key);
     }
 
     // Once a real courier shipment exists (Amazon Shipping or Delhivery — any provider whose
@@ -1767,6 +1837,7 @@
         { key: 'paid', label: 'Payment Confirmed' },
         { key: 'confirmed', label: 'Confirmed' },
         { key: 'packed', label: 'Packed' },
+        { key: 'ready_to_ship', label: 'Ready to Ship' },
         { key: 'ready_for_pickup', label: 'Ready for Pickup' },
         { key: 'picked_up', label: 'Picked Up' },
         { key: 'in_transit', label: 'In Transit' },
@@ -1778,7 +1849,8 @@
         { key: 'paid', label: 'Payment Confirmed' },
         { key: 'confirmed', label: 'Confirmed' },
         { key: 'packed', label: 'Packed' },
-        { key: 'ready_for_pickup', label: 'Ready for Pickup' },
+        { key: 'ready_to_ship', label: 'Ready to Ship' },
+        { key: 'ready_for_pickup', label: 'Preparing for Pickup' },
         { key: 'picked_up', label: 'Picked Up' },
         { key: 'in_transit', label: 'In Transit' },
         { key: 'out_for_delivery', label: 'Out for Delivery' },
@@ -1808,7 +1880,8 @@
         placed: true,
         paid: o.payment_status === 'paid',
         confirmed: internalRank >= 1 || courierStarted,
-        packed: internalRank >= 2 || courierStarted,
+        packed: internalRank >= 3 || courierStarted,
+        ready_to_ship: internalRank >= 4 || courierStarted,
         ready_for_pickup: courierRank >= 0,
         picked_up: courierRank >= 1,
         in_transit: courierRank >= 2,
@@ -2008,7 +2081,7 @@
               : '<div class="panel-card"><h4>Order Status</h4>' +
                   (isCourier && ['delivery_failed', 'returned', 'cancelled'].indexOf(shipment.normalized_status) !== -1
                     ? '<p><span class="badge badge-' + escapeHtml(shipment.normalized_status) + '">' + statusLabel(shipment.normalized_status) + '</span></p>'
-                    : trackingTimelineHtml(done, isCourier ? courierSteps : TRACKING_STEPS)) +
+                    : trackingTimelineHtml(done, isCourier ? courierSteps : TRACKING_STEPS, o, shipment, isCourier)) +
                 '</div>') +
             '<div class="panel-card"><h4>Shipping</h4>' + shippingSectionHtml(shipment) +
             '</div>' +
@@ -2046,9 +2119,15 @@
         });
     }
 
-    function trackingTimelineHtml(done, steps) {
+    function trackingTimelineHtml(done, steps, o, shipment, isCourier) {
       return '<div class="tracking-timeline">' + (steps || TRACKING_STEPS).map(function (step) {
-        return '<div class="tracking-step' + (done[step.key] ? ' done' : '') + '"><span class="tracking-dot">' + (done[step.key] ? '&#10003;' : '') + '</span><span>' + step.label + '</span></div>';
+        var isDone = !!done[step.key];
+        var time = isDone && o ? stageTime(step.key, o, shipment, isCourier) : null;
+        var timeHtml = isDone && o ? '<span class="tracking-step-time">' + (time ? formatDateTime(time) : 'Time unavailable') + '</span>' : '';
+        return '<div class="tracking-step' + (isDone ? ' done' : '') + '">' +
+          '<span class="tracking-dot">' + (isDone ? '&#10003;' : '') + '</span>' +
+          '<span class="tracking-step-body"><span class="tracking-step-label">' + step.label + '</span>' + timeHtml + '</span>' +
+        '</div>';
       }).join('') + '</div>';
     }
 
@@ -2094,7 +2173,11 @@
             : '<p>Shipped with <strong>' + COURIER_PROVIDER_LABELS[shipment.provider] + '</strong></p>') +
           '<p>AWB: <strong>' + (shipment.tracking_id ? escapeHtml(shipment.tracking_id) : 'Unavailable') + '</strong></p>' +
           '<p>Current Status: <strong><span class="badge badge-' + escapeHtml(shipment.normalized_status) + '">' + courierStatusLabel(shipment.normalized_status) + '</span></strong></p>' +
-          (shipment.estimated_delivery ? '<p>Estimated Delivery: <strong>' + formatDate(shipment.estimated_delivery) + '</strong></p>' : '') +
+          (shipment.pickup_status ? '<p>Pickup Status: <strong>' + escapeHtml(statusLabel(shipment.pickup_status)) + '</strong></p>' : '') +
+          // Real Delhivery ETA only — never a guessed "2 days"/"tomorrow". Says so plainly when
+          // the provider hasn't supplied one yet, instead of just omitting the line.
+          '<p>Estimated Delivery: <strong>' + (shipment.estimated_delivery ? formatDate(shipment.estimated_delivery) : 'Not available yet') + '</strong></p>' +
+          (shipment.last_tracking_sync_at ? '<p>Last Updated: <strong>' + formatDateTime(shipment.last_tracking_sync_at) + '</strong></p>' : '') +
           (isPrePickup
             ? '<p class="account-payment-note">Your shipment has been created with ' + COURIER_PROVIDER_LABELS[shipment.provider] + '. Pickup will be scheduled soon.</p>'
             : (latestEvent && latestEvent.description ? '<p>Latest Update: <strong>' + escapeHtml(latestEvent.description) + (latestEvent.event_location ? ' — ' + escapeHtml(latestEvent.event_location) : '') + '</strong></p>' : '')) +

@@ -1521,7 +1521,7 @@
           '<div class="amazon-shipping-grid">' +
             '<div><span>Tracking ID</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
             '<div><span>Current Status</span><strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></strong></div>' +
-            '<div><span>Estimated Delivery</span><strong>' + (s.estimated_delivery ? fmtDate(s.estimated_delivery) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Estimated Delivery</span><strong>' + (s.estimated_delivery ? fmtDate(s.estimated_delivery) : 'Not available yet') + '</strong></div>' +
             '<div><span>Shipping Cost</span><strong>' + (s.shipping_cost != null ? fmtPrice(s.shipping_cost) : 'Unavailable') + '</strong></div>' +
           '</div>' +
           (s.last_tracking_sync_at ? '<p class="amazon-sync-note">Last synced ' + fmtDate(s.last_tracking_sync_at) + '</p>' : '') +
@@ -1577,7 +1577,7 @@
           '<div class="amazon-shipping-grid">' +
             '<div><span>AWB</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
             '<div><span>Current Status</span><strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></strong></div>' +
-            '<div><span>Estimated Delivery</span><strong>' + (s.estimated_delivery ? fmtDate(s.estimated_delivery) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Estimated Delivery</span><strong>' + (s.estimated_delivery ? fmtDate(s.estimated_delivery) : 'Not available yet') + '</strong></div>' +
             '<div><span>Shipping Cost</span><strong>' + (s.shipping_cost != null ? fmtPrice(s.shipping_cost) : 'Unavailable') + '</strong></div>' +
             '<div><span>Pickup Status</span><strong>' + (s.pickup_status ? statusLabel(s.pickup_status) : 'Unavailable') + '</strong></div>' +
           '</div>' +
