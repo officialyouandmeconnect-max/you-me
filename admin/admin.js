@@ -71,14 +71,22 @@
 
   function throwIfError(res) { if (res.error) throw new Error(res.error.message || 'Request failed'); return res; }
 
-  // Every Amazon Shipping call goes through this — a Supabase Edge Function, never Amazon's
-  // API directly from the browser (see supabase/functions/amazon-shipping/index.ts). The
-  // function re-verifies the caller is an admin itself using this same access token; nothing
-  // here is a trust boundary on its own.
-  function callEdgeFunction(name, body) {
+  // Every Amazon Shipping/Delhivery call goes through this — a Supabase Edge Function, never
+  // the courier's API directly from the browser. The function re-verifies the caller is an
+  // admin itself using this same access token; nothing here is a trust boundary on its own.
+  //
+  // A session can go stale in a way a normal getSession() call won't catch on its own: the
+  // access token still looks present/unexpired locally, but the *refresh* token backing it has
+  // already been invalidated (e.g. Supabase rotated it from a sign-in elsewhere) — the very
+  // first sign this happened was always a bare 401 "Not authenticated." from one of these calls,
+  // with no clear way for Admin to tell "retry" from "you need to log in again". This makes that
+  // distinction explicit: one silent session refresh + retry for a call that fails
+  // authentication, and only if THAT also fails does it surface as a real, actionable "your
+  // session expired" prompt instead of a raw error.
+  function callEdgeFunction(name, body, isRetry) {
     return supabaseClient.auth.getSession().then(function (res) {
       var token = res.data && res.data.session && res.data.session.access_token;
-      if (!token) return Promise.reject(new Error('Not authenticated.'));
+      if (!token) return isRetry ? Promise.reject(sessionExpiredError()) : recoverSessionThenRetry(name, body);
       // `Authorization` carries the anon key — this project's edge gateway silently 502s any
       // request carrying a genuine Supabase JWT in any header (Authorization or otherwise)
       // before the function's own code ever runs, even with per-function JWT verification off.
@@ -96,11 +104,24 @@
         body: JSON.stringify(body)
       }).then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (data) {
+          if (r.status === 401 && !isRetry) return recoverSessionThenRetry(name, body);
           if (!r.ok) throw new Error(data.error || 'Request failed (' + r.status + ')');
           return data;
         });
       });
     });
+  }
+  function recoverSessionThenRetry(name, body) {
+    return supabaseClient.auth.refreshSession().then(function (refreshed) {
+      if (refreshed.error || !refreshed.data.session) throw sessionExpiredError();
+      return callEdgeFunction(name, body, true);
+    }).catch(function () { throw sessionExpiredError(); });
+  }
+  function sessionExpiredError() {
+    // Signing out (rather than just redirecting) clears the invalid session locally too — the
+    // next /login is a genuinely clean sign-in, not another attempt with the same dead tokens.
+    supabaseClient.auth.signOut().then(function () { window.location.href = BASE_PATH + '/login'; });
+    return new Error('Your session has expired — redirecting you to log in again…');
   }
 
   /* ---------- 1. AdminAPI (Supabase-backed data layer) ---------- */
