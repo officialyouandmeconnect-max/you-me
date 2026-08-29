@@ -1690,7 +1690,7 @@
       { key: 'out_for_delivery', label: 'Out for Delivery' },
       { key: 'delivered', label: 'Delivered' }
     ];
-    var ORDER_STATUS_RANK = { new: 0, confirmed: 1, packing: 2, ready_to_ship: 2, shipped: 3, out_for_delivery: 4, delivered: 5 };
+    var ORDER_STATUS_RANK = { new: 0, confirmed: 1, packing: 2, packed: 2, ready_to_ship: 2, shipped: 3, out_for_delivery: 4, delivered: 5 };
 
     function trackingStepsDone(o) {
       var rank = ORDER_STATUS_RANK[o.order_status] != null ? ORDER_STATUS_RANK[o.order_status] : 0;

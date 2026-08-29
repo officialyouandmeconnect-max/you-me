@@ -1149,13 +1149,13 @@
 
   /* ---------- 6. Orders ---------- */
   var orderListState = { status: 'all', q: '' };
-  var ORDER_STATUSES = ['new', 'confirmed', 'packing', 'ready_to_ship', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
+  var ORDER_STATUSES = ['new', 'confirmed', 'packing', 'packed', 'ready_to_ship', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
   // Once Delhivery has a confirmed shipment (a real provider_shipment_id/AWB), Delhivery becomes
   // the source of truth for everything from "shipped" onward — Admin no longer hand-sets those
   // stages, they're synced automatically (see delhivery-shipping's syncShipment, which advances
   // orders.order_status itself). Admin still fully owns internal prep before that point, and can
   // still cancel the order outright.
-  var INTERNAL_ORDER_STATUSES = ['new', 'confirmed', 'packing', 'ready_to_ship', 'cancelled'];
+  var INTERNAL_ORDER_STATUSES = ['new', 'confirmed', 'packing', 'packed', 'ready_to_ship', 'cancelled'];
   var PAYMENT_STATUSES = ['pending', 'paid', 'failed', 'refunded'];
 
   ROUTE_RENDERERS.orders = function (param) {
@@ -1389,7 +1389,7 @@
                 '<div class="form-field"><label for="paymentRefInput">Payment reference / notes</label><input type="text" id="paymentRefInput" placeholder="UPI ref, screenshot note…"></div>' +
                 '<button type="button" class="btn-primary btn-sm" id="savePaymentBtn">Update Payment</button>' +
               '</div>' +
-              '<div class="panel-card"><h3>Order Status</h3>' +
+              '<div class="panel-card"><h3>' + (isDelhiveryConfirmed ? 'Order Preparation' : 'Order Status') + '</h3>' +
                 '<div class="status-timeline">' + o.statusHistory.map(function (h) {
                   return '<div class="status-timeline-item"><span class="status-timeline-dot"></span><div><strong>' + statusLabel(h.status) + '</strong><br><span style="color:var(--text-soft);">' + fmtDate(h.created_at) + (h.note ? ' — ' + esc(h.note) : '') + '</span></div></div>';
                 }).join('') + '</div>' +
@@ -1572,7 +1572,8 @@
       var events = (s.shipment_events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at); });
       var terminal = ['delivered', 'cancelled', 'returned'].indexOf(s.normalized_status) !== -1;
       return '<div class="amazon-shipping-card">' +
-          '<div class="amazon-shipping-head"><strong>DELHIVERY</strong><span class="badge badge-active">Shipment Created ✓</span></div>' +
+          '<div class="amazon-shipping-head"><strong>DELHIVERY STATUS</strong><span class="badge badge-active">Shipment Created ✓</span></div>' +
+          '<p class="amazon-shipping-hint" style="margin-top:-4px;">Synced automatically from Delhivery — never manually set.</p>' +
           '<div class="amazon-shipping-grid">' +
             '<div><span>AWB</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
             '<div><span>Current Status</span><strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></strong></div>' +
