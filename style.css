@@ -1214,6 +1214,28 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .form-field .field-error { color: #C5677A; font-size: 0.72rem; min-height: 1em; }
 .form-field input.invalid, .form-field select.invalid { border-color: #C5677A; }
 
+/* Password field + eye toggle — button sits inside the input's own border, not a separate boxy
+   control next to it. */
+.password-input-wrap { position: relative; display: flex; }
+.password-input-wrap input { flex: 1; padding-right: 44px; }
+.password-toggle-btn {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-text-soft);
+  cursor: pointer;
+}
+.password-toggle-btn:hover { color: var(--color-text); }
+.password-toggle-btn:focus-visible { outline: 2px solid var(--color-pink); outline-offset: -2px; border-radius: 50%; }
+
+.account-google-hint { font-size: 0.78rem; color: var(--color-text-soft); margin: -4px 0 4px; }
+
 .order-summary-table { width: 100%; font-size: 0.82rem; margin-bottom: 14px; border-collapse: collapse; }
 .order-summary-table td { padding: 8px 0; border-bottom: 1px solid rgba(64,46,33,0.06); }
 .order-summary-table td:last-child { text-align: right; font-weight: 600; }
