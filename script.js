@@ -1324,6 +1324,12 @@
 
     var PENDING_KEY = 'ym_checkout_after_login';
     var savedAddresses = [];
+    // Set once create_order() succeeds for the CURRENT checkout session, cleared on open() —
+    // a retry after a failed/cancelled Cashfree attempt (the checkout panel stays open on
+    // failure now — see onSubmit below) must reuse this SAME internal order, never call
+    // create_order() a second time, or it would create a duplicate order and decrement stock
+    // twice for one purchase.
+    var pendingOrderId = null;
 
     // The one gate every purchase path (Buy Now, Add to Cart → Checkout, cart drawer's
     // "Checkout" button) funnels through — see CONFIG-level note at the top of this file.
@@ -1338,6 +1344,7 @@
         AccountPanel.open('Sign in to continue your order.');
         return;
       }
+      pendingOrderId = null;
       loadSavedAddresses().then(render);
       openPanel(panel());
     }
@@ -1539,19 +1546,33 @@
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Placing your order…'; }
       if (errorEl) errorEl.textContent = '';
 
-      // The order is saved to the database FIRST — Cashfree Checkout only opens once that
-      // succeeds, so the store's own records are always the source of truth. create_order() is
-      // a SECURITY DEFINER Postgres function: it independently re-validates stock and
-      // recomputes every price itself, ignoring anything the client sends here. Payment is
-      // handled entirely separately below — this write alone never marks anything paid.
-      supabaseClient.rpc('create_order', { p_customer: customer, p_address: address, p_items: rpcItems })
-        .then(function (res) {
-          if (res.error) throw new Error(res.error.message || 'Could not place your order. Please try again.');
-          var rpcResult = res.data;
-          close();
-          CartService.clear();
+      // BUG FIX: this used to close the checkout panel and clear the cart BEFORE knowing
+      // whether starting the Cashfree session even succeeded — any failure in
+      // cashfree-create-order, or in the checkout() call itself, then had nowhere visible to
+      // show up: the panel was already gone. Now the panel stays open (and the cart un-cleared)
+      // until PaymentFlow.startCheckout actually hands off to Cashfree — see its
+      // onSessionReady callback below, which is the one moment that's safe to close.
+      //
+      // create_order() is still the one place stock is decremented and prices are
+      // recomputed server-side — unchanged. If it already succeeded once for this checkout
+      // session (a previous Cashfree attempt failed/was cancelled), reuse that SAME internal
+      // order instead of creating a second one and decrementing stock twice.
+      var orderPromise = pendingOrderId
+        ? Promise.resolve({ id: pendingOrderId })
+        : supabaseClient.rpc('create_order', { p_customer: customer, p_address: address, p_items: rpcItems })
+            .then(function (res) {
+              if (res.error) throw new Error(res.error.message || 'Could not place your order. Please try again.');
+              pendingOrderId = res.data.id;
+              return res.data;
+            });
+
+      orderPromise
+        .then(function (rpcResult) {
           if (submitBtn) submitBtn.textContent = 'Starting secure payment…';
-          return PaymentFlow.startCheckout(rpcResult.id);
+          return PaymentFlow.startCheckout(rpcResult.id, function onSessionReady() {
+            close();
+            CartService.clear();
+          });
         })
         .catch(function (err) {
           if (errorEl) errorEl.textContent = err.message;
@@ -1686,16 +1707,48 @@
   }
 
   var PaymentFlow = (function () {
-    // Starts (or restarts, for a retry) a Cashfree Checkout session for an already-created
-    // internal order and immediately redirects the browser to Cashfree's own hosted checkout
-    // page — a full-page redirect, not an in-page modal, so nothing here runs again until the
-    // customer is sent back to /payment-result. Cashfree tells us who actually paid, never the
-    // reverse.
-    function startCheckout(orderId) {
+    // BUG FIX (root cause, verified against Cashfree's current Hosted Web Checkout docs —
+    // https://www.cashfree.com/docs/payments/online/web/redirect): `redirectTarget: '_self'`
+    // itself was correct (it's the SDK default) and `return_url` was already being set
+    // server-side in order_meta — that part was never the problem. The actual bug was in what
+    // this code did AROUND the checkout() call:
+    //   1. checkout()'s result was never inspected at all — no `.then()`, so a client-side
+    //      error/cancellation had no code path to react to.
+    //   2. Checkout.onSubmit (below) closed the checkout panel and cleared the cart
+    //      IMMEDIATELY after create_order() succeeded — before cashfree-create-order had even
+    //      been called, let alone before Cashfree checkout actually opened. Any failure getting
+    //      to Cashfree (edge function error, missing session id, SDK not loaded) then had
+    //      nowhere visible to show up — the panel was already gone, so it looked exactly like
+    //      what was reported: an order silently placed with no payment outcome.
+    //   3. Nothing here ever re-asked Cashfree's own server what actually happened — the
+    //      customer being back on our site was treated as the end of the flow instead of the
+    //      START of verification.
+    //
+    // Fixed: checkout()'s resolution (or the mere fact that we're still on this page after
+    // calling it, for `_self` navigations that for any reason didn't leave the page) is treated
+    // as nothing more than a signal to go ask the server what really happened — never trusted
+    // by itself. See Checkout.onSubmit for the panel/cart-clear timing fix.
+    function startCheckout(orderId, onSessionReady) {
       return callEdgeFunction('cashfree-create-order', { orderId: orderId }).then(function (result) {
         if (!result.paymentSessionId) throw new Error(result.error || 'Could not start payment.');
+        console.log('PaymentFlow: Cashfree session created', { orderId: orderId, cfOrderId: result.cfOrderId, mode: result.mode });
         var cashfree = Cashfree({ mode: result.mode === 'production' ? 'production' : 'sandbox' });
-        return cashfree.checkout({ paymentSessionId: result.paymentSessionId, redirectTarget: '_self' });
+        // From here on the customer is handed off to Cashfree — safe point for the caller to
+        // close its own UI (checkout panel, clear cart). Not done any earlier: if
+        // cashfree-create-order itself had failed above, the caller's UI is still open and the
+        // thrown error is visible right where the customer can see it and retry.
+        if (onSessionReady) onSessionReady();
+        // return_url is already set server-side (order_meta, in cashfree-create-order) —
+        // redirectTarget: '_self' is the SDK's own default full-page-navigation behaviour.
+        return cashfree.checkout({ paymentSessionId: result.paymentSessionId, redirectTarget: '_self' }).then(function (checkoutResult) {
+          if (checkoutResult && checkoutResult.error) {
+            console.log('PaymentFlow: checkout() resolved without navigating away (error/cancelled) — verifying with Cashfree server-side rather than trusting this', checkoutResult.error);
+          }
+          // A real `_self` navigation unloads this page before this line ever runs — reaching
+          // here at all means that, for whatever reason, no navigation happened. Never leave
+          // the customer stranded: drive to the same server-verified result screen ourselves.
+          PaymentResultPage.open(orderId);
+        });
       });
     }
     function verify(orderId) {
