@@ -989,6 +989,34 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .address-picker-header .panel-close { position: static; }
 .address-picker-body { padding: 12px 16px 20px; overflow-y: auto; }
 
+/* Confirm Modal — same bottom-sheet(mobile)/centered-modal(desktop) pattern as the address
+   picker, sized for a short yes/no prompt (Remove Order / Clear History / Sign Out). */
+.confirm-sheet {
+  left: 0; right: 0; bottom: 0;
+  width: 100%;
+  border-radius: 22px 22px 0 0;
+  box-shadow: 0 -8px 32px rgba(64,46,33,0.18);
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+}
+.confirm-sheet.open { transform: translateY(0); }
+@media (min-width: 640px) {
+  .confirm-sheet {
+    left: 50%; bottom: auto; top: 50%;
+    width: min(400px, calc(100% - 32px));
+    border-radius: var(--radius-lg);
+    box-shadow: 0 20px 60px rgba(64,46,33,0.22);
+    transform: translate(-50%, -50%) scale(0.94);
+    opacity: 0;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+  }
+  .confirm-sheet.open { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.confirm-sheet-body { padding: 4px 20px 22px; }
+.confirm-sheet-body p { color: var(--color-text-soft); font-size: 0.9rem; line-height: 1.5; margin: 0 0 20px; }
+.confirm-sheet-actions { display: flex; flex-direction: column; gap: 10px; }
+.confirm-sheet-actions .btn { justify-content: center; width: 100%; }
+
 .address-picker-option {
   display: flex; align-items: flex-start; gap: 12px;
   padding: 14px 14px; margin-bottom: 10px;
@@ -1313,18 +1341,33 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 
 @media (max-width: 720px) {
   .product-modal, .cart-drawer, .checkout-modal, .wishlist-drawer, .account-panel, .info-modal, .address-form-panel { width: 100%; }
+  /* BUG FIX: the inline Add to Cart / Buy Now block (.pm-actions) was never hidden on mobile,
+     so it showed alongside .pm-sticky-actions below it — two identical button pairs on the same
+     page. Only the sticky bar should show on mobile; both call the exact same doAddToCart()
+     handler (see onBodyClick in script.js), so hiding one here changes nothing functional. */
+  .pm-actions { display: none !important; }
+  .pm-stock-note { display: none; } /* belongs to the inline block only — no sticky-bar equivalent needed */
   .pm-sticky-actions {
     display: flex;
     gap: 10px;
     position: fixed;
     left: 0; right: 0; bottom: 0;
     background: var(--color-surface);
-    padding: 12px 16px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
     box-shadow: 0 -6px 20px rgba(64,46,33,0.12);
     z-index: 6;
   }
   .pm-sticky-actions .btn { flex: 1; justify-content: center; }
+  /* Extra clearance so the fixed bar (now taller with the safe-area inset on notched phones)
+     never covers the last bit of scrollable content. */
+  .product-modal-body { padding-bottom: calc(110px + env(safe-area-inset-bottom)); }
   .form-row { grid-template-columns: 1fr; }
+}
+
+@media (min-width: 721px) {
+  /* Explicit desktop/tablet counterpart — .pm-sticky-actions already defaults to display:none
+     above 720px (see its base rule), this just documents the pair for the breakpoint audit. */
+  .pm-actions { display: flex; }
 }
 
 /* =========================================================
@@ -1522,6 +1565,9 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .account-dash-section-head { display: flex; align-items: center; justify-content: space-between; margin: 26px 0 14px; }
 .account-dash-section-head h3 { font-size: 1.02rem; }
 .account-dash-section-head .link-btn { background: none; border: none; color: var(--color-pink); font-weight: 600; font-size: 0.82rem; cursor: pointer; }
+.order-history-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.order-card-remove { background: none; border: none; color: var(--color-text-soft); font-size: 0.78rem; text-decoration: underline; cursor: pointer; padding: 0; }
+.order-card-remove:hover { color: var(--color-pink); }
 
 .account-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .account-stat-card { background: var(--color-surface); border-radius: var(--radius-md); box-shadow: var(--shadow-soft); padding: 18px; text-align: center; }

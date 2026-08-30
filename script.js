@@ -311,7 +311,7 @@
       btn.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
       btn.setAttribute('aria-pressed', String(!shown));
     });
-    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose'].forEach(function (id) {
+    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose'].forEach(function (id) {
       var btn = document.getElementById(id);
       if (btn) btn.addEventListener('click', closeTopPanel);
     });
@@ -1891,6 +1891,34 @@
     return { open: open };
   })();
 
+  /* ---------- 18c. Confirm Modal (reusable branded yes/no — never window.confirm()) ---------- */
+  var ConfirmModal = (function () {
+    function panel() { return document.getElementById('confirmModal'); }
+    function body() { return document.getElementById('confirmModalBody'); }
+    var onConfirm = null;
+
+    // opts: { title, message, confirmLabel, cancelLabel, onConfirm }
+    function open(opts) {
+      document.getElementById('confirmModalTitle').textContent = opts.title || 'Are you sure?';
+      onConfirm = opts.onConfirm || null;
+      body().innerHTML =
+        '<p>' + escapeHtml(opts.message || '') + '</p>' +
+        '<div class="confirm-sheet-actions">' +
+          '<button type="button" class="btn btn-primary" id="confirmSheetConfirm">' + escapeHtml(opts.confirmLabel || 'Confirm') + '</button>' +
+          '<button type="button" class="btn btn-outline" id="confirmSheetCancel">' + escapeHtml(opts.cancelLabel || 'Cancel') + '</button>' +
+        '</div>';
+      document.getElementById('confirmSheetConfirm').addEventListener('click', function () {
+        var cb = onConfirm;
+        close();
+        if (cb) cb();
+      });
+      document.getElementById('confirmSheetCancel').addEventListener('click', close);
+      openPanel(panel());
+    }
+    function close() { closePanel(panel()); onConfirm = null; }
+    return { open: open, close: close };
+  })();
+
   /* ---------- 18b. Account dashboard (/account) ---------- */
   // Every query in this module reads through the anon-key Supabase client, same as everywhere
   // else on the site — what actually limits a customer to their own orders/addresses is Row
@@ -1922,11 +1950,27 @@
       else if (currentTab === 'profile') renderProfile();
     }
 
+    // Fetches every order once, split client-side into the customer's normal (visible) list and
+    // their hidden/archived one — `customer_hidden_at` is never interpreted by Admin, this split
+    // only ever affects what the customer sees in their own My Orders. An order can be hidden
+    // (see hideEligible()) only once it's reached a terminal state — order_status
+    // delivered/cancelled, or payment_status failed/refunded — never while still active.
     function fetchOrders() {
       if (ordersCache) return Promise.resolve(ordersCache);
       return supabaseClient.from('orders').select('*, order_items(*)').order('created_at', { ascending: false })
-        .then(function (res) { ordersCache = res.data || []; return ordersCache; })
-        .catch(function () { ordersCache = []; return ordersCache; });
+        .then(function (res) {
+          var all = res.data || [];
+          ordersCache = {
+            visible: all.filter(function (o) { return !o.customer_hidden_at; }),
+            hidden: all.filter(function (o) { return !!o.customer_hidden_at; })
+          };
+          return ordersCache;
+        })
+        .catch(function () { ordersCache = { visible: [], hidden: [] }; return ordersCache; });
+    }
+
+    function hideEligible(o) {
+      return o.order_status === 'delivered' || o.order_status === 'cancelled' || o.payment_status === 'failed' || o.payment_status === 'refunded';
     }
 
     function orderThumbAndSummary(o) {
@@ -1940,7 +1984,8 @@
 
     /* ---- Overview ---- */
     function renderOverview() {
-      fetchOrders().then(function (orders) {
+      fetchOrders().then(function (result) {
+        var orders = result.visible;
         var user = SessionService.getUser();
         var active = orders.filter(function (o) { return o.order_status !== 'delivered' && o.order_status !== 'cancelled'; }).length;
         var delivered = orders.filter(function (o) { return o.order_status === 'delivered'; }).length;
@@ -1968,12 +2013,47 @@
     }
 
     /* ---- My Orders (list) ---- */
+    var showingHidden = false; // resets to the normal (visible) list every time the tab is re-entered
     function renderOrders() {
-      fetchOrders().then(function (orders) {
-        content().innerHTML =
-          '<h3>My Orders</h3>' +
-          (orders.length === 0 ? emptyOrdersState() : orders.map(orderCardHtml).join(''));
-        bindOrderCardActions();
+      showingHidden = false;
+      fetchOrders().then(function (result) {
+        renderOrdersList(result);
+      });
+    }
+
+    function renderOrdersList(result) {
+      var orders = showingHidden ? result.hidden : result.visible;
+      var anyEligibleVisible = result.visible.some(hideEligible);
+      content().innerHTML =
+        '<div class="account-dash-section-head"><h3>' + (showingHidden ? 'Hidden Orders' : 'My Orders') + '</h3>' +
+          '<div class="order-history-actions">' +
+            (!showingHidden && anyEligibleVisible ? '<button type="button" class="link-btn" id="clearOrderHistoryBtn">Clear Order History</button>' : '') +
+            (result.hidden.length ? '<button type="button" class="link-btn" id="toggleHiddenOrdersBtn">' + (showingHidden ? 'Back to My Orders' : 'Hidden Orders (' + result.hidden.length + ')') + '</button>' : '') +
+          '</div>' +
+        '</div>' +
+        (orders.length === 0
+          ? (showingHidden ? '<div class="account-empty-state"><p>No hidden orders.</p></div>' : emptyOrdersState())
+          : orders.map(function (o) { return orderCardHtml(o, showingHidden); }).join(''));
+      bindOrderCardActions();
+
+      var toggleBtn = document.getElementById('toggleHiddenOrdersBtn');
+      if (toggleBtn) toggleBtn.addEventListener('click', function () { showingHidden = !showingHidden; renderOrdersList(result); });
+
+      var clearBtn = document.getElementById('clearOrderHistoryBtn');
+      if (clearBtn) clearBtn.addEventListener('click', function () {
+        ConfirmModal.open({
+          title: 'Clear your order history?',
+          message: 'This will remove all eligible orders from your account view. It will not delete payment, invoice or admin records.',
+          confirmLabel: 'Clear History',
+          cancelLabel: 'Keep Orders',
+          onConfirm: function () {
+            supabaseClient.rpc('clear_customer_order_history').then(function (res) {
+              if (res.error) { showToast(res.error.message || 'Could not clear order history.'); return; }
+              ordersCache = null;
+              fetchOrders().then(renderOrdersList);
+            });
+          }
+        });
       });
     }
 
@@ -1986,8 +2066,11 @@
       '</div>';
     }
 
-    function orderCardHtml(o) {
+    function orderCardHtml(o, isHiddenList) {
       var ts = orderThumbAndSummary(o);
+      var actionBtn = isHiddenList
+        ? '<button type="button" class="link-btn order-card-remove" data-restore-order="' + o.id + '">Restore</button>'
+        : (hideEligible(o) ? '<button type="button" class="link-btn order-card-remove" data-remove-order="' + o.id + '">Remove Order</button>' : '');
       return '<div class="order-card">' +
         '<div class="order-card-thumb">' + productImageHtml(ts.thumb) + '</div>' +
         '<div class="order-card-info">' +
@@ -1999,13 +2082,45 @@
           '</div>' +
         '</div>' +
         '<div class="order-card-right"><div class="order-card-total">' + formatPrice(o.total) + '</div>' +
-          '<button type="button" class="btn btn-sm btn-outline" data-view-order="' + o.id + '">View Order</button></div>' +
+          '<button type="button" class="btn btn-sm btn-outline" data-view-order="' + o.id + '">View Order</button>' +
+          actionBtn +
+        '</div>' +
       '</div>';
+    }
+
+    // Shared by both the order card (My Orders / Hidden Orders lists) and the order detail page
+    // — same RPCs, same confirmation copy, same refresh-after-confirm behaviour everywhere.
+    function confirmRemoveOrder(orderId, afterRemove) {
+      ConfirmModal.open({
+        title: 'Remove this order?',
+        message: 'This order will be removed from your account view. Your payment, invoice and order records will remain securely stored.',
+        confirmLabel: 'Remove Order',
+        cancelLabel: 'Cancel',
+        onConfirm: function () {
+          supabaseClient.rpc('hide_order', { p_order_id: orderId }).then(function (res) {
+            if (res.error) { showToast(res.error.message || 'Could not remove this order.'); return; }
+            ordersCache = null;
+            if (afterRemove) afterRemove(); else fetchOrders().then(renderOrdersList);
+          });
+        }
+      });
     }
 
     function bindOrderCardActions() {
       content().querySelectorAll('[data-view-order]').forEach(function (btn) {
         btn.addEventListener('click', function () { renderOrderDetail(Number(btn.dataset.viewOrder)); });
+      });
+      content().querySelectorAll('[data-remove-order]').forEach(function (btn) {
+        btn.addEventListener('click', function () { confirmRemoveOrder(Number(btn.dataset.removeOrder)); });
+      });
+      content().querySelectorAll('[data-restore-order]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          supabaseClient.rpc('unhide_order', { p_order_id: Number(btn.dataset.restoreOrder) }).then(function (res) {
+            if (res.error) { showToast(res.error.message || 'Could not restore this order.'); return; }
+            ordersCache = null;
+            fetchOrders().then(renderOrdersList);
+          });
+        });
       });
       var exploreBtn = document.getElementById('accountExploreBtn');
       if (exploreBtn) exploreBtn.addEventListener('click', function () { hideAccountDashboardView(); Router.navigate('kids'); });
@@ -2338,10 +2453,18 @@
                 : invoiceEligible(o)
                   ? '<button type="button" class="btn btn-sm btn-outline" id="downloadInvoiceBtn">Download Invoice</button>'
                   : '<p class="account-payment-note">Invoice will be available after your order is confirmed.</p>') +
-            '</div>';
+            '</div>' +
+            (!o.customer_hidden_at && hideEligible(o)
+              ? '<div class="panel-card"><button type="button" class="btn btn-sm btn-outline" id="removeOrderDetailBtn">Remove Order</button></div>'
+              : '');
 
           var back = document.getElementById('orderDetailBack');
           if (back) back.addEventListener('click', function () { render('orders'); });
+
+          var removeBtn = document.getElementById('removeOrderDetailBtn');
+          if (removeBtn) removeBtn.addEventListener('click', function () {
+            confirmRemoveOrder(o.id, function () { render('orders'); });
+          });
 
           var downloadBtn = document.getElementById('downloadInvoiceBtn');
           if (downloadBtn) downloadBtn.addEventListener('click', function () {
@@ -2608,7 +2731,18 @@
     }
 
     function doLogout() {
-      SessionService.logout().then(function () { window.location.href = BASE_PATH + '/'; });
+      ConfirmModal.open({
+        title: 'Sign out?',
+        message: 'Are you sure you want to sign out of your You & Me account?',
+        confirmLabel: 'Sign Out',
+        cancelLabel: 'Stay Signed In',
+        // SessionService.logout() only ever calls supabase.auth.signOut() + clears the in-memory
+        // session — it never touches CartService/WishlistService (both their own separate
+        // localStorage-backed stores), so cart and wishlist survive sign-out exactly as before.
+        onConfirm: function () {
+          SessionService.logout().then(function () { window.location.href = BASE_PATH + '/'; });
+        }
+      });
     }
 
     function init() {
