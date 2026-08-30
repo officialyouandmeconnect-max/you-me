@@ -1272,6 +1272,8 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 }
 .whatsapp-place-order-btn:hover { background: #1ebc59; }
 
+#checkoutPayBtn { width: 100%; justify-content: center; }
+
 /* ---- Order Success ---- */
 .success-modal-body { padding: 40px 30px 32px; text-align: center; }
 .success-modal-body .success-icon { font-size: 2.4rem; margin-bottom: 14px; }
@@ -1280,6 +1282,11 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .success-order-id { font-weight: 700; color: var(--color-pink); margin-bottom: 20px; }
 .success-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
 .success-actions .btn { justify-content: center; }
+
+/* Payment result page (Cashfree redirect lands here) — reuses .success-modal for positioning. */
+.payment-result-spinner { animation: paymentResultPulse 1.4s ease-in-out infinite; }
+@keyframes paymentResultPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.payment-result-failed { color: #d9534f; }
 
 /* ---- Toast ---- */
 .toast {

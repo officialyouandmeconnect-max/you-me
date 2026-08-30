@@ -1402,15 +1402,17 @@
             (totals.discount > 0 ? '<div class="cart-totals-row"><span>Discount</span><span>&minus;' + formatPrice(totals.discount) + '</span></div>' : '') +
             '<div class="cart-totals-row grand"><span>Total</span><span>' + formatPrice(totals.total) + '</span></div>' +
           '</div>' +
-          '<div class="checkout-section"><h3>Payment Method</h3>' +
-            '<label class="payment-method-card"><input type="radio" name="paymentMethod" value="whatsapp" checked>' +
-            '<span><strong>WhatsApp Order / Manual Payment</strong><p>Place your order through WhatsApp. Our team will confirm availability and send you the payment QR / payment details.</p></span></label>' +
+          '<div class="checkout-section"><h3>Payment</h3>' +
+            '<label class="payment-method-card">' +
+              '<svg viewBox="0 0 24 24" width="20" height="20" style="margin-top:2px;"><rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><line x1="2" y1="10" x2="22" y2="10" stroke="currentColor" stroke-width="2"/></svg>' +
+              '<span><strong>Secure Payment via Cashfree</strong><p>UPI, Google Pay, PhonePe, Cards, NetBanking and more — pay securely, verified automatically.</p></span>' +
+            '</label>' +
           '</div>' +
-          '<p class="checkout-stock-note">Final availability will be confirmed by our team on WhatsApp.</p>' +
+          '<p class="checkout-stock-note">Your order is saved the moment you tap Pay — final delivery details are confirmed automatically once payment succeeds.</p>' +
           '<p class="pm-selection-error" id="checkoutSubmitError"></p>' +
-          '<button type="submit" class="btn whatsapp-place-order-btn">' +
-            '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.1l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1-.2.2-.7.8-.8 1-.2.2-.3.2-.5.1-.2-.1-1-.4-1.9-1.2-.7-.6-1.2-1.4-1.3-1.6-.1-.2 0-.4.1-.5.1-.1.2-.3.4-.4.1-.1.2-.2.2-.4.1-.2 0-.3 0-.4 0-.1-.6-1.4-.8-1.9-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.4.1-.6.3-.2.2-.8.8-.8 1.9s.8 2.2 1 2.4c.1.2 1.6 2.5 3.9 3.4.5.2.9.4 1.3.5.5.2 1 .1 1.3.1.4-.1 1.3-.5 1.4-1 .2-.5.2-.9.1-1Z"/></svg>' +
-            'Place Order on WhatsApp' +
+          '<button type="submit" class="btn" id="checkoutPayBtn">' +
+            '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="#fff" stroke-width="2"/><line x1="2" y1="10" x2="22" y2="10" stroke="#fff" stroke-width="2"/></svg>' +
+            'Pay Securely with Cashfree' +
           '</button>' +
         '</form>';
 
@@ -1532,36 +1534,28 @@
       var address = { house: values.coHouse, street: values.coStreet, landmark: values.coLandmark || null, city: values.coCity, state: values.coState, pincode: values.coPin };
       var rpcItems = items.map(function (it) { return { productId: it.productId, size: it.size, color: it.color, quantity: it.qty }; });
 
-      var submitBtn = document.querySelector('.whatsapp-place-order-btn');
+      var submitBtn = document.getElementById('checkoutPayBtn');
       var errorEl = document.getElementById('checkoutSubmitError');
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Placing your order…'; }
       if (errorEl) errorEl.textContent = '';
 
-      // The order is saved to the database FIRST — WhatsApp only opens once that succeeds, so
-      // the store's own records are always the source of truth, never dependent on WhatsApp.
-      // create_order() is a SECURITY DEFINER Postgres function: it independently re-validates
-      // stock and recomputes every price itself, ignoring anything the client sends here.
+      // The order is saved to the database FIRST — Cashfree Checkout only opens once that
+      // succeeds, so the store's own records are always the source of truth. create_order() is
+      // a SECURITY DEFINER Postgres function: it independently re-validates stock and
+      // recomputes every price itself, ignoring anything the client sends here. Payment is
+      // handled entirely separately below — this write alone never marks anything paid.
       supabaseClient.rpc('create_order', { p_customer: customer, p_address: address, p_items: rpcItems })
         .then(function (res) {
           if (res.error) throw new Error(res.error.message || 'Could not place your order. Please try again.');
           var rpcResult = res.data;
-          // The function only returns id/orderNumber/totals (it doesn't echo back item names or
-          // photos) — build the full shape the WhatsApp message needs from the cart + the
-          // already-loaded product catalog, which is fine here since the order is already saved.
-          var fullItems = items.map(function (it) {
-            var product = findProduct(it.productId) || {};
-            var unitPrice = product.price || 0;
-            return { name: product.name || 'Item', image: (product.images || [])[0] || null, size: it.size, color: it.color, quantity: it.qty, totalPrice: unitPrice * it.qty };
-          });
-          var savedOrder = { id: rpcResult.id, orderNumber: rpcResult.orderNumber, items: fullItems, totals: rpcResult.totals, customer: customer, address: address };
-          var whatsappUrl = OrderService.placeOrder('whatsapp', savedOrder).url;
           close();
           CartService.clear();
-          window.setTimeout(function () { SuccessScreen.show(savedOrder, whatsappUrl); }, 320);
+          if (submitBtn) submitBtn.textContent = 'Starting secure payment…';
+          return PaymentFlow.startCheckout(rpcResult.id);
         })
         .catch(function (err) {
           if (errorEl) errorEl.textContent = err.message;
-          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Place Order on WhatsApp'; }
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Pay Securely with Cashfree'; }
         });
     }
 
@@ -1647,6 +1641,202 @@
   })();
 
   function statusLabel(s) { return String(s || '').replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
+
+  // Real Cashfree sub-method (upi/card/netbanking/app/...) -> friendly label. Falls back to the
+  // raw value for anything not explicitly listed, never invented.
+  var CASHFREE_METHOD_LABELS = { upi: 'UPI', card: 'Card', netbanking: 'Net Banking', app: 'Wallet / App', paylater: 'Pay Later', emi: 'EMI' };
+  function paymentMethodLabel(paymentMethod, cashfreeSubMethod) {
+    if (paymentMethod === 'cashfree') return 'Cashfree' + (cashfreeSubMethod ? ' — ' + (CASHFREE_METHOD_LABELS[cashfreeSubMethod] || statusLabel(cashfreeSubMethod)) : ' (Online Payment)');
+    if (paymentMethod === 'whatsapp') return 'WhatsApp / Manual Payment';
+    return statusLabel(paymentMethod || '');
+  }
+
+  /* ---------- 18a. Cashfree payment flow ---------- */
+  // Calls a cashfree-* Supabase Edge Function as the signed-in customer. Same auth workaround
+  // and same auto-recover-then-redirect pattern as the admin panel's callEdgeFunction (see
+  // admin.js) — this project's edge gateway 502s any request carrying a genuine Supabase JWT
+  // in a header, so the real access token travels base64-encoded as x-user-token-b64 instead
+  // (decoded server-side by requireUser() in supabase/functions/_shared/shipping.ts).
+  function callEdgeFunction(name, body, isRetry) {
+    return supabaseClient.auth.getSession().then(function (res) {
+      var token = res.data && res.data.session && res.data.session.access_token;
+      if (!token) return isRetry ? Promise.reject(paymentSessionExpiredError()) : recoverPaymentSessionThenRetry(name, body);
+      return fetch(SUPABASE_URL + '/functions/v1/' + name, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'apikey': SUPABASE_ANON_KEY, 'x-user-token-b64': btoa(token) },
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (data) {
+          if (r.status === 401 && !isRetry) return recoverPaymentSessionThenRetry(name, body);
+          if (!r.ok) throw new Error(data.error || 'Request failed (' + r.status + ')');
+          return data;
+        });
+      });
+    });
+  }
+  function recoverPaymentSessionThenRetry(name, body) {
+    return supabaseClient.auth.refreshSession().then(function (refreshed) {
+      if (refreshed.error || !refreshed.data.session) throw paymentSessionExpiredError();
+      return callEdgeFunction(name, body, true);
+    }).catch(function () { throw paymentSessionExpiredError(); });
+  }
+  function paymentSessionExpiredError() {
+    supabaseClient.auth.signOut().then(function () { window.location.href = BASE_PATH + '/login'; });
+    return new Error('Your session has expired — please sign in again to continue.');
+  }
+
+  var PaymentFlow = (function () {
+    // Starts (or restarts, for a retry) a Cashfree Checkout session for an already-created
+    // internal order and immediately redirects the browser to Cashfree's own hosted checkout
+    // page — a full-page redirect, not an in-page modal, so nothing here runs again until the
+    // customer is sent back to /payment-result. Cashfree tells us who actually paid, never the
+    // reverse.
+    function startCheckout(orderId) {
+      return callEdgeFunction('cashfree-create-order', { orderId: orderId }).then(function (result) {
+        if (!result.paymentSessionId) throw new Error(result.error || 'Could not start payment.');
+        var cashfree = Cashfree({ mode: result.mode === 'production' ? 'production' : 'sandbox' });
+        return cashfree.checkout({ paymentSessionId: result.paymentSessionId, redirectTarget: '_self' });
+      });
+    }
+    function verify(orderId) {
+      return callEdgeFunction('cashfree-verify-payment', { orderId: orderId });
+    }
+    return { startCheckout: startCheckout, verify: verify };
+  })();
+
+  /* ---------- 18b1. Payment Result page (/payment-result — Cashfree redirects back here) ---------- */
+  var PaymentResultPage = (function () {
+    function panel() { return document.getElementById('paymentResultModal'); }
+    function body() { return document.getElementById('paymentResultBody'); }
+    function close() { closePanel(panel()); }
+
+    var POLL_DELAYS_MS = [2000, 3000, 4000, 5000, 6000]; // ~20s of automatic re-checking before asking the customer to check manually
+
+    function open(orderId) {
+      var b = body();
+      if (!orderId || !Number.isFinite(orderId)) {
+        if (b) b.innerHTML = notFoundHtml();
+        openPanel(panel());
+        wireCloseButtons();
+        return;
+      }
+      renderVerifying(b);
+      openPanel(panel());
+      wireCloseButtons();
+      pollVerify(orderId, 0);
+    }
+
+    function renderVerifying(b, note) {
+      if (!b) return;
+      b.innerHTML =
+        '<div class="success-icon payment-result-spinner">&#9825;</div>' +
+        '<h2>Verifying your payment&hellip;</h2>' +
+        '<p>' + escapeHtml(note || 'Please don’t close this page — this only takes a moment.') + '</p>';
+    }
+
+    function pollVerify(orderId, attempt) {
+      PaymentFlow.verify(orderId).then(function (result) {
+        if (result.status === 'PAID') return renderPaid(orderId, result);
+        if (result.status === 'FAILED') return renderFailed(orderId, result);
+        // PENDING — try again a few times automatically before asking the customer to check
+        // manually. Never invent a success or failure state while genuinely unresolved.
+        if (attempt < POLL_DELAYS_MS.length) {
+          renderVerifying(body(), attempt > 0 ? 'Still confirming with Cashfree…' : null);
+          window.setTimeout(function () { pollVerify(orderId, attempt + 1); }, POLL_DELAYS_MS[attempt]);
+        } else {
+          renderStillPending(orderId, result);
+        }
+      }).catch(function (err) {
+        renderStillPending(orderId, { orderNumber: null, error: err.message });
+      });
+    }
+
+    function renderPaid(orderId, result) {
+      var b = body();
+      if (!b) return;
+      b.innerHTML =
+        '<div class="success-icon">&#9825;</div><h2>Payment Successful &hearts;</h2>' +
+        '<p>Thank you for shopping with You &amp; Me.</p>' +
+        (result.orderNumber ? '<p class="success-order-id">Order #' + escapeHtml(result.orderNumber) + '</p>' : '') +
+        '<p class="success-payment-status">Payment: <strong>' + fmtAmount(result.total) + ' paid' + (result.paymentMethod ? ' via ' + escapeHtml(paymentMethodLabel('cashfree', result.paymentMethod)) : '') + '</strong></p>' +
+        '<div class="success-actions">' +
+          '<button type="button" class="btn btn-outline" id="paymentResultViewOrder">View My Order</button>' +
+          '<button type="button" class="btn btn-outline" id="paymentResultContinue">Continue Shopping</button>' +
+        '</div>';
+      bindViewAndContinue(orderId);
+    }
+
+    function renderFailed(orderId, result) {
+      var b = body();
+      if (!b) return;
+      b.innerHTML =
+        '<div class="success-icon payment-result-failed">&#10005;</div><h2>Payment Failed</h2>' +
+        '<p>Your payment could not be completed' + (result.orderNumber ? ' for order #' + escapeHtml(result.orderNumber) : '') + '. No charge was made, and your order is still saved — you can try again right away.</p>' +
+        '<div class="success-actions">' +
+          '<button type="button" class="btn" id="paymentResultRetry">Try Again</button>' +
+          '<button type="button" class="btn btn-outline" id="paymentResultViewOrder">View My Order</button>' +
+          '<button type="button" class="btn btn-outline" id="paymentResultContinue">Continue Shopping</button>' +
+        '</div>';
+      var retryBtn = document.getElementById('paymentResultRetry');
+      if (retryBtn) retryBtn.addEventListener('click', function () {
+        retryBtn.disabled = true;
+        retryBtn.textContent = 'Starting payment…';
+        PaymentFlow.startCheckout(orderId).catch(function (err) {
+          retryBtn.disabled = false;
+          retryBtn.textContent = 'Try Again';
+          alert(err.message || 'Could not start payment — please try again.');
+        });
+      });
+      bindViewAndContinue(orderId);
+    }
+
+    function renderStillPending(orderId, result) {
+      var b = body();
+      if (!b) return;
+      b.innerHTML =
+        '<div class="success-icon payment-result-spinner">&#9825;</div><h2>Payment verification in progress</h2>' +
+        '<p>This is taking longer than usual — your order is saved either way. Tap below to check again, or come back to My Orders shortly; it updates automatically as soon as Cashfree confirms it.</p>' +
+        '<div class="success-actions">' +
+          '<button type="button" class="btn" id="paymentResultCheckAgain">Check Again</button>' +
+          '<button type="button" class="btn btn-outline" id="paymentResultViewOrder">View My Order</button>' +
+          '<button type="button" class="btn btn-outline" id="paymentResultContinue">Continue Shopping</button>' +
+        '</div>';
+      var checkBtn = document.getElementById('paymentResultCheckAgain');
+      if (checkBtn) checkBtn.addEventListener('click', function () {
+        renderVerifying(body());
+        pollVerify(orderId, POLL_DELAYS_MS.length); // one more manual check, no further auto-retry loop
+      });
+      bindViewAndContinue(orderId);
+    }
+
+    function bindViewAndContinue(orderId) {
+      var viewBtn = document.getElementById('paymentResultViewOrder');
+      if (viewBtn) viewBtn.addEventListener('click', function () {
+        close();
+        try { sessionStorage.setItem('ym_account_focus_order', String(orderId)); } catch (e) { /* ignore */ }
+        window.location.href = BASE_PATH + '/account';
+      });
+      var continueBtn = document.getElementById('paymentResultContinue');
+      if (continueBtn) continueBtn.addEventListener('click', function () { close(); window.location.href = BASE_PATH + '/'; });
+    }
+
+    function notFoundHtml() {
+      return '<div class="success-icon payment-result-failed">&#10005;</div><h2>Order not found</h2>' +
+        '<p>We couldn’t find which order this payment belongs to. If money was deducted, it will still be confirmed automatically — check My Orders in a moment.</p>' +
+        '<div class="success-actions"><button type="button" class="btn btn-outline" id="paymentResultContinue">Continue Shopping</button></div>';
+    }
+
+    function wireCloseButtons() {
+      var closeBtn = document.getElementById('paymentResultClose');
+      if (closeBtn) closeBtn.onclick = function () { close(); window.location.href = BASE_PATH + '/'; };
+      var continueBtn = document.getElementById('paymentResultContinue');
+      if (continueBtn) continueBtn.addEventListener('click', function () { close(); window.location.href = BASE_PATH + '/'; });
+    }
+
+    function fmtAmount(total) { return typeof total === 'number' ? formatPrice(total) : ''; }
+
+    return { open: open };
+  })();
 
   /* ---------- 18b. Account dashboard (/account) ---------- */
   // Every query in this module reads through the anon-key Supabase client, same as everywhere
@@ -2002,7 +2192,7 @@
         '<tbody>' + itemRows + '</tbody></table>' +
         '<table class="summary-table"><tbody>' + summaryRows + '</tbody></table>' +
         '<h2 class="section">Payment</h2>' +
-        '<div style="font-size:0.9rem;">Method: ' + escapeHtml(invoice.payment_method === 'whatsapp' ? 'WhatsApp / Manual Payment' : invoice.payment_method) + '<br>' +
+        '<div style="font-size:0.9rem;">Method: ' + escapeHtml(paymentMethodLabel(invoice.payment_method)) + '<br>' +
           'Status: ' + escapeHtml(statusLabel(invoice.payment_status)) +
           (invoice.payment_reference ? '<br>Reference: ' + escapeHtml(invoice.payment_reference) : '') +
         '</div>' +
@@ -2072,9 +2262,13 @@
               '<div class="cart-totals-row grand"><span>Total</span><span>' + formatPrice(o.total) + '</span></div>' +
             '</div>' +
             '<div class="panel-card"><h4>Payment</h4>' +
-              '<p>Method: ' + escapeHtml(o.payment_method === 'whatsapp' ? 'WhatsApp / Manual Payment' : o.payment_method) + '</p>' +
+              '<p>Method: ' + escapeHtml(paymentMethodLabel(o.payment_method, o.cashfree_payment_method)) + '</p>' +
               '<p class="success-payment-status">Payment Status: <span class="badge badge-' + o.payment_status + '">' + statusLabel(o.payment_status) + '</span></p>' +
-              '<p class="account-payment-note">Payment is confirmed manually by our team once received — you\'ll see this update automatically, no action needed here.</p>' +
+              (o.payment_status === 'paid'
+                ? '<p>Amount Paid: <strong>' + formatPrice(o.total) + '</strong>' + (o.paid_at ? '<br>Paid On: ' + formatDateTime(o.paid_at) : '') + '</p>'
+                : o.payment_method === 'cashfree'
+                  ? '<p class="account-payment-note">Payment is verified automatically by Cashfree — this updates on its own, no action needed here.</p>'
+                  : '<p class="account-payment-note">Payment is confirmed manually by our team once received — you\'ll see this update automatically, no action needed here.</p>') +
             '</div>' +
             (o.order_status === 'cancelled'
               ? '<div class="panel-card"><h4>Order Status</h4><p><span class="badge badge-cancelled">Cancelled</span></p></div>'
@@ -2857,7 +3051,17 @@
       // panel first and letting the router run after would just have it slammed shut again.
       SessionService.check().then(function (user) {
         var path = window.location.pathname;
-        var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account', resetPasswordPath = BASE_PATH + '/reset-password';
+        var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account', resetPasswordPath = BASE_PATH + '/reset-password', paymentResultPath = BASE_PATH + '/payment-result';
+
+        // Cashfree redirects the customer back here after checkout (see PaymentFlow.startCheckout's
+        // return_url). Authoritative status is fetched server-side inside PaymentResultPage — the
+        // URL landing here is never itself treated as proof of anything.
+        if (path === paymentResultPath) {
+          var qs = new URLSearchParams(window.location.search);
+          var resultOrderId = Number(qs.get('order_id'));
+          PaymentResultPage.open(resultOrderId);
+          return;
+        }
 
         // A Supabase password-recovery link lands here with its token already exchanged for a
         // session by SessionService.check() above (detectSessionInUrl parses it from the URL on

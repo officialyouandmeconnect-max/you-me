@@ -545,6 +545,12 @@
   <div class="success-modal-body" id="successModalBody"><!-- injected --></div>
 </div>
 
+<!-- Payment Result (Cashfree redirects the customer back here after checkout) -->
+<div class="panel success-modal payment-result-modal" id="paymentResultModal" role="dialog" aria-modal="true" aria-labelledby="paymentResultTitle" hidden>
+  <button class="panel-close" id="paymentResultClose" aria-label="Close">&times;</button>
+  <div class="success-modal-body" id="paymentResultBody"><!-- injected --></div>
+</div>
+
 <!-- Search Overlay -->
 <div class="panel search-overlay" id="searchOverlay" role="dialog" aria-modal="true" aria-label="Search products" hidden>
   <div class="search-overlay-header">
@@ -599,7 +605,8 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829"></script>
-<script src="script.js?v=20260829d"></script>
+<script src="script.js?v=20260829e"></script>
 </body>
 </html>

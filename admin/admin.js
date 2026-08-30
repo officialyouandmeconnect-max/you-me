@@ -29,6 +29,16 @@
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function statusLabel(s) { return String(s || '').replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
 
+  // Real Cashfree sub-method (upi/card/netbanking/app/...) -> friendly label. Mirrors the same
+  // helper in the customer site's script.js — kept manually in sync since the two frontends
+  // don't share a module system.
+  var CASHFREE_METHOD_LABELS = { upi: 'UPI', card: 'Card', netbanking: 'Net Banking', app: 'Wallet / App', paylater: 'Pay Later', emi: 'EMI' };
+  function paymentMethodLabel(paymentMethod, cashfreeSubMethod) {
+    if (paymentMethod === 'cashfree') return 'Cashfree' + (cashfreeSubMethod ? ' — ' + (CASHFREE_METHOD_LABELS[cashfreeSubMethod] || statusLabel(cashfreeSubMethod)) : ' (Online Payment)');
+    if (paymentMethod === 'whatsapp') return 'WhatsApp / Manual Payment';
+    return statusLabel(paymentMethod || '');
+  }
+
   /* ---------- 0. Inline icon system (Lucide-style stroke icons — no icon font/CDN needed) ---------- */
   var ICON_PATHS = {
     dashboard: '<rect width="7" height="9" x="3" y="3" rx="1.5"/><rect width="7" height="5" x="14" y="3" rx="1.5"/><rect width="7" height="9" x="14" y="12" rx="1.5"/><rect width="7" height="5" x="3" y="16" rx="1.5"/>',
@@ -320,7 +330,8 @@
               address: { house: o.house, street: o.street, landmark: o.landmark, city: o.city, state: o.state, pincode: o.pincode },
               items: (o.order_items || []).map(function (it) { return { image: it.product_image, name: it.product_name, sku: it.sku, size: it.size, color: it.color, quantity: it.quantity, unitPrice: it.unit_price, totalPrice: it.total_price }; }),
               totals: { subtotal: o.subtotal, delivery: o.delivery_charge, discount: o.discount, total: o.total },
-              paymentMethod: o.payment_method, paymentStatus: o.payment_status, paymentReference: o.payment_reference, paymentNotes: o.payment_notes,
+              paymentMethod: o.payment_method, paymentStatus: o.payment_status, paymentReference: o.payment_reference, paymentNotes: o.payment_notes, paidAt: o.paid_at,
+              cashfreePaymentMethod: o.cashfree_payment_method, cashfreeCfPaymentId: o.cashfree_cf_payment_id, cashfreeOrderId: o.cashfree_order_id,
               orderStatus: o.order_status, statusHistory: history
             };
           });
@@ -1313,7 +1324,7 @@
       '<tbody>' + itemRows + '</tbody></table>' +
       '<table class="summary-table"><tbody>' + summaryRows + '</tbody></table>' +
       '<h2 class="section">Payment</h2>' +
-      '<div style="font-size:0.9rem;">Method: ' + esc(invoice.payment_method === 'whatsapp' ? 'WhatsApp / Manual Payment' : invoice.payment_method) + '<br>' +
+      '<div style="font-size:0.9rem;">Method: ' + esc(paymentMethodLabel(invoice.payment_method)) + '<br>' +
         'Status: ' + esc(statusLabel(invoice.payment_status)) +
         (invoice.payment_reference ? '<br>Reference: ' + esc(invoice.payment_reference) : '') +
       '</div>' +
@@ -1381,13 +1392,19 @@
             '</div>' +
             '<div>' +
               '<div class="panel-card"><h3>Payment</h3>' +
-                '<p>Method: ' + esc(o.paymentMethod) + '<br>Status: <span class="badge badge-' + o.paymentStatus + '">' + statusLabel(o.paymentStatus) + '</span></p>' +
-                (o.paymentReference ? '<p style="font-size:0.8rem;">Reference: ' + esc(o.paymentReference) + '</p>' : '') +
+                '<p>Provider: ' + esc(o.paymentMethod === 'cashfree' ? 'Cashfree' : (o.paymentMethod === 'whatsapp' ? 'WhatsApp / Manual' : o.paymentMethod)) +
+                  '<br>Method: ' + esc(paymentMethodLabel(o.paymentMethod, o.cashfreePaymentMethod)) +
+                  '<br>Status: <span class="badge badge-' + o.paymentStatus + '">' + statusLabel(o.paymentStatus) + '</span></p>' +
+                (o.paymentStatus === 'paid' ? '<p>Paid Amount: <strong>' + fmtPrice(o.totals.total) + '</strong>' + (o.paidAt ? '<br>Paid At: ' + fmtDate(o.paidAt) : '') + '</p>' : '') +
+                (o.paymentMethod === 'cashfree' && o.cashfreeCfPaymentId ? '<p style="font-size:0.8rem;">Cashfree Payment ID: ' + esc(o.cashfreeCfPaymentId) + '</p>' : '') +
+                (o.paymentReference ? '<p style="font-size:0.8rem;">Reference' + (o.paymentMethod === 'cashfree' ? ' (Bank/UPI)' : '') + ': ' + esc(o.paymentReference) + '</p>' : '') +
                 (o.paymentNotes ? '<p style="font-size:0.8rem;">Notes: ' + esc(o.paymentNotes) + '</p>' : '') +
-                '<div class="form-field"><label for="paymentStatusSelect">Update payment status</label>' +
-                  '<select id="paymentStatusSelect">' + PAYMENT_STATUSES.map(function (s) { return '<option value="' + s + '"' + (s === o.paymentStatus ? ' selected' : '') + '>' + statusLabel(s) + '</option>'; }).join('') + '</select></div>' +
-                '<div class="form-field"><label for="paymentRefInput">Payment reference / notes</label><input type="text" id="paymentRefInput" placeholder="UPI ref, screenshot note…"></div>' +
-                '<button type="button" class="btn-primary btn-sm" id="savePaymentBtn">Update Payment</button>' +
+                (o.paymentMethod === 'cashfree'
+                  ? '<p class="amazon-shipping-hint">Verified automatically by Cashfree — not manually editable, even by an admin.</p>'
+                  : '<div class="form-field"><label for="paymentStatusSelect">Update payment status</label>' +
+                      '<select id="paymentStatusSelect">' + PAYMENT_STATUSES.map(function (s) { return '<option value="' + s + '"' + (s === o.paymentStatus ? ' selected' : '') + '>' + statusLabel(s) + '</option>'; }).join('') + '</select></div>' +
+                    '<div class="form-field"><label for="paymentRefInput">Payment reference / notes</label><input type="text" id="paymentRefInput" placeholder="UPI ref, screenshot note…"></div>' +
+                    '<button type="button" class="btn-primary btn-sm" id="savePaymentBtn">Update Payment</button>') +
               '</div>' +
               '<div class="panel-card"><h3>' + (isDelhiveryConfirmed ? 'Order Preparation' : 'Order Status') + '</h3>' +
                 '<div class="status-timeline">' + o.statusHistory.map(function (h) {
@@ -1416,7 +1433,8 @@
             '</div>' +
           '</div>';
 
-        document.getElementById('savePaymentBtn').addEventListener('click', function () {
+        var savePaymentBtn = document.getElementById('savePaymentBtn');
+        if (savePaymentBtn) savePaymentBtn.addEventListener('click', function () {
           AdminAPI.orders.setPayment(o.id, {
             paymentStatus: document.getElementById('paymentStatusSelect').value,
             paymentNotes: document.getElementById('paymentRefInput').value.trim() || null
