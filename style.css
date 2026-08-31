@@ -1591,6 +1591,11 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .order-card-date { font-size: 0.76rem; color: var(--color-text-soft); font-weight: 500; }
 .order-card-summary { font-size: 0.8rem; color: var(--color-text-soft); margin: 4px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .order-card-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+/* Soft-warning state (Payment Incomplete/Cancelled) — never the green "paid" look, but not a
+   harsh red alarm either: a warm amber, consistent with the site's pastel palette. */
+.order-card-warning { border: 1px solid #E8C27A; background: #FBF3E3; }
+.order-card-warning-label { font-size: 0.85rem; font-weight: 700; color: #8A5A12; margin: 2px 0 2px; }
+.order-card-warning-note { font-size: 0.78rem; color: var(--color-text-soft); margin: 0 0 8px; }
 .order-card-right { text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .order-card-total { font-weight: 700; }
 

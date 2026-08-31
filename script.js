@@ -1969,8 +1969,25 @@
         .catch(function () { ordersCache = { visible: [], hidden: [] }; return ordersCache; });
     }
 
+    // An order started via Cashfree that the customer never actually paid for — never
+    // progressed past 'new' (nothing prepared yet), payment_status still 'pending' forever
+    // because they closed/backed out of Cashfree Checkout. Frontend return/close is NEVER proof
+    // of payment either way — this is purely a display classification for an order whose real,
+    // server-verified payment_status genuinely never became 'paid'.
+    function isAbandonedCashfree(o) {
+      return o.order_status === 'new' && o.payment_method === 'cashfree' && o.payment_status === 'pending';
+    }
+    // Soft-warning card state for My Orders — never the green "paid" look. Distinguishes
+    // "customer just hasn't paid yet" (still retryable) from "Cashfree reported it failed"
+    // (also retryable, different wording) — both use the same Pay Again action either way.
+    function paymentIncompleteState(o) {
+      if (isAbandonedCashfree(o)) return { label: 'Payment Incomplete', note: 'Payment was not completed for this order.' };
+      if (o.payment_method === 'cashfree' && o.payment_status === 'failed') return { label: 'Payment Cancelled', note: 'Payment was not completed for this order.' };
+      return null;
+    }
+
     function hideEligible(o) {
-      return o.order_status === 'delivered' || o.order_status === 'cancelled' || o.payment_status === 'failed' || o.payment_status === 'refunded';
+      return o.order_status === 'delivered' || o.order_status === 'cancelled' || o.payment_status === 'failed' || o.payment_status === 'refunded' || isAbandonedCashfree(o);
     }
 
     function orderThumbAndSummary(o) {
@@ -2068,22 +2085,29 @@
 
     function orderCardHtml(o, isHiddenList) {
       var ts = orderThumbAndSummary(o);
-      var actionBtn = isHiddenList
+      var removeBtn = isHiddenList
         ? '<button type="button" class="link-btn order-card-remove" data-restore-order="' + o.id + '">Restore</button>'
         : (hideEligible(o) ? '<button type="button" class="link-btn order-card-remove" data-remove-order="' + o.id + '">Remove Order</button>' : '');
-      return '<div class="order-card">' +
+      var reorderBtn = '<button type="button" class="link-btn order-card-remove" data-reorder="' + o.id + '">Reorder</button>';
+      var incomplete = paymentIncompleteState(o);
+      return '<div class="order-card' + (incomplete ? ' order-card-warning' : '') + '">' +
         '<div class="order-card-thumb">' + productImageHtml(ts.thumb) + '</div>' +
         '<div class="order-card-info">' +
           '<div class="order-card-top"><strong>Order #' + escapeHtml(o.order_number) + '</strong><span class="order-card-date">' + formatDate(o.created_at) + '</span></div>' +
           '<p class="order-card-summary">' + escapeHtml(ts.summary) + '</p>' +
-          '<div class="order-card-badges">' +
-            '<span class="badge badge-' + o.payment_status + '">' + statusLabel(o.payment_status) + '</span>' +
-            '<span class="badge badge-' + o.order_status + '">' + statusLabel(o.order_status) + '</span>' +
-          '</div>' +
+          (incomplete
+            ? '<p class="order-card-warning-label">' + escapeHtml(incomplete.label) + '</p><p class="order-card-warning-note">' + escapeHtml(incomplete.note) + '</p>'
+            : '<div class="order-card-badges">' +
+                '<span class="badge badge-' + o.payment_status + '">' + statusLabel(o.payment_status) + '</span>' +
+                '<span class="badge badge-' + o.order_status + '">' + statusLabel(o.order_status) + '</span>' +
+              '</div>') +
         '</div>' +
         '<div class="order-card-right"><div class="order-card-total">' + formatPrice(o.total) + '</div>' +
-          '<button type="button" class="btn btn-sm btn-outline" data-view-order="' + o.id + '">View Order</button>' +
-          actionBtn +
+          (incomplete && !isHiddenList
+            ? '<button type="button" class="btn btn-sm btn-primary" data-pay-again="' + o.id + '">Pay Again</button>'
+            : '<button type="button" class="btn btn-sm btn-outline" data-view-order="' + o.id + '">View Order</button>') +
+          reorderBtn +
+          removeBtn +
         '</div>' +
       '</div>';
     }
@@ -2106,9 +2130,65 @@
       });
     }
 
+    // PAY AGAIN — tries to pay the SAME existing unpaid order (never creates a new one).
+    // startCheckout() already does everything steps 1-9 of the retry flow require: re-fetches
+    // the order server-side, re-checks it belongs to the caller (requireUser in the Edge
+    // Function) and isn't already paid (409 if so — see cashfree-create-order/index.ts), gets a
+    // fresh Cashfree session, and opens Checkout. Server-side Cashfree verification (not this
+    // click, not the redirect, not the popup closing) is what can ever mark it paid.
+    function payAgain(orderId, btn) {
+      if (btn.disabled) return; // guards a double-click — see below, this is the actual protection
+      btn.disabled = true;
+      var originalText = btn.textContent;
+      btn.textContent = 'Starting…';
+      PaymentFlow.startCheckout(orderId).catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        showToast(err.message || 'Could not start payment. Please try again.');
+      });
+    }
+
+    // REORDER — conceptually separate from Pay Again: builds a NEW cart from a past order's
+    // items, never touches the original order. Re-checks each item against the CURRENTLY
+    // loaded catalog (current price via CartService.addItem -> findProduct, current stock) —
+    // never blindly reuses the historical order_items snapshot's price, and never silently
+    // substitutes an unavailable product/variant for something else.
+    function reorderItems(order) {
+      var items = order.order_items || [];
+      if (!items.length) { showToast('This order has no items to reorder.'); return; }
+      var added = 0;
+      var unavailable = [];
+      items.forEach(function (it) {
+        var product = findProduct(it.product_id);
+        if (!product || product.status !== 'active') { unavailable.push(it.product_name); return; }
+        var variant = (product.variants || []).filter(function (v) { return v.size === it.size && v.color === it.color; })[0];
+        if (!variant || variant.stock < 1) { unavailable.push(it.product_name + ' (' + it.size + ', ' + it.color + ')'); return; }
+        CartService.addItem(product.id, it.size, it.color, Math.min(it.quantity, variant.stock));
+        added++;
+      });
+      if (added) { hideAccountDashboardView(); CartDrawer.open(); }
+      if (unavailable.length) {
+        showToast((added ? added + ' item(s) added to cart. ' : '') + 'No longer available: ' + unavailable.join(', '));
+      } else {
+        showToast(added + ' item(s) added to cart — review before checkout.');
+      }
+    }
+
     function bindOrderCardActions() {
       content().querySelectorAll('[data-view-order]').forEach(function (btn) {
         btn.addEventListener('click', function () { renderOrderDetail(Number(btn.dataset.viewOrder)); });
+      });
+      content().querySelectorAll('[data-pay-again]').forEach(function (btn) {
+        btn.addEventListener('click', function () { payAgain(Number(btn.dataset.payAgain), btn); });
+      });
+      content().querySelectorAll('[data-reorder]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var orderId = Number(btn.dataset.reorder);
+          fetchOrders().then(function (result) {
+            var order = result.visible.concat(result.hidden).filter(function (o) { return o.id === orderId; })[0];
+            if (order) reorderItems(order);
+          });
+        });
       });
       content().querySelectorAll('[data-remove-order]').forEach(function (btn) {
         btn.addEventListener('click', function () { confirmRemoveOrder(Number(btn.dataset.removeOrder)); });
@@ -2406,6 +2486,7 @@
         .then(function (ctx) {
           var o = ctx.o, shipment = ctx.shipment, isCourier = ctx.isCourier, courierSteps = ctx.courierSteps, invoice = ctx.invoice;
           var done = o.order_status === 'cancelled' ? null : (isCourier ? courierTrackingStepsDone(o, shipment) : trackingStepsDone(o));
+          var detailIncomplete = paymentIncompleteState(o);
 
           content().innerHTML =
             '<button type="button" class="link-btn" id="orderDetailBack">&#8592; Back to My Orders</button>' +
@@ -2429,14 +2510,18 @@
               (o.discount > 0 ? '<div class="cart-totals-row"><span>Discount</span><span>&minus;' + formatPrice(o.discount) + '</span></div>' : '') +
               '<div class="cart-totals-row grand"><span>Total</span><span>' + formatPrice(o.total) + '</span></div>' +
             '</div>' +
-            '<div class="panel-card"><h4>Payment</h4>' +
-              '<p>Method: ' + escapeHtml(paymentMethodLabel(o.payment_method, o.cashfree_payment_method)) + '</p>' +
-              '<p class="success-payment-status">Payment Status: <span class="badge badge-' + o.payment_status + '">' + statusLabel(o.payment_status) + '</span></p>' +
-              (o.payment_status === 'paid'
-                ? '<p>Amount Paid: <strong>' + formatPrice(o.total) + '</strong>' + (o.paid_at ? '<br>Paid On: ' + formatDateTime(o.paid_at) : '') + '</p>'
-                : o.payment_method === 'cashfree'
-                  ? '<p class="account-payment-note">Payment is verified automatically by Cashfree — this updates on its own, no action needed here.</p>'
-                  : '<p class="account-payment-note">Payment is confirmed manually by our team once received — you\'ll see this update automatically, no action needed here.</p>') +
+            '<div class="panel-card' + (detailIncomplete ? ' order-card-warning' : '') + '"><h4>Payment</h4>' +
+              (detailIncomplete
+                ? '<p class="order-card-warning-label">' + escapeHtml(detailIncomplete.label) + '</p>' +
+                  '<p class="order-card-warning-note">' + escapeHtml(detailIncomplete.note) + '</p>' +
+                  '<button type="button" class="btn btn-sm btn-primary" id="payAgainDetailBtn">Pay Again</button>'
+                : '<p>Method: ' + escapeHtml(paymentMethodLabel(o.payment_method, o.cashfree_payment_method)) + '</p>' +
+                  '<p class="success-payment-status">Payment Status: <span class="badge badge-' + o.payment_status + '">' + statusLabel(o.payment_status) + '</span></p>' +
+                  (o.payment_status === 'paid'
+                    ? '<p>Amount Paid: <strong>' + formatPrice(o.total) + '</strong>' + (o.paid_at ? '<br>Paid On: ' + formatDateTime(o.paid_at) : '') + '</p>'
+                    : o.payment_method === 'cashfree'
+                      ? '<p class="account-payment-note">Payment is verified automatically by Cashfree — this updates on its own, no action needed here.</p>'
+                      : '<p class="account-payment-note">Payment is confirmed manually by our team once received — you\'ll see this update automatically, no action needed here.</p>')) +
             '</div>' +
             (o.order_status === 'cancelled'
               ? '<div class="panel-card"><h4>Order Status</h4><p><span class="badge badge-cancelled">Cancelled</span></p></div>'
@@ -2465,6 +2550,9 @@
           if (removeBtn) removeBtn.addEventListener('click', function () {
             confirmRemoveOrder(o.id, function () { render('orders'); });
           });
+
+          var payAgainDetailBtn = document.getElementById('payAgainDetailBtn');
+          if (payAgainDetailBtn) payAgainDetailBtn.addEventListener('click', function () { payAgain(o.id, payAgainDetailBtn); });
 
           var downloadBtn = document.getElementById('downloadInvoiceBtn');
           if (downloadBtn) downloadBtn.addEventListener('click', function () {

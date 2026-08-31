@@ -401,6 +401,26 @@
       },
       cancelDelhivery: function (shipmentId) {
         return callEdgeFunction('delhivery-shipping', { action: 'cancel', shipmentId: shipmentId });
+      },
+      // Same pattern again — every one of these goes through the shiprocket-shipping Edge
+      // Function, never a direct table write, never fabricated data.
+      checkShiprocketServiceability: function (pincode, weightKg, cod) {
+        return callEdgeFunction('shiprocket-shipping', { action: 'check-serviceability', pincode: pincode, weightKg: weightKg, cod: cod });
+      },
+      createShiprocket: function (orderId, paymentType, pkg, courierId) {
+        return callEdgeFunction('shiprocket-shipping', { action: 'create', orderId: orderId, paymentType: paymentType, package: pkg, courierId: courierId });
+      },
+      generateLabelShiprocket: function (shipmentId) {
+        return callEdgeFunction('shiprocket-shipping', { action: 'generate-label', shipmentId: shipmentId });
+      },
+      schedulePickupShiprocket: function (shipmentId) {
+        return callEdgeFunction('shiprocket-shipping', { action: 'schedule-pickup', shipmentId: shipmentId });
+      },
+      syncShiprocket: function (shipmentId) {
+        return callEdgeFunction('shiprocket-shipping', { action: 'sync', shipmentId: shipmentId });
+      },
+      cancelShiprocket: function (shipmentId) {
+        return callEdgeFunction('shiprocket-shipping', { action: 'cancel', shipmentId: shipmentId });
       }
     },
 
@@ -1329,7 +1349,7 @@
         (invoice.payment_reference ? '<br>Reference: ' + esc(invoice.payment_reference) : '') +
       '</div>' +
       (shipment && shipment.provider ? '<h2 class="section">Shipping</h2>' +
-        '<div style="font-size:0.9rem;">Shipping Partner: ' + esc(shipment.provider === 'delhivery' ? 'Delhivery' : shipment.provider === 'amazon_shipping' ? 'Amazon Shipping' : shipment.provider) +
+        '<div style="font-size:0.9rem;">Shipping Partner: ' + esc(shipment.provider === 'delhivery' ? 'Delhivery' : shipment.provider === 'shiprocket' ? 'Shiprocket' : shipment.provider === 'amazon_shipping' ? 'Amazon Shipping' : shipment.provider) +
         (shipment.tracking_id ? '<br>Tracking / AWB: ' + esc(shipment.tracking_id) : '') +
         '</div>' : '') +
       '<div class="inv-footer">This is a system-generated invoice for a You &amp; Me order.</div>' +
@@ -1351,6 +1371,9 @@
     shippingCreateError = null;
     delhiveryServiceability = null;
     delhiveryServiceabilityError = null;
+    shiprocketServiceability = null;
+    shiprocketServiceabilityError = null;
+    shiprocketSelectedCourierId = null;
     AdminAPI.orders.get(id).then(function (o) {
       Promise.all([
         AdminAPI.shipments.get(o.id).catch(function () { return null; }),
@@ -1358,11 +1381,15 @@
       ]).then(function (results) {
         var shipment = results[0], invoice = results[1];
         o.shipment = shipment || o.shipment;
-        var isDelhiveryConfirmed = !!(o.shipment && o.shipment.provider === 'delhivery' && o.shipment.provider_shipment_id);
+        // Any provider with its own real automatic tracking (Delhivery, Shiprocket — not Custom
+        // Delivery, which stays fully admin-managed) takes over order_status from here.
+        var COURIER_TRACKED_PROVIDERS = ['delhivery', 'shiprocket'];
+        var isDelhiveryConfirmed = !!(o.shipment && COURIER_TRACKED_PROVIDERS.indexOf(o.shipment.provider) !== -1 && o.shipment.provider_shipment_id);
         var orderStatusOptions = isDelhiveryConfirmed ? INTERNAL_ORDER_STATUSES : ORDER_STATUSES;
-        // True once Delhivery's own sync has already advanced order_status past the
+        // True once the courier's own sync has already advanced order_status past the
         // admin-owned prep stages — at that point there's nothing left here for Admin to set.
         var courierLocked = isDelhiveryConfirmed && INTERNAL_ORDER_STATUSES.indexOf(o.orderStatus) === -1;
+        var courierProviderLabel = o.shipment && o.shipment.provider === 'shiprocket' ? 'Shiprocket' : 'Delhivery';
         content().innerHTML =
           '<div class="section-heading-row"><h3 style="font-size:1.1rem;">Order ' + esc(o.orderNumber) + '</h3>' +
             '<a href="' + BASE_PATH + '/admin/orders" class="btn-ghost btn-sm">← Back to Orders</a></div>' +
@@ -1411,12 +1438,12 @@
                   return '<div class="status-timeline-item"><span class="status-timeline-dot"></span><div><strong>' + statusLabel(h.status) + '</strong><br><span style="color:var(--text-soft);">' + fmtDate(h.created_at) + (h.note ? ' — ' + esc(h.note) : '') + '</span></div></div>';
                 }).join('') + '</div>' +
                 (courierLocked
-                  ? '<p class="shipping-provider-warning">Delhivery is now tracking this shipment automatically — see the Shipping card below for live courier status. This stage is no longer manually editable.</p>'
+                  ? '<p class="shipping-provider-warning">' + esc(courierProviderLabel) + ' is now tracking this shipment automatically — see the Shipping card below for live courier status. This stage is no longer manually editable.</p>'
                   : '<div class="status-select-row">' +
                       '<select id="orderStatusSelect">' + orderStatusOptions.map(function (s) { return '<option value="' + s + '"' + (s === o.orderStatus ? ' selected' : '') + '>' + statusLabel(s) + '</option>'; }).join('') + '</select>' +
                       '<button type="button" class="btn-primary btn-sm" id="saveStatusBtn">Update</button>' +
                     '</div>' +
-                    (isDelhiveryConfirmed ? '<p class="account-payment-note" style="margin-top:6px;">Once shipped, courier tracking (Shipped / In Transit / Out for Delivery / Delivered) syncs automatically from Delhivery — no need to set those here.</p>' : '')
+                    (isDelhiveryConfirmed ? '<p class="account-payment-note" style="margin-top:6px;">Once shipped, courier tracking (Shipped / In Transit / Out for Delivery / Delivered) syncs automatically from ' + esc(courierProviderLabel) + ' — no need to set those here.</p>' : '')
                 ) +
               '</div>' +
               '<div class="panel-card"><h3>Invoice</h3>' +
@@ -1473,6 +1500,9 @@
   var shippingCreateError = null;
   var delhiveryServiceability = null; // null | { serviceable, codAvailable, prepaidAvailable }
   var delhiveryServiceabilityError = null;
+  var shiprocketServiceability = null; // null | { serviceable, couriers: [...] }
+  var shiprocketServiceabilityError = null;
+  var shiprocketSelectedCourierId = null;
   // Same wording as the customer-facing COURIER_STATUS_LABELS in script.js — Admin and the
   // customer should describe the exact same Delhivery-reported state identically.
   var NORMALIZED_STATUS_LABELS = {
@@ -1480,20 +1510,22 @@
     in_transit: 'In Transit', out_for_delivery: 'Out for Delivery', delivered: 'Delivered',
     delivery_failed: 'Delivery Attempt Failed', returned: 'Return to Origin', cancelled: 'Cancelled'
   };
-  var PROVIDER_LABELS = { manual: 'Manual Shipping', amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery' };
+  var PROVIDER_LABELS = { manual: 'Custom Delivery', amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery', shiprocket: 'Shiprocket' };
 
   function renderShippingCard(o) {
     var s = o.shipment;
     var provider = shippingProviderChoice || (s && s.provider) || 'manual';
     var section = provider === 'amazon_shipping' ? renderAmazonSection(o, s)
       : provider === 'delhivery' ? renderDelhiverySection(o, s)
+      : provider === 'shiprocket' ? renderShiprocketSection(o, s)
       : renderManualSection(s);
     return '<div class="panel-card" id="shippingCardWrap"><h3>Shipping</h3>' +
       '<div class="form-field"><label for="shipProviderSelect">Shipping Provider</label>' +
         '<select id="shipProviderSelect">' +
-          '<option value="manual"' + (provider === 'manual' ? ' selected' : '') + '>Manual Shipping</option>' +
-          '<option value="amazon_shipping"' + (provider === 'amazon_shipping' ? ' selected' : '') + '>Amazon Shipping</option>' +
+          '<option value="manual"' + (provider === 'manual' ? ' selected' : '') + '>Custom Delivery</option>' +
           '<option value="delhivery"' + (provider === 'delhivery' ? ' selected' : '') + '>Delhivery</option>' +
+          '<option value="shiprocket"' + (provider === 'shiprocket' ? ' selected' : '') + '>Shiprocket</option>' +
+          (s && s.provider === 'amazon_shipping' ? '<option value="amazon_shipping" selected>Amazon Shipping</option>' : '') +
         '</select></div>' +
       (s && s.provider && s.provider !== provider
         ? '<p class="shipping-provider-warning">This order already has a ' + (PROVIDER_LABELS[s.provider] || s.provider) + ' shipment. Creating a new one here replaces it.</p>'
@@ -1649,6 +1681,83 @@
       '<button type="button" class="btn-primary btn-sm" id="dlCreateBtn">Create Delhivery Shipment</button>';
   }
 
+  function renderShiprocketSection(o, s) {
+    var isShiprocket = s && s.provider === 'shiprocket';
+    var errorBox = function (message) {
+      return '<div class="shipping-error-box"><strong>Shiprocket Shipment Could Not Be Created</strong>' +
+        '<p>Reason: ' + esc(message) + '</p><button type="button" class="btn-secondary btn-sm" id="srRetryBtn">Try Again</button></div>';
+    };
+
+    // A shipment row exists AND Shiprocket actually confirmed one (has a provider_shipment_id)
+    // — otherwise fall through to the serviceability-check/create flow.
+    if (isShiprocket && s.provider_shipment_id) {
+      var events = (s.shipment_events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at); });
+      var terminal = ['delivered', 'cancelled', 'returned'].indexOf(s.normalized_status) !== -1;
+      return '<div class="amazon-shipping-card">' +
+          '<div class="amazon-shipping-head"><strong>SHIPROCKET STATUS</strong><span class="badge badge-active">Shipment Created ✓</span></div>' +
+          '<p class="amazon-shipping-hint" style="margin-top:-4px;">Synced automatically from Shiprocket — never manually set.</p>' +
+          '<div class="amazon-shipping-grid">' +
+            '<div><span>Courier</span><strong>' + (s.courier_name ? esc(s.courier_name) : 'Not yet assigned') + '</strong></div>' +
+            '<div><span>AWB</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Current Status</span><strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></strong></div>' +
+            '<div><span>Pickup Status</span><strong>' + (s.pickup_status ? statusLabel(s.pickup_status) : 'Unavailable') + '</strong></div>' +
+          '</div>' +
+          (s.last_tracking_sync_at ? '<p class="amazon-sync-note">Last synced ' + fmtDate(s.last_tracking_sync_at) + '</p>' : '') +
+          '<div class="amazon-shipping-actions">' +
+            (s.label_url ? '<a href="' + esc(s.label_url) + '" target="_blank" class="btn-secondary btn-sm">Download Label</a>' : (s.tracking_id ? '<button type="button" class="btn-secondary btn-sm" id="srLabelBtn">Generate Label</button>' : '')) +
+            '<button type="button" class="btn-secondary btn-sm" id="srRefreshBtn">Refresh Tracking</button>' +
+            (s.pickup_status === 'requested' ? '<button type="button" class="btn-secondary btn-sm" id="srSchedulePickupBtn">Schedule Pickup</button>' : '') +
+            (terminal ? '' : '<button type="button" class="btn-danger btn-sm" id="srCancelBtn">Cancel Shipment</button>') +
+          '</div>' +
+          (s.last_error ? '<p class="shipping-error-inline">Last sync error: ' + esc(s.last_error) + '</p>' : '') +
+          '<div class="tracking-events"><h4>Tracking History</h4>' +
+          (events.length ? events.map(function (e) {
+            return '<div class="tracking-event-row"><strong>' + esc(NORMALIZED_STATUS_LABELS[e.normalized_status] || e.normalized_status || e.provider_status || '—') + '</strong>' +
+              '<span>' + (e.event_time ? fmtDate(e.event_time) : '') + (e.event_location ? ' · ' + esc(e.event_location) : '') + '</span>' +
+              (e.description ? '<p>' + esc(e.description) + '</p>' : '') + '</div>';
+          }).join('') : '<p class="amazon-shipping-hint">No courier scans available yet.</p>') +
+          '</div>' +
+        '</div>';
+    }
+
+    // Shiprocket requires checking serviceability (real courier options + rates) before
+    // creating a shipment — this step goes through the Edge Function to Shiprocket's own API,
+    // never invented courier names/charges/ETAs.
+    if (!shiprocketServiceability) {
+      return '<p class="amazon-shipping-hint">Check which couriers Shiprocket can offer for this order\'s PIN code (' + esc(o.address.pincode) + ') before creating a shipment.</p>' +
+        (shiprocketServiceabilityError ? '<p class="shipping-error-inline">' + esc(shiprocketServiceabilityError) + '</p>' : '') +
+        '<div class="form-field"><label>Package Weight (kg)</label><input type="number" step="0.01" id="srCheckWeight" placeholder="e.g. 0.4" value="0.5"></div>' +
+        '<button type="button" class="btn-primary btn-sm" id="srCheckServiceabilityBtn">Check Serviceability</button>';
+    }
+    if (!shiprocketServiceability.serviceable) {
+      return '<div class="shipping-error-box"><strong>Not Serviceable</strong><p>Shiprocket returned no couriers for PIN code ' + esc(o.address.pincode) + '.</p></div>' +
+        '<button type="button" class="btn-secondary btn-sm" id="srRecheckBtn">Check Again</button>';
+    }
+
+    var courierOptions = shiprocketServiceability.couriers.map(function (c) {
+      return '<option value="' + c.courierId + '"' + (String(shiprocketSelectedCourierId) === String(c.courierId) ? ' selected' : '') + '>' +
+        esc(c.name) + ' — ₹' + c.rate + (c.etaDays ? ' · ETA ' + esc(String(c.etaDays)) : '') + (c.codAvailable ? ' · COD' : '') + '</option>';
+    }).join('');
+
+    return '<p class="amazon-shipping-hint">PIN ' + esc(o.address.pincode) + ' is serviceable ✓ — ' + shiprocketServiceability.couriers.length + ' courier(s) available from Shiprocket.</p>' +
+      '<div class="form-field"><label>Courier</label><select id="srCourierSelect">' + courierOptions + '</select></div>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Package Weight (kg)</label><input type="number" step="0.01" id="srWeight" value="0.5"></div>' +
+        '<div class="form-field"><label>Length (cm)</label><input type="number" id="srLength" value="10"></div>' +
+      '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Width (cm)</label><input type="number" id="srWidth" value="10"></div>' +
+        '<div class="form-field"><label>Height (cm)</label><input type="number" id="srHeight" value="10"></div>' +
+      '</div>' +
+      '<div class="form-field"><label>Payment Type</label><select id="srPaymentType">' +
+        '<option value="prepaid"' + (o.paymentStatus === 'paid' ? ' selected' : '') + '>Prepaid</option>' +
+        '<option value="cod"' + (o.paymentStatus !== 'paid' ? ' selected' : '') + '>COD</option>' +
+      '</select></div>' +
+      '<p class="amazon-shipping-hint">Customer name, phone, address, and order value are loaded automatically from this order.</p>' +
+      (shippingCreateError ? errorBox(shippingCreateError) : '') +
+      '<button type="button" class="btn-primary btn-sm" id="srCreateBtn">Create Shiprocket Shipment</button>';
+  }
+
   function refreshShippingCard(o) {
     var el = document.getElementById('shippingCardWrap');
     if (el) el.outerHTML = renderShippingCard(o);
@@ -1662,6 +1771,9 @@
       shippingCreateError = null;
       delhiveryServiceability = null;
       delhiveryServiceabilityError = null;
+      shiprocketServiceability = null;
+      shiprocketServiceabilityError = null;
+      shiprocketSelectedCourierId = null;
       refreshShippingCard(o);
     });
 
@@ -1776,6 +1888,67 @@
     if (dlCancelBtn) dlCancelBtn.addEventListener('click', function () {
       if (!window.confirm('Cancel this Delhivery shipment? This cannot be undone.')) return;
       AdminAPI.shipments.cancelDelhivery(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not cancel shipment: ' + err.message); });
+    });
+
+    // ---- Shiprocket ----
+    var srCheckBtn = document.getElementById('srCheckServiceabilityBtn') || document.getElementById('srRecheckBtn');
+    if (srCheckBtn) srCheckBtn.addEventListener('click', function () {
+      var weightInput = document.getElementById('srCheckWeight');
+      var weightKg = weightInput ? Number(weightInput.value) || 0.5 : 0.5;
+      srCheckBtn.disabled = true; srCheckBtn.textContent = 'Checking…';
+      AdminAPI.shipments.checkShiprocketServiceability(o.address.pincode, weightKg, o.paymentStatus !== 'paid')
+        .then(function (res) { shiprocketServiceability = res; shiprocketServiceabilityError = null; refreshShippingCard(o); })
+        .catch(function (err) { shiprocketServiceabilityError = err.message; refreshShippingCard(o); });
+    });
+    var srCourierSelect = document.getElementById('srCourierSelect');
+    if (srCourierSelect) srCourierSelect.addEventListener('change', function () { shiprocketSelectedCourierId = srCourierSelect.value; });
+    var srCreateBtn = document.getElementById('srCreateBtn');
+    if (srCreateBtn) srCreateBtn.addEventListener('click', function () {
+      var pkg = {
+        weightKg: Number(document.getElementById('srWeight').value),
+        lengthCm: Number(document.getElementById('srLength').value),
+        widthCm: Number(document.getElementById('srWidth').value),
+        heightCm: Number(document.getElementById('srHeight').value)
+      };
+      if (!pkg.weightKg || !pkg.lengthCm || !pkg.widthCm || !pkg.heightCm) {
+        shippingCreateError = 'Package weight and all three dimensions are required.';
+        refreshShippingCard(o); return;
+      }
+      var courierId = (document.getElementById('srCourierSelect') || {}).value || shiprocketSelectedCourierId;
+      srCreateBtn.disabled = true; srCreateBtn.textContent = 'Creating…';
+      AdminAPI.shipments.createShiprocket(o.id, document.getElementById('srPaymentType').value, pkg, courierId ? Number(courierId) : undefined)
+        .then(function () { shippingCreateError = null; shippingProviderChoice = null; shiprocketServiceability = null; renderOrderDetail(o.id); })
+        .catch(function (err) { shippingCreateError = err.message; refreshShippingCard(o); });
+    });
+    var srRetryBtn = document.getElementById('srRetryBtn');
+    if (srRetryBtn) srRetryBtn.addEventListener('click', function () { shippingCreateError = null; refreshShippingCard(o); });
+    var srRefreshBtn = document.getElementById('srRefreshBtn');
+    if (srRefreshBtn) srRefreshBtn.addEventListener('click', function () {
+      srRefreshBtn.disabled = true; srRefreshBtn.textContent = 'Refreshing…';
+      AdminAPI.shipments.syncShiprocket(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not refresh tracking: ' + err.message); srRefreshBtn.disabled = false; srRefreshBtn.textContent = 'Refresh Tracking'; });
+    });
+    var srLabelBtn = document.getElementById('srLabelBtn');
+    if (srLabelBtn) srLabelBtn.addEventListener('click', function () {
+      srLabelBtn.disabled = true; srLabelBtn.textContent = 'Generating…';
+      AdminAPI.shipments.generateLabelShiprocket(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not generate label: ' + err.message); srLabelBtn.disabled = false; srLabelBtn.textContent = 'Generate Label'; });
+    });
+    var srSchedulePickupBtn = document.getElementById('srSchedulePickupBtn');
+    if (srSchedulePickupBtn) srSchedulePickupBtn.addEventListener('click', function () {
+      srSchedulePickupBtn.disabled = true; srSchedulePickupBtn.textContent = 'Scheduling…';
+      AdminAPI.shipments.schedulePickupShiprocket(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not schedule pickup: ' + err.message); srSchedulePickupBtn.disabled = false; srSchedulePickupBtn.textContent = 'Schedule Pickup'; });
+    });
+    var srCancelBtn = document.getElementById('srCancelBtn');
+    if (srCancelBtn) srCancelBtn.addEventListener('click', function () {
+      if (!window.confirm('Cancel this Shiprocket shipment? This cannot be undone.')) return;
+      AdminAPI.shipments.cancelShiprocket(o.shipment.id)
         .then(function () { renderOrderDetail(o.id); })
         .catch(function (err) { window.alert('Could not cancel shipment: ' + err.message); });
     });
