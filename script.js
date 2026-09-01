@@ -2812,6 +2812,18 @@
     // from the invoice's own frozen snapshot or is omitted (no GST/tax fields exist unless
     // invoice.tax_amount is genuinely > 0 — this store has no GST registration, so that's
     // always the case today, and the Tax line simply never renders).
+    // The official logo, exactly as already loaded on this page (same <img> the header itself
+    // uses — index.html embeds it as a data: URI, so this is never a network fetch and never a
+    // relative-path guess that could break inside a generated/printed document). Falls back to
+    // the text wordmark only if that element genuinely isn't in the DOM for some reason — never
+    // silently missing.
+    function invoiceLogoHtml() {
+      var logoImg = document.querySelector('.navbar-brand-logo');
+      var src = logoImg && logoImg.src;
+      if (!src) return '<h1>YOU &amp; ME</h1>';
+      return '<img class="inv-logo" src="' + src + '" alt="You & Me">';
+    }
+
     function buildInvoiceHtml(order, items, invoice) {
       var seller = invoice.seller_snapshot || INVOICE_SELLER_FALLBACK;
       var customer = invoice.customer_snapshot || {};
@@ -2848,7 +2860,8 @@
         '.invoice{max-width:760px;margin:0 auto;}' +
         '.inv-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #F1E4D3;padding-bottom:20px;margin-bottom:24px;}' +
         '.inv-brand h1{margin:0;font-size:1.6rem;color:#E68A98;}' +
-        '.inv-brand p{margin:2px 0 0;color:#6B6259;font-size:0.85rem;}' +
+        '.inv-logo{display:block;height:48px;width:auto;max-width:220px;object-fit:contain;object-position:left center;}' +
+        '.inv-brand p{margin:6px 0 0;color:#6B6259;font-size:0.85rem;}' +
         '.inv-meta{text-align:right;font-size:0.85rem;color:#2E2A26;}' +
         '.inv-meta strong{color:#E68A98;}' +
         'h2.section{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;color:#6B6259;margin:24px 0 8px;}' +
@@ -2865,7 +2878,7 @@
         '@media print{body{padding:0;} @page{size:A4;margin:16mm;}}' +
         '</style></head><body><div class="invoice">' +
         '<div class="inv-head">' +
-          '<div class="inv-brand"><h1>YOU &amp; ME</h1><p>Together in Every Style</p></div>' +
+          '<div class="inv-brand">' + invoiceLogoHtml() + '<p>Together in Every Style</p></div>' +
           '<div class="inv-meta">' +
             '<div><strong>Invoice #' + escapeHtml(invoice.invoice_number) + '</strong></div>' +
             '<div>Invoice Date: ' + formatDate(invoice.invoice_date) + '</div>' +
