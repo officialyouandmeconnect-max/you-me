@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260829i">
+<link rel="stylesheet" href="style.css?v=20260829j">
 </head>
 <body>
 
@@ -74,6 +74,12 @@
       </div>
     </nav>
 
+    <button type="button" class="deliver-to-btn" id="deliverToBtn" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="9.5" r="2.4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      <span class="deliver-to-text"><small>Deliver to</small><strong id="deliverToLabel">Select location</strong></span>
+      <svg viewBox="0 0 24 24" width="12" height="12" class="deliver-to-chevron"><polyline points="6 9 12 15 18 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+
     <div class="header-icons">
       <button class="icon-btn header-icon-secondary" aria-label="Search" id="searchBtn">
         <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><line x1="20" y1="20" x2="16.6" y2="16.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -100,6 +106,13 @@
       </button>
     </div>
   </div>
+  <!-- Mobile-only compact delivery-location bar — a third row under the main header row, so
+       nothing in the existing mobile header (logo/search/account/cart icons) is restructured. -->
+  <button type="button" class="deliver-to-bar-mobile" id="deliverToBtnMobile" aria-haspopup="dialog">
+    <svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="9.5" r="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+    <span>Delivering to <strong id="deliverToLabelMobile">Select location</strong></span>
+    <span class="deliver-to-bar-change">Change</span>
+  </button>
 </header>
 
 <main>
@@ -590,6 +603,16 @@
   <div class="success-modal-body" id="successModalBody"><!-- injected --></div>
 </div>
 
+<!-- Delivery Location selector — same bottom-sheet(mobile)/centered-modal(desktop) pattern as
+     the address picker. Never window.prompt/alert. -->
+<div class="panel address-picker-sheet" id="locationSheet" role="dialog" aria-modal="true" aria-labelledby="locationSheetTitle" hidden>
+  <div class="address-picker-header">
+    <h2 id="locationSheetTitle">Delivery Location</h2>
+    <button class="panel-close" id="locationSheetClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="address-picker-body" id="locationSheetBody"><!-- injected --></div>
+</div>
+
 <!-- Confirm Modal — reusable branded yes/no confirmation (Remove Order, Clear History, Sign Out).
      Never window.confirm(). Same .panel/.overlay-scrim infra as every other popup on this site. -->
 <div class="panel confirm-sheet" id="confirmModal" role="alertdialog" aria-modal="true" aria-labelledby="confirmModalTitle" hidden>
@@ -662,6 +685,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260829j"></script>
+<script src="script.js?v=20260829k"></script>
 </body>
 </html>

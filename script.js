@@ -311,7 +311,7 @@
       btn.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
       btn.setAttribute('aria-pressed', String(!shown));
     });
-    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose', 'shopFilterSheetClose', 'shopSortSheetClose'].forEach(function (id) {
+    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose', 'shopFilterSheetClose', 'shopSortSheetClose', 'locationSheetClose'].forEach(function (id) {
       var btn = document.getElementById(id);
       if (btn) btn.addEventListener('click', closeTopPanel);
     });
@@ -917,7 +917,31 @@
         '<div class="pm-sticky-actions">' +
           '<button type="button" class="btn btn-outline" id="pmAddToCartSticky"' + (p.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
           '<button type="button" class="btn btn-primary" id="pmBuyNowSticky"' + (p.stock <= 0 ? ' disabled' : '') + '>Buy Now</button>' +
-        '</div>';
+        '</div>' +
+        '<div class="pm-delivery-block">' + deliveryBlockHtml() + '</div>';
+    }
+
+    // Real-only delivery check for this product page — reads the SAME DeliveryLocation state
+    // the header "Deliver to" control uses (one source of truth site-wide), and can also check
+    // a fresh PIN inline without leaving the product modal. Never fabricates an ETA/locality.
+    function deliveryBlockHtml() {
+      var loc = DeliveryLocation.get();
+      if (loc && loc.pincode) {
+        var statusHtml = loc.checked === false
+          ? '<p class="location-result location-result-error">' + escapeHtml(loc.error || "We couldn't check delivery availability right now.") + '</p>'
+          : loc.serviceable
+            ? '<p class="location-result location-result-ok">✓ Delivery available' + (loc.etaDays != null ? ' — usually ' + loc.etaDays + ' day' + (loc.etaDays === 1 ? '' : 's') : '') + '</p>'
+            : '<p class="location-result location-result-bad">Currently unavailable at this pincode.</p>';
+        return '<h4>Delivery</h4>' +
+          '<div class="pm-delivery-row"><span>Delivering to ' + escapeHtml(loc.pincode) + '</span><button type="button" class="link-btn" id="pmDeliveryChange">Change</button></div>' +
+          statusHtml;
+      }
+      return '<h4>Delivery</h4>' +
+        '<div class="location-pin-row">' +
+          '<input type="text" inputmode="numeric" maxlength="6" placeholder="Enter PIN code" id="pmDeliveryPinInput">' +
+          '<button type="button" class="btn btn-outline btn-sm" id="pmDeliveryCheckBtn">Check</button>' +
+        '</div>' +
+        '<p class="location-result" id="pmDeliveryResult"></p>';
     }
 
     function showError(msg) {
@@ -967,11 +991,27 @@
       if (event.target.id === 'pmSizeGuideToggle') { state.sizeGuideOpen = !state.sizeGuideOpen; render(); return; }
       if (event.target.id === 'pmAddToCart' || event.target.id === 'pmAddToCartSticky') { doAddToCart(false); return; }
       if (event.target.id === 'pmBuyNow' || event.target.id === 'pmBuyNowSticky') { doAddToCart(true); return; }
+
+      if (event.target.id === 'pmDeliveryChange') { DeliveryLocation.open(); return; }
+      if (event.target.id === 'pmDeliveryCheckBtn') {
+        var pinInput = document.getElementById('pmDeliveryPinInput');
+        var resultEl = document.getElementById('pmDeliveryResult');
+        var pincode = (pinInput.value || '').trim();
+        if (!/^[1-9][0-9]{5}$/.test(pincode)) { resultEl.className = 'location-result location-result-error'; resultEl.textContent = 'Enter a valid 6-digit PIN code.'; return; }
+        event.target.disabled = true;
+        DeliveryLocation.selectPincode(pincode, null).then(function () {
+          if (state.product) render(); // re-render now shows the checked state via deliveryBlockHtml()
+        });
+        return;
+      }
     }
 
     function init() {
       var b = body();
       if (b) b.addEventListener('click', onBodyClick);
+      // Keeps the modal's own Delivery block in sync if the customer changes their location via
+      // the header control while a product is open — same shared state, never a second source of truth.
+      DeliveryLocation.onChange(function () { if (state.product && !panel().hidden) render(); });
     }
 
     return { open: open, close: close, init: init };
@@ -1747,9 +1787,25 @@
 
       var submitBtn = document.getElementById('checkoutPayBtn');
       var errorEl = document.getElementById('checkoutSubmitError');
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Placing your order…'; }
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Checking delivery…'; }
       if (errorEl) errorEl.textContent = '';
 
+      // Checkout re-check (never trusts a stale browsing-time PIN): re-run serviceability
+      // against the ACTUAL shipping PIN just entered/confirmed on this form. Only a definitive
+      // "not serviceable" blocks the order — if the check itself fails (provider API down), we
+      // don't punish the customer for our own infra hiccup; Admin still has a second,
+      // authoritative serviceability gate before actually creating a shipment.
+      DeliveryLocation.checkPincode(address.pincode).then(function (deliveryCheck) {
+        if (deliveryCheck.status === 'ok' && deliveryCheck.serviceable === false) {
+          if (errorEl) errorEl.textContent = 'Delivery is currently unavailable to PIN code ' + address.pincode + '. Please use a different address.';
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Pay Securely with Cashfree'; }
+          return;
+        }
+        proceedWithOrder();
+      }).catch(function () { proceedWithOrder(); }); // network hiccup on the check itself — don't block checkout over it
+
+      function proceedWithOrder() {
+      if (submitBtn) submitBtn.textContent = 'Placing your order…';
       // BUG FIX: this used to close the checkout panel and clear the cart BEFORE knowing
       // whether starting the Cashfree session even succeeded — any failure in
       // cashfree-create-order, or in the checkout() call itself, then had nowhere visible to
@@ -1782,6 +1838,7 @@
           if (errorEl) errorEl.textContent = err.message;
           if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Pay Securely with Cashfree'; }
         });
+      }
     }
 
     function init() { /* body listeners attach in render() */ }
@@ -2121,6 +2178,198 @@
     }
     function close() { closePanel(panel()); onConfirm = null; }
     return { open: open, close: close };
+  })();
+
+  /* ---------- 18d. Delivery Location (header "Deliver to" + serviceability check) ----------
+     One normalized customer-facing result, no matter how many courier providers exist behind
+     it (today: Delhivery + Shiprocket; a future DTDC would just be one more entry the
+     check-delivery Edge Function checks — nothing here would need to change). Never trusts a
+     browsing-time PIN for checkout — Checkout re-runs this itself against the actual shipping
+     address before payment (see Checkout module). Never fabricates a locality or ETA — only
+     ever shows what a saved address or the provider APIs themselves actually returned. */
+  var DeliveryLocation = (function () {
+    var STORAGE_KEY = 'ym_delivery_location';
+    var current = null; // null | { pincode, locality, serviceable, checked, etaDays, error }
+    var listeners = [];
+    var savedAddresses = [];
+
+    function load() {
+      try {
+        var raw = window.localStorage.getItem(STORAGE_KEY);
+        current = raw ? JSON.parse(raw) : null;
+      } catch (e) { current = null; }
+    }
+    function persist() {
+      try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(current)); } catch (e) { /* storage unavailable */ }
+      updateHeaderLabel();
+      listeners.forEach(function (fn) { fn(current); });
+    }
+    function get() { return current; }
+    function onChange(fn) { listeners.push(fn); }
+
+    function labelText() {
+      if (!current || !current.pincode) return 'Select location';
+      return current.locality ? current.locality + ' ' + current.pincode : current.pincode;
+    }
+    function updateHeaderLabel() {
+      var t = labelText();
+      var el = document.getElementById('deliverToLabel'); if (el) el.textContent = t;
+      var elM = document.getElementById('deliverToLabelMobile'); if (elM) elM.textContent = t;
+    }
+
+    // The one place check-delivery is ever called from the browser — never courier credentials,
+    // just a PIN in, a normalized real result out.
+    function checkPincode(pincode) {
+      return fetch(SUPABASE_URL + '/functions/v1/check-delivery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'apikey': SUPABASE_ANON_KEY },
+        body: JSON.stringify({ pincode: pincode })
+      }).then(function (r) { return r.json().catch(function () { return { status: 'error', error: "We couldn't check delivery availability right now. Please try again." }; }); })
+        .catch(function () { return { status: 'error', error: "We couldn't check delivery availability right now. Please try again." }; });
+    }
+
+    function selectPincode(pincode, locality) {
+      return checkPincode(pincode).then(function (result) {
+        if (result.status === 'error') {
+          current = { pincode: pincode, locality: locality || null, serviceable: null, checked: false, error: result.error };
+        } else {
+          current = { pincode: pincode, locality: locality || null, serviceable: result.serviceable, etaDays: result.etaDays, checked: true };
+        }
+        persist();
+        return current;
+      });
+    }
+    function selectAddress(addr) {
+      var locality = [addr.city, addr.state].filter(Boolean).join(', ');
+      return selectPincode(addr.pincode, locality || null);
+    }
+
+    function panel() { return document.getElementById('locationSheet'); }
+    function body() { return document.getElementById('locationSheetBody'); }
+
+    function bodyHtml() {
+      var user = SessionService.getUser();
+      var addressesHtml = user && savedAddresses.length
+        ? '<div class="location-section"><h4>Saved Addresses</h4>' +
+            savedAddresses.map(function (a) {
+              return '<button type="button" class="location-address-option" data-select-address="' + a.id + '">' +
+                '<strong>' + escapeHtml(a.label || 'Home') + '</strong>' +
+                '<span>' + escapeHtml(a.city || '') + (a.state ? ', ' + escapeHtml(a.state) : '') + ' — ' + escapeHtml(a.pincode) + '</span>' +
+              '</button>';
+            }).join('') +
+          '</div>'
+        : '';
+      return (
+        '<div class="location-section">' +
+          '<button type="button" class="btn btn-outline location-current-btn" id="locationUseCurrentBtn">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
+            'Use My Current Location' +
+          '</button>' +
+          '<p class="location-hint" id="locationCurrentHint"></p>' +
+        '</div>' +
+        '<div class="location-section">' +
+          '<h4>Enter Pincode</h4>' +
+          '<div class="location-pin-row">' +
+            '<input type="text" inputmode="numeric" maxlength="6" placeholder="6-digit PIN code" id="locationPinInput" value="' + (current && current.pincode ? escapeHtml(current.pincode) : '') + '">' +
+            '<button type="button" class="btn btn-primary" id="locationCheckBtn">Check</button>' +
+          '</div>' +
+          '<p class="location-result" id="locationResult"></p>' +
+        '</div>' +
+        addressesHtml
+      );
+    }
+
+    function renderResult(el, result) {
+      if (!el) return;
+      if (!result) { el.innerHTML = ''; el.className = 'location-result'; return; }
+      if (result.checked === false) {
+        el.className = 'location-result location-result-error';
+        el.textContent = result.error || "We couldn't check delivery availability right now. Please try again.";
+      } else if (result.serviceable) {
+        el.className = 'location-result location-result-ok';
+        el.textContent = '✓ Delivery available to ' + result.pincode + (result.etaDays != null ? ' — usually ' + result.etaDays + ' day' + (result.etaDays === 1 ? '' : 's') : '');
+      } else {
+        el.className = 'location-result location-result-bad';
+        el.textContent = 'Delivery is currently unavailable to this PIN code.';
+      }
+    }
+
+    function open() {
+      savedAddresses = [];
+      body().innerHTML = bodyHtml();
+      bind();
+      openPanel(panel());
+      var user = SessionService.getUser();
+      if (user) {
+        supabaseClient.from('addresses').select('*').order('is_default', { ascending: false }).order('created_at', { ascending: false })
+          .then(function (res) { savedAddresses = res.data || []; if (!panel().hidden) { body().innerHTML = bodyHtml(); bind(); } })
+          .catch(function () { /* no addresses to show — not fatal */ });
+      }
+    }
+    function close() { closePanel(panel()); }
+
+    function bind() {
+      var currentBtn = document.getElementById('locationUseCurrentBtn');
+      var hintEl = document.getElementById('locationCurrentHint');
+      if (currentBtn) currentBtn.addEventListener('click', function () {
+        if (!navigator.geolocation) { hintEl.textContent = 'Location isn\'t supported on this device — please enter your PIN code below.'; return; }
+        currentBtn.disabled = true;
+        hintEl.textContent = 'Getting your location…';
+        navigator.geolocation.getCurrentPosition(
+          function () {
+            // We deliberately don't run reverse-geocoding (no fake PIN would ever be honest
+            // without it) — the customer's real coordinates alone can't become a trustworthy
+            // PIN code, so we ask them to confirm it themselves instead of guessing.
+            currentBtn.disabled = false;
+            hintEl.textContent = 'Got your location — please confirm your PIN code below to check delivery.';
+            var pinInput = document.getElementById('locationPinInput');
+            if (pinInput) pinInput.focus();
+          },
+          function () {
+            currentBtn.disabled = false;
+            hintEl.textContent = 'Location permission was not granted — please enter your PIN code below.';
+          },
+          { timeout: 10000 }
+        );
+      });
+
+      var pinInput = document.getElementById('locationPinInput');
+      var checkBtn = document.getElementById('locationCheckBtn');
+      var resultEl = document.getElementById('locationResult');
+      function doCheck() {
+        var pincode = (pinInput.value || '').trim();
+        if (!/^[1-9][0-9]{5}$/.test(pincode)) { resultEl.className = 'location-result location-result-error'; resultEl.textContent = 'Enter a valid 6-digit PIN code.'; return; }
+        checkBtn.disabled = true; checkBtn.textContent = 'Checking…';
+        selectPincode(pincode, null).then(function (result) {
+          checkBtn.disabled = false; checkBtn.textContent = 'Check';
+          renderResult(resultEl, result);
+        });
+      }
+      if (checkBtn) checkBtn.addEventListener('click', doCheck);
+      if (pinInput) pinInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') doCheck(); });
+
+      body().querySelectorAll('[data-select-address]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var addr = savedAddresses.filter(function (a) { return String(a.id) === btn.dataset.selectAddress; })[0];
+          if (!addr) return;
+          btn.disabled = true;
+          selectAddress(addr).then(function () { close(); });
+        });
+      });
+    }
+
+    function init() {
+      load();
+      updateHeaderLabel();
+      var btn = document.getElementById('deliverToBtn');
+      if (btn) btn.addEventListener('click', open);
+      var btnM = document.getElementById('deliverToBtnMobile');
+      if (btnM) btnM.addEventListener('click', open);
+      var closeBtn = document.getElementById('locationSheetClose');
+      if (closeBtn) closeBtn.addEventListener('click', close);
+    }
+
+    return { init: init, get: get, onChange: onChange, checkPincode: checkPincode, selectPincode: selectPincode, open: open };
   })();
 
   /* ---------- 18b. Account dashboard (/account) ---------- */
@@ -3500,6 +3749,7 @@
     Gallery.init();
     ComingSoon.init();
     InfoModal.init();
+    DeliveryLocation.init();
     initFooter();
     initBadgesAndButtons();
     initMobileNav();

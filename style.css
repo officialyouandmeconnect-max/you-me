@@ -254,6 +254,69 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   padding: 0 3px;
 }
 
+/* ---------- Delivery Location control (header) ---------- */
+.deliver-to-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 1.5px solid rgba(64,46,33,0.14);
+  border-radius: 999px;
+  padding: 7px 14px;
+  color: var(--color-text);
+  cursor: pointer;
+  flex-shrink: 0;
+  max-width: 210px;
+}
+.deliver-to-btn:hover { border-color: var(--color-pink); }
+.deliver-to-btn svg:first-child { flex-shrink: 0; color: var(--color-pink); }
+.deliver-to-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; text-align: left; }
+.deliver-to-text small { font-size: 0.66rem; color: var(--color-text-soft); line-height: 1.2; }
+.deliver-to-text strong { font-size: 0.78rem; font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+.deliver-to-chevron { flex-shrink: 0; color: var(--color-text-soft); }
+
+.deliver-to-bar-mobile {
+  display: none; /* shown at <=720px, see media query */
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-cream);
+  border: none;
+  border-top: 1px solid rgba(64,46,33,0.06);
+  padding: 8px 16px;
+  font-size: 0.78rem;
+  color: var(--color-text);
+  cursor: pointer;
+}
+.deliver-to-bar-mobile svg { flex-shrink: 0; color: var(--color-pink); }
+.deliver-to-bar-mobile span:not(.deliver-to-bar-change) { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deliver-to-bar-change { color: var(--color-pink); font-weight: 700; flex-shrink: 0; }
+
+/* ---------- Delivery Location sheet body ---------- */
+.location-section { margin-bottom: 22px; }
+.location-section:last-child { margin-bottom: 0; }
+.location-section h4 { font-size: 0.82rem; font-weight: 700; margin-bottom: 10px; }
+.location-current-btn { width: 100%; justify-content: center; }
+.location-hint { font-size: 0.78rem; color: var(--color-text-soft); margin-top: 8px; min-height: 1.1em; }
+.location-pin-row { display: flex; gap: 8px; }
+.location-pin-row input {
+  flex: 1; border: 1.5px solid rgba(64,46,33,0.16); border-radius: var(--radius-sm);
+  padding: 10px 12px; font-family: inherit; font-size: 0.88rem; outline: none;
+}
+.location-pin-row input:focus { border-color: var(--color-pink); }
+.location-result { font-size: 0.82rem; font-weight: 600; margin-top: 10px; min-height: 1.1em; }
+.location-result-ok { color: var(--color-sage); }
+.location-result-bad { color: var(--color-pink); }
+.location-result-error { color: #C9862B; }
+.location-address-option {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+  text-align: left; background: var(--color-cream); border: none; border-radius: var(--radius-sm);
+  padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+}
+.location-address-option:hover { background: var(--color-pink-soft); }
+.location-address-option strong { font-size: 0.85rem; }
+.location-address-option span { font-size: 0.78rem; color: var(--color-text-soft); }
+
 .nav-toggle {
   display: none;
   flex-direction: column;
@@ -829,6 +892,8 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   .header-inner { padding: 14px 16px; gap: 12px; }
   .nav-toggle { display: flex; }
   .header-icon-secondary { display: none; }
+  .deliver-to-btn { display: none; }
+  .deliver-to-bar-mobile { display: flex; }
 
   /* Drawer: a full-width sheet dropping from under the header. Scrolls internally (rather than
      clipping) if a small screen's viewport is shorter than the full menu content. */
@@ -1176,6 +1241,15 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   border-radius: var(--radius-sm);
   padding: 10px 12px;
 }
+.pm-delivery-block {
+  margin-top: 16px;
+  background: var(--color-cream);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+.pm-delivery-block h4 { font-size: 0.8rem; font-weight: 700; margin-bottom: 8px; }
+.pm-delivery-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.82rem; }
+.pm-delivery-row .link-btn { background: none; border: none; color: var(--color-pink); font-weight: 600; cursor: pointer; font-size: 0.78rem; }
 
 .pm-size-guide-table {
   width: 100%;
