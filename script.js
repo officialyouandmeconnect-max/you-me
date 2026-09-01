@@ -2228,6 +2228,19 @@
         .catch(function () { return { status: 'error', error: "We couldn't check delivery availability right now. Please try again." }; });
     }
 
+    // Server-side reverse-geocode (real Google Maps Geocoding API, key never touches the
+    // browser) — turns the coordinates navigator.geolocation hands back into a real PIN code.
+    // Never guessed/derived client-side; a failure here always degrades honestly to "please
+    // confirm your PIN" rather than showing an invented code.
+    function reverseGeocode(lat, lng) {
+      return fetch(SUPABASE_URL + '/functions/v1/reverse-geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'apikey': SUPABASE_ANON_KEY },
+        body: JSON.stringify({ lat: lat, lng: lng })
+      }).then(function (r) { return r.json().catch(function () { return { status: 'error' }; }); })
+        .catch(function () { return { status: 'error' }; });
+    }
+
     function selectPincode(pincode, locality) {
       return checkPincode(pincode).then(function (result) {
         if (result.status === 'error') {
@@ -2316,14 +2329,28 @@
         currentBtn.disabled = true;
         hintEl.textContent = 'Getting your location…';
         navigator.geolocation.getCurrentPosition(
-          function () {
-            // We deliberately don't run reverse-geocoding (no fake PIN would ever be honest
-            // without it) — the customer's real coordinates alone can't become a trustworthy
-            // PIN code, so we ask them to confirm it themselves instead of guessing.
-            currentBtn.disabled = false;
-            hintEl.textContent = 'Got your location — please confirm your PIN code below to check delivery.';
-            var pinInput = document.getElementById('locationPinInput');
-            if (pinInput) pinInput.focus();
+          function (pos) {
+            hintEl.textContent = 'Got your location — looking up your PIN code…';
+            reverseGeocode(pos.coords.latitude, pos.coords.longitude).then(function (geo) {
+              currentBtn.disabled = false;
+              var pinInput = document.getElementById('locationPinInput');
+              var resultEl = document.getElementById('locationResult');
+              if (geo.status === 'ok' && geo.pincode) {
+                hintEl.textContent = 'Found your area — checking delivery for PIN ' + geo.pincode + '…';
+                if (pinInput) pinInput.value = geo.pincode;
+                var locality = [geo.locality, geo.state].filter(Boolean).join(', ');
+                selectPincode(geo.pincode, locality || null).then(function (result) {
+                  hintEl.textContent = 'Detected PIN ' + geo.pincode + (locality ? ' — ' + locality : '') + '.';
+                  renderResult(resultEl, result);
+                });
+              } else if (geo.status === 'no_postal_code' || geo.status === 'no_results') {
+                hintEl.textContent = "We got your location but couldn't find a PIN code for it — please enter it below.";
+                if (pinInput) pinInput.focus();
+              } else {
+                hintEl.textContent = "We couldn't determine your PIN code right now — please enter it below.";
+                if (pinInput) pinInput.focus();
+              }
+            });
           },
           function () {
             currentBtn.disabled = false;
