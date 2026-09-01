@@ -490,6 +490,27 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 }
 .wishlist-btn:hover { transform: scale(1.08); }
 .wishlist-btn.active { color: var(--color-pink); }
+/* Quick Add (Phase 2 shop upgrade) — replaces the permanent full-width Add to Cart/Buy Now
+   pair on every card; opens the same product modal + cart intent as before (data-add-to-cart
+   is unchanged, only its markup/position moved), so cart logic itself is untouched. */
+.product-quick-add {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--color-pink);
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 10px rgba(64,46,33,0.18);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.product-quick-add:hover { transform: scale(1.08); }
+.product-quick-add:disabled { opacity: 0.4; cursor: not-allowed; }
 .product-card h3 {
   font-family: var(--font-body);
   font-weight: 500;
@@ -1403,6 +1424,71 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .gallery-filter-chip.active { background: var(--color-pink); border-color: var(--color-pink); color: #fff; }
 .gallery-grid { grid-template-columns: repeat(4, 1fr); }
 .gallery-empty { text-align: center; padding: 60px 20px; color: var(--color-text-soft); }
+.gallery-empty .link-btn { display: inline-block; margin-top: 10px; color: var(--color-pink); font-weight: 600; }
+
+/* ---------- Phase 2 shop upgrade: toolbar, sidebar, filters, sort ---------- */
+.shop-quick-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.shop-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0; border-top: 1px solid rgba(64,46,33,0.08); border-bottom: 1px solid rgba(64,46,33,0.08);
+  margin-bottom: 22px;
+}
+.shop-result-count { font-size: 0.82rem; color: var(--color-text-soft); font-weight: 500; }
+.shop-toolbar-actions { display: flex; gap: 10px; }
+.shop-toolbar-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: none; border: 1.5px solid rgba(64,46,33,0.16); border-radius: 999px;
+  padding: 7px 16px; font-size: 0.8rem; font-weight: 600; color: var(--color-text);
+  cursor: pointer; position: relative;
+}
+.shop-toolbar-btn:hover { border-color: var(--color-pink); }
+.shop-toolbar-badge {
+  background: var(--color-pink); color: #fff; font-size: 0.66rem; font-weight: 700;
+  border-radius: 999px; min-width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; padding: 0 4px;
+}
+
+.shop-layout { display: block; }
+.shop-sidebar { display: none; } /* shown at desktop widths below */
+.shop-sidebar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.shop-sidebar-head h3 { font-size: 1rem; }
+.shop-sidebar-head .link-btn { background: none; border: none; color: var(--color-pink); font-weight: 600; font-size: 0.78rem; cursor: pointer; }
+
+.shop-filter-group { margin-bottom: 24px; }
+.shop-filter-group h4 { font-size: 0.82rem; font-weight: 700; margin-bottom: 10px; color: var(--color-text); }
+.shop-filter-option { display: flex; align-items: center; gap: 9px; font-size: 0.85rem; color: var(--color-text-soft); padding: 6px 0; cursor: pointer; }
+.shop-filter-option input { accent-color: var(--color-pink); width: 16px; height: 16px; flex-shrink: 0; }
+.shop-price-inputs { display: flex; align-items: center; gap: 8px; }
+.shop-price-inputs input {
+  width: 0; flex: 1; border: 1.5px solid rgba(64,46,33,0.16); border-radius: var(--radius-sm);
+  padding: 8px 10px; font-family: inherit; font-size: 0.82rem; outline: none;
+}
+.shop-price-inputs input:focus { border-color: var(--color-pink); }
+.shop-price-inputs span { font-size: 0.78rem; color: var(--color-text-soft); }
+.shop-color-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.shop-color-swatch {
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; position: relative;
+  box-shadow: 0 0 0 1px rgba(64,46,33,0.15);
+}
+.shop-color-swatch.active { border-color: var(--color-pink); box-shadow: 0 0 0 1px var(--color-pink); }
+.shop-filter-empty { font-size: 0.82rem; color: var(--color-text-soft); }
+
+.shop-load-more { display: block; margin: 30px auto 0; }
+
+/* Filter/Sort bottom sheets — reuse .address-picker-sheet's responsive bottom-sheet(mobile)/
+   centered-modal(desktop) behaviour; this block only adds the footer bar. */
+.shop-filter-sheet-footer {
+  display: flex; gap: 10px; padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(64,46,33,0.08); flex-shrink: 0;
+}
+.shop-filter-sheet-footer .btn { flex: 1; justify-content: center; }
+.shop-sort-option { padding: 12px 0; border-bottom: 1px solid rgba(64,46,33,0.06); }
+.shop-sort-option:last-child { border-bottom: none; }
+
+@media (min-width: 900px) {
+  .shop-toolbar-actions #shopFilterBtn { display: none; } /* sidebar covers this at desktop widths */
+  .shop-layout { display: grid; grid-template-columns: 240px 1fr; gap: 32px; align-items: start; }
+  .shop-sidebar { display: block; position: sticky; top: 100px; }
+}
 
 .view-coming-soon {
   display: flex;

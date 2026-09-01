@@ -241,7 +241,7 @@
       create: function (payload) {
         return supabaseClient.from('products').insert({
           sku: payload.sku, name: payload.name, description: payload.description || '', fabric: payload.fabric || '',
-          category: payload.category, subcategory: payload.subcategory || null, age_group: payload.ageGroup || null,
+          category: payload.category, subcategory: payload.subcategory || null, age_group: payload.ageGroup || null, gender: payload.gender || null,
           price: payload.price, sale_price: payload.salePrice, stock: 0,
           featured: !!payload.featured, new_arrival: !!payload.newArrival, status: payload.status || 'active'
         }).select().single().then(function (res) {
@@ -253,7 +253,7 @@
       update: function (id, payload) {
         return supabaseClient.from('products').update({
           sku: payload.sku, name: payload.name, description: payload.description || '', fabric: payload.fabric || '',
-          category: payload.category, subcategory: payload.subcategory || null, age_group: payload.ageGroup || null,
+          category: payload.category, subcategory: payload.subcategory || null, age_group: payload.ageGroup || null, gender: payload.gender || null,
           price: payload.price, sale_price: payload.salePrice,
           featured: !!payload.featured, new_arrival: !!payload.newArrival, status: payload.status || 'active',
           updated_at: new Date().toISOString()
@@ -1018,6 +1018,12 @@
               field('pAgeGroup', 'Age Group', p.ageGroup || '') +
               field('pFabric', 'Material / Fabric', p.fabric || '') +
             '</div>' +
+            '<div class="form-row">' +
+              '<div class="form-field"><label for="pGender">Gender (optional — powers the storefront Gender filter)</label>' +
+                '<select id="pGender"><option value=""' + (!p.gender ? ' selected' : '') + '>Not set</option>' +
+                  ['boys', 'girls', 'unisex'].map(function (g) { return '<option value="' + g + '"' + (p.gender === g ? ' selected' : '') + '>' + g.charAt(0).toUpperCase() + g.slice(1) + '</option>'; }).join('') +
+                '</select></div>' +
+            '</div>' +
             '<div class="form-field"><label for="pDescription">Description</label><textarea id="pDescription" rows="3">' + esc(p.description || '') + '</textarea></div>' +
           '</div>' +
           '<div class="panel-card">' +
@@ -1158,6 +1164,7 @@
           category: document.getElementById('pCategory').value,
           subcategory: document.getElementById('pSubcategory').value.trim(),
           ageGroup: document.getElementById('pAgeGroup').value.trim(),
+          gender: document.getElementById('pGender').value || null,
           fabric: document.getElementById('pFabric').value.trim(),
           description: document.getElementById('pDescription').value.trim(),
           price: Number(document.getElementById('pPrice').value),

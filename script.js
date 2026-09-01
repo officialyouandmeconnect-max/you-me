@@ -311,21 +311,24 @@
       btn.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
       btn.setAttribute('aria-pressed', String(!shown));
     });
-    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose'].forEach(function (id) {
+    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose', 'shopFilterSheetClose', 'shopSortSheetClose'].forEach(function (id) {
       var btn = document.getElementById(id);
       if (btn) btn.addEventListener('click', closeTopPanel);
     });
   }
 
   /* ---------- 8. Shared product-card renderer + grid event delegation ---------- */
+  // Redesigned (Phase 2 shop upgrade): the image is the focus — no permanent full-width Add to
+  // Cart / Buy Now pair on every card anymore (data-add-to-cart already just opens the product
+  // modal pre-set to the cart intent, same as before — clicking Quick Add here still goes
+  // through the exact same size/color validation there, nothing about that changed). Only a
+  // low-stock/out-of-stock note is shown — "In Stock" on every single card was just noise.
   function renderProductCard(product) {
     var discount = discountPercent(product);
     var stock = stockInfo(product.stock);
     var oldPriceHtml = product.oldPrice ? '<span class="product-old-price">' + formatPrice(product.oldPrice) + '</span>' : '';
     var discountHtml = discount > 0 ? '<span class="product-discount">' + discount + '% OFF</span>' : '';
-    var sizeChips = product.sizes.slice(0, 4).map(function (s) { return '<span class="product-chip">' + escapeHtml(s) + '</span>'; }).join('');
-    var moreSizes = product.sizes.length > 4 ? '<span class="product-chip">+' + (product.sizes.length - 4) + '</span>' : '';
-    var colorDots = product.colors.map(function (c) { return '<span class="product-color-dot" style="background:' + c.hex + '" title="' + escapeHtml(c.name) + '"></span>'; }).join('');
+    var colorDots = product.colors.slice(0, 5).map(function (c) { return '<span class="product-color-dot" style="background:' + c.hex + '" title="' + escapeHtml(c.name) + '"></span>'; }).join('');
     var wishActive = WishlistService.has(product.id);
 
     return (
@@ -335,18 +338,16 @@
           '<button class="wishlist-btn' + (wishActive ? ' active' : '') + '" type="button" aria-label="Toggle wishlist for ' + escapeHtml(product.name) + '" data-wishlist="' + product.id + '">' +
             heartIconSVG(wishActive) +
           '</button>' +
+          '<button class="product-quick-add" type="button" aria-label="Add ' + escapeHtml(product.name) + ' to cart" data-add-to-cart="' + product.id + '"' + (product.stock <= 0 ? ' disabled' : '') + '>' +
+            '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>' +
+          '</button>' +
         '</div>' +
         '<h3 data-open-product="' + product.id + '">' + escapeHtml(product.name) + '</h3>' +
         '<div class="product-price-row">' +
           '<span class="product-price">' + formatPrice(product.price) + '</span>' + oldPriceHtml + discountHtml +
         '</div>' +
-        '<div class="product-stock ' + stock.cls + '">' + stock.label + '</div>' +
-        '<div class="product-chip-row">' + sizeChips + moreSizes + '</div>' +
-        '<div class="product-chip-row">' + colorDots + '</div>' +
-        '<div class="product-card-actions">' +
-          '<button class="btn btn-outline btn-sm btn-block" type="button" data-add-to-cart="' + product.id + '"' + (product.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
-          '<button class="btn btn-primary btn-sm btn-block" type="button" data-buy-now="' + product.id + '"' + (product.stock <= 0 ? ' disabled' : '') + '>Buy Now</button>' +
-        '</div>' +
+        (product.colors.length ? '<div class="product-chip-row">' + colorDots + '</div>' : '') +
+        (stock.cls !== 'in-stock' ? '<div class="product-stock ' + stock.cls + '">' + stock.label + '</div>' : '') +
       '</article>'
     );
   }
@@ -496,82 +497,285 @@
     return { init: init, navigate: navigate };
   })();
 
-  /* ---------- 10. Gallery view (Kids Wear / View All / New Arrivals) ---------- */
+  /* ---------- 10. Gallery / Shop view (Kids Wear / View All / New Arrivals) ----------
+     Phase 2 shop upgrade: sidebar (desktop) + Filter/Sort bottom sheets (mobile) + quick chips
+     + sort + result count + Load More. Every filter option is computed from the real product
+     data actually in the current mode's pool — a facet with zero real values never renders, and
+     nothing here is ever a hardcoded/fake option list. */
   var Gallery = (function () {
-    var currentFilter = 'all';
-    var currentMode = 'kids';
+    var GENDER_LABELS = { boys: 'Boys', girls: 'Girls', unisex: 'Unisex' };
+    var SORT_OPTIONS = [
+      { value: 'recommended', label: 'Recommended' },
+      { value: 'new', label: 'New Arrivals' },
+      { value: 'price-asc', label: 'Price: Low to High' },
+      { value: 'price-desc', label: 'Price: High to Low' },
+      { value: 'discount', label: 'Discount' }
+    ];
+    var PAGE_SIZE = 12;
+
+    var mode = 'kids';        // kids | all | new-arrivals
+    var pool = [];             // the mode's base product set, before filters
+    var quickChipKey = null;   // subcategory (kids) | category (all) | null (new-arrivals)
+    var filters = {};          // { gender, ageGroup, color, minPrice, maxPrice, inStockOnly, discountOnly, quickChip }
+    var sort = 'recommended';
+    var visibleCount = PAGE_SIZE;
+
+    function resetFilters() {
+      filters = { gender: null, ageGroup: null, color: null, minPrice: null, maxPrice: null, inStockOnly: false, discountOnly: false, quickChip: 'all' };
+      sort = 'recommended';
+      visibleCount = PAGE_SIZE;
+    }
 
     function titleEl() { return document.getElementById('galleryTitle'); }
     function subtitleEl() { return document.getElementById('gallerySubtitle'); }
-    function filtersEl() { return document.getElementById('galleryFilters'); }
+    function quickChipsEl() { return document.getElementById('shopQuickChips'); }
     function gridEl() { return document.getElementById('galleryGrid'); }
     function emptyEl() { return document.getElementById('galleryEmpty'); }
+    function sidebarEl() { return document.getElementById('shopSidebar'); }
+    function resultCountEl() { return document.getElementById('shopResultCount'); }
+    function loadMoreBtn() { return document.getElementById('shopLoadMoreBtn'); }
+
+    /* ---- facet computation (only ever from real data actually present in `pool`) ---- */
+    function distinctValues(list, key) {
+      var seen = {}, out = [];
+      list.forEach(function (p) { var v = p[key]; if (v && !seen[v]) { seen[v] = true; out.push(v); } });
+      return out;
+    }
+    function distinctColors(list) {
+      var seen = {}, out = [];
+      list.forEach(function (p) { (p.colors || []).forEach(function (c) { if (!seen[c.name]) { seen[c.name] = true; out.push(c); } }); });
+      return out;
+    }
+    function priceRange(list) {
+      if (!list.length) return { min: 0, max: 0 };
+      var prices = list.map(function (p) { return p.price; });
+      return { min: Math.min.apply(null, prices), max: Math.max.apply(null, prices) };
+    }
+
+    /* ---- applying filters + sort to the pool ---- */
+    function applyFilters(list) {
+      return list.filter(function (p) {
+        if (quickChipKey && filters.quickChip && filters.quickChip !== 'all' && p[quickChipKey] !== filters.quickChip) return false;
+        if (filters.gender && p.gender !== filters.gender) return false;
+        if (filters.ageGroup && p.ageGroup !== filters.ageGroup) return false;
+        if (filters.color && !(p.colors || []).some(function (c) { return c.name === filters.color; })) return false;
+        if (filters.minPrice != null && p.price < filters.minPrice) return false;
+        if (filters.maxPrice != null && p.price > filters.maxPrice) return false;
+        if (filters.inStockOnly && p.stock <= 0) return false;
+        if (filters.discountOnly && discountPercent(p) <= 0) return false;
+        return true;
+      });
+    }
+    function applySort(list) {
+      var sorted = list.slice();
+      if (sort === 'price-asc') sorted.sort(function (a, b) { return a.price - b.price; });
+      else if (sort === 'price-desc') sorted.sort(function (a, b) { return b.price - a.price; });
+      else if (sort === 'discount') sorted.sort(function (a, b) { return discountPercent(b) - discountPercent(a); });
+      else if (sort === 'new') sorted.sort(function (a, b) { return (b.newArrival ? 1 : 0) - (a.newArrival ? 1 : 0) || b.id - a.id; });
+      else sorted.sort(function (a, b) { return (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || a.id - b.id; }); // Recommended — no fake "popularity", just featured-first then catalog order
+      return sorted;
+    }
+    function activeFilterCount() {
+      var n = 0;
+      if (filters.gender) n++;
+      if (filters.ageGroup) n++;
+      if (filters.color) n++;
+      if (filters.minPrice != null || filters.maxPrice != null) n++;
+      if (filters.inStockOnly) n++;
+      if (filters.discountOnly) n++;
+      return n;
+    }
+
+    /* ---- rendering ---- */
+    function render() {
+      var filtered = applySort(applyFilters(pool));
+      var grid = gridEl(), empty = emptyEl();
+
+      resultCountEl().textContent = filtered.length + (filtered.length === 1 ? ' Product' : ' Products');
+      var filterCountBadge = document.getElementById('shopFilterCount');
+      var n = activeFilterCount();
+      if (filterCountBadge) { filterCountBadge.hidden = n === 0; filterCountBadge.textContent = String(n); }
+      var sortLabelEl = document.getElementById('shopSortLabel');
+      if (sortLabelEl) sortLabelEl.textContent = sort === 'recommended' ? 'Sort' : (SORT_OPTIONS.filter(function (o) { return o.value === sort; })[0] || {}).label || 'Sort';
+
+      if (filtered.length === 0) {
+        grid.innerHTML = '';
+        empty.hidden = false;
+        loadMoreBtn().hidden = true;
+      } else {
+        empty.hidden = true;
+        var slice = filtered.slice(0, visibleCount);
+        renderProductGrid(grid, slice);
+        var lm = loadMoreBtn();
+        lm.hidden = filtered.length <= visibleCount;
+      }
+
+      renderQuickChips();
+      renderSidebar();
+    }
+
+    function renderQuickChips() {
+      var el = quickChipsEl();
+      if (!quickChipKey) { el.hidden = true; return; }
+      var values = quickChipKey === 'subcategory'
+        ? SUBCATEGORY_ORDER.filter(function (sub) { return pool.some(function (p) { return p.subcategory === sub; }); })
+        : distinctValues(pool, quickChipKey);
+      if (values.length < 2) { el.hidden = true; return; } // a single real option isn't a useful chip row
+      var labelFor = function (v) { return quickChipKey === 'subcategory' ? (SUBCATEGORY_LABELS[v] || v) : (v.charAt(0).toUpperCase() + v.slice(1)); };
+      el.innerHTML = ['<button type="button" class="gallery-filter-chip' + (filters.quickChip === 'all' ? ' active' : '') + '" data-chip="all">All</button>']
+        .concat(values.map(function (v) {
+          return '<button type="button" class="gallery-filter-chip' + (filters.quickChip === v ? ' active' : '') + '" data-chip="' + escapeHtml(v) + '">' + escapeHtml(labelFor(v)) + '</button>';
+        })).join('');
+      el.hidden = false;
+    }
+
+    /* ---- filter form (shared markup for the desktop sidebar AND the mobile sheet) ---- */
+    function filterFormHtml() {
+      var genders = distinctValues(pool, 'gender');
+      var ages = distinctValues(pool, 'ageGroup');
+      var colors = distinctColors(pool);
+      var range = priceRange(pool);
+      var anyDiscount = pool.some(function (p) { return discountPercent(p) > 0; });
+      var html = '';
+
+      if (genders.length > 1) {
+        html += '<div class="shop-filter-group"><h4>Gender</h4>' + genders.map(function (g) {
+          return '<label class="shop-filter-option"><input type="radio" name="shopGender" value="' + g + '"' + (filters.gender === g ? ' checked' : '') + '><span>' + (GENDER_LABELS[g] || g) + '</span></label>';
+        }).join('') + '<label class="shop-filter-option"><input type="radio" name="shopGender" value=""' + (!filters.gender ? ' checked' : '') + '><span>Any</span></label></div>';
+      }
+      if (ages.length > 1) {
+        html += '<div class="shop-filter-group"><h4>Age</h4>' + ages.map(function (a) {
+          return '<label class="shop-filter-option"><input type="radio" name="shopAge" value="' + escapeHtml(a) + '"' + (filters.ageGroup === a ? ' checked' : '') + '><span>' + escapeHtml(a) + '</span></label>';
+        }).join('') + '<label class="shop-filter-option"><input type="radio" name="shopAge" value=""' + (!filters.ageGroup ? ' checked' : '') + '><span>Any</span></label></div>';
+      }
+      if (range.max > range.min) {
+        html += '<div class="shop-filter-group"><h4>Price</h4><div class="shop-price-inputs">' +
+          '<input type="number" id="shopMinPrice" placeholder="₹' + range.min + '" value="' + (filters.minPrice != null ? filters.minPrice : '') + '" min="' + range.min + '" max="' + range.max + '">' +
+          '<span>to</span>' +
+          '<input type="number" id="shopMaxPrice" placeholder="₹' + range.max + '" value="' + (filters.maxPrice != null ? filters.maxPrice : '') + '" min="' + range.min + '" max="' + range.max + '">' +
+          '</div></div>';
+      }
+      if (colors.length > 1) {
+        html += '<div class="shop-filter-group"><h4>Color</h4><div class="shop-color-options">' + colors.map(function (c) {
+          return '<button type="button" class="shop-color-swatch' + (filters.color === c.name ? ' active' : '') + '" data-color="' + escapeHtml(c.name) + '" style="background:' + c.hex + '" title="' + escapeHtml(c.name) + '" aria-label="' + escapeHtml(c.name) + '"></button>';
+        }).join('') + '</div></div>';
+      }
+      html += '<div class="shop-filter-group"><h4>Availability</h4>' +
+        '<label class="shop-filter-option"><input type="checkbox" id="shopInStockOnly"' + (filters.inStockOnly ? ' checked' : '') + '><span>In Stock Only</span></label></div>';
+      if (anyDiscount) {
+        html += '<div class="shop-filter-group"><h4>Discount</h4>' +
+          '<label class="shop-filter-option"><input type="checkbox" id="shopDiscountOnly"' + (filters.discountOnly ? ' checked' : '') + '><span>On Sale</span></label></div>';
+      }
+      return html || '<p class="shop-filter-empty">No filters available for this view yet.</p>';
+    }
+
+    function bindFilterFormEvents(root, onChange) {
+      root.querySelectorAll('input[name="shopGender"]').forEach(function (r) { r.addEventListener('change', function () { filters.gender = r.value || null; onChange(); }); });
+      root.querySelectorAll('input[name="shopAge"]').forEach(function (r) { r.addEventListener('change', function () { filters.ageGroup = r.value || null; onChange(); }); });
+      root.querySelectorAll('[data-color]').forEach(function (btn) {
+        btn.addEventListener('click', function () { filters.color = filters.color === btn.dataset.color ? null : btn.dataset.color; onChange(); });
+      });
+      var minEl = root.querySelector('#shopMinPrice'), maxEl = root.querySelector('#shopMaxPrice');
+      if (minEl) minEl.addEventListener('change', function () { filters.minPrice = minEl.value ? Number(minEl.value) : null; onChange(); });
+      if (maxEl) maxEl.addEventListener('change', function () { filters.maxPrice = maxEl.value ? Number(maxEl.value) : null; onChange(); });
+      var inStockEl = root.querySelector('#shopInStockOnly');
+      if (inStockEl) inStockEl.addEventListener('change', function () { filters.inStockOnly = inStockEl.checked; onChange(); });
+      var discountEl = root.querySelector('#shopDiscountOnly');
+      if (discountEl) discountEl.addEventListener('change', function () { filters.discountOnly = discountEl.checked; onChange(); });
+    }
+
+    function renderSidebar() {
+      var el = sidebarEl();
+      if (!el) return;
+      el.innerHTML = '<div class="shop-sidebar-head"><h3>Filters</h3>' +
+        (activeFilterCount() > 0 ? '<button type="button" class="link-btn" id="shopSidebarClear">Clear All</button>' : '') +
+        '</div>' + filterFormHtml();
+      bindFilterFormEvents(el, function () { visibleCount = PAGE_SIZE; render(); });
+      var clearBtn = document.getElementById('shopSidebarClear');
+      if (clearBtn) clearBtn.addEventListener('click', function () { resetFilters(); render(); });
+    }
+
+    /* ---- mobile Filter / Sort bottom sheets ---- */
+    function openFilterSheet() {
+      document.getElementById('shopFilterSheetBody').innerHTML = filterFormHtml();
+      bindFilterFormEvents(document.getElementById('shopFilterSheetBody'), function () { /* apply live, "Show Results" just closes */ render(); refreshFilterSheetBody(); });
+      openPanel(document.getElementById('shopFilterSheet'));
+    }
+    function refreshFilterSheetBody() {
+      var body = document.getElementById('shopFilterSheetBody');
+      if (!body || document.getElementById('shopFilterSheet').hidden) return;
+      body.innerHTML = filterFormHtml();
+      bindFilterFormEvents(body, function () { render(); refreshFilterSheetBody(); });
+    }
+    function openSortSheet() {
+      document.getElementById('shopSortSheetBody').innerHTML = SORT_OPTIONS.map(function (o) {
+        return '<label class="shop-filter-option shop-sort-option"><input type="radio" name="shopSort" value="' + o.value + '"' + (sort === o.value ? ' checked' : '') + '><span>' + o.label + '</span></label>';
+      }).join('');
+      document.querySelectorAll('input[name="shopSort"]').forEach(function (r) {
+        r.addEventListener('change', function () { sort = r.value; visibleCount = PAGE_SIZE; render(); closePanel(document.getElementById('shopSortSheet')); });
+      });
+      openPanel(document.getElementById('shopSortSheet'));
+    }
 
     function renderKids(initialFilter) {
-      currentMode = 'kids';
-      currentFilter = initialFilter && SUBCATEGORY_ORDER.indexOf(initialFilter) !== -1 ? initialFilter : 'all';
+      mode = 'kids';
+      pool = PRODUCTS.filter(function (p) { return p.category === 'kids'; });
+      quickChipKey = 'subcategory';
+      resetFilters();
+      if (initialFilter && SUBCATEGORY_ORDER.indexOf(initialFilter) !== -1) filters.quickChip = initialFilter;
       titleEl().textContent = 'Kids Wear';
       subtitleEl().textContent = 'Comfort-first styles for every little moment.';
-
-      var kidsProducts = PRODUCTS.filter(function (p) { return p.category === 'kids'; });
-      var availableSubs = SUBCATEGORY_ORDER.filter(function (sub) {
-        return kidsProducts.some(function (p) { return p.subcategory === sub; });
-      });
-
-      var chips = ['<button type="button" class="gallery-filter-chip' + (currentFilter === 'all' ? ' active' : '') + '" data-filter="all">All</button>']
-        .concat(availableSubs.map(function (sub) {
-          return '<button type="button" class="gallery-filter-chip' + (currentFilter === sub ? ' active' : '') + '" data-filter="' + sub + '">' + SUBCATEGORY_LABELS[sub] + '</button>';
-        }));
-      filtersEl().innerHTML = chips.join('');
-      filtersEl().hidden = false;
-
-      renderList(currentFilter === 'all' ? kidsProducts : kidsProducts.filter(function (p) { return p.subcategory === currentFilter; }));
+      render();
     }
 
     function renderAll() {
-      currentMode = 'all';
+      mode = 'all';
+      pool = PRODUCTS.slice();
+      quickChipKey = 'category';
+      resetFilters();
       titleEl().textContent = 'All Products';
       subtitleEl().textContent = 'Everything from You & Me, in one place.';
-      filtersEl().hidden = true;
-      renderList(PRODUCTS.slice());
+      render();
     }
 
     function renderNewArrivals() {
-      currentMode = 'new-arrivals';
+      mode = 'new-arrivals';
+      pool = PRODUCTS.filter(function (p) { return p.newArrival; });
+      quickChipKey = null;
+      resetFilters();
       titleEl().textContent = 'New Arrivals';
       subtitleEl().textContent = 'Fresh styles, just landed.';
-      filtersEl().hidden = true;
-      renderList(PRODUCTS.filter(function (p) { return p.newArrival; }));
+      render();
     }
 
-    function renderList(products) {
-      var grid = gridEl();
-      var empty = emptyEl();
-      if (products.length === 0) {
-        grid.innerHTML = '';
-        empty.hidden = false;
-      } else {
-        empty.hidden = true;
-        renderProductGrid(grid, products);
-      }
-    }
-
-    function onFilterClick(event) {
-      var chip = event.target.closest('[data-filter]');
-      if (!chip || currentMode !== 'kids') return;
-      currentFilter = chip.dataset.filter;
-      filtersEl().querySelectorAll('.gallery-filter-chip').forEach(function (c) {
-        c.classList.toggle('active', c === chip);
-      });
-      var kidsProducts = PRODUCTS.filter(function (p) { return p.category === 'kids'; });
-      renderList(currentFilter === 'all' ? kidsProducts : kidsProducts.filter(function (p) { return p.subcategory === currentFilter; }));
+    function onQuickChipClick(event) {
+      var chip = event.target.closest('[data-chip]');
+      if (!chip) return;
+      filters.quickChip = chip.dataset.chip;
+      visibleCount = PAGE_SIZE;
+      render();
     }
 
     function init() {
       var back = document.getElementById('galleryBack');
       if (back) back.addEventListener('click', function () { Router.navigate('home'); });
-      var filters = filtersEl();
-      if (filters) filters.addEventListener('click', onFilterClick);
+      var chips = quickChipsEl();
+      if (chips) chips.addEventListener('click', onQuickChipClick);
+
+      var lm = loadMoreBtn();
+      if (lm) lm.addEventListener('click', function () { visibleCount += PAGE_SIZE; render(); });
+
+      var emptyClear = document.getElementById('galleryEmptyClear');
+      if (emptyClear) emptyClear.addEventListener('click', function () { resetFilters(); render(); });
+
+      var filterBtn = document.getElementById('shopFilterBtn');
+      if (filterBtn) filterBtn.addEventListener('click', openFilterSheet);
+      var sortBtn = document.getElementById('shopSortBtn');
+      if (sortBtn) sortBtn.addEventListener('click', openSortSheet);
+      var filterClearBtn = document.getElementById('shopFilterClearBtn');
+      if (filterClearBtn) filterClearBtn.addEventListener('click', function () { resetFilters(); render(); refreshFilterSheetBody(); });
+      var filterApplyBtn = document.getElementById('shopFilterApplyBtn');
+      if (filterApplyBtn) filterApplyBtn.addEventListener('click', function () { closePanel(document.getElementById('shopFilterSheet')); });
     }
 
     return { renderKids: renderKids, renderAll: renderAll, renderNewArrivals: renderNewArrivals, init: init };

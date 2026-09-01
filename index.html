@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260829h">
+<link rel="stylesheet" href="style.css?v=20260829i">
 </head>
 <body>
 
@@ -360,14 +360,59 @@
       <h2 id="galleryTitle">Products</h2>
     </div>
     <p class="gallery-subtitle" id="gallerySubtitle"></p>
-    <div class="gallery-filters" id="galleryFilters" hidden></div>
-    <div class="product-grid gallery-grid" id="galleryGrid"><!-- injected --></div>
-    <div class="gallery-empty" id="galleryEmpty" hidden>
-      <p>No products found in this category yet.</p>
+
+    <div class="shop-quick-chips" id="shopQuickChips" hidden></div>
+
+    <div class="shop-toolbar">
+      <span class="shop-result-count" id="shopResultCount"></span>
+      <div class="shop-toolbar-actions">
+        <button type="button" class="shop-toolbar-btn" id="shopFilterBtn">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 6h16M7 12h10M10 18h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Filter<span class="shop-toolbar-badge" id="shopFilterCount" hidden></span>
+        </button>
+        <button type="button" class="shop-toolbar-btn" id="shopSortBtn">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 4v16M6 4l-3 3M6 4l3 3M18 20V4M18 20l-3-3M18 20l3-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span id="shopSortLabel">Sort</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="shop-layout">
+      <aside class="shop-sidebar" id="shopSidebar"><!-- injected desktop filters --></aside>
+      <div class="shop-main">
+        <div class="product-grid gallery-grid" id="galleryGrid"><!-- injected --></div>
+        <div class="gallery-empty" id="galleryEmpty" hidden>
+          <p>No products match these filters.</p>
+          <button type="button" class="link-btn" id="galleryEmptyClear">Clear all filters</button>
+        </div>
+        <button type="button" class="btn btn-outline shop-load-more" id="shopLoadMoreBtn" hidden>Load More</button>
+      </div>
     </div>
   </div>
 </div>
 <!-- /VIEW: GALLERY -->
+
+<!-- Shop Filter Sheet (mobile bottom sheet / desktop unused — desktop uses the sidebar) -->
+<div class="panel address-picker-sheet shop-filter-sheet" id="shopFilterSheet" role="dialog" aria-modal="true" aria-labelledby="shopFilterSheetTitle" hidden>
+  <div class="address-picker-header">
+    <h2 id="shopFilterSheetTitle">Filters</h2>
+    <button class="panel-close" id="shopFilterSheetClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="address-picker-body" id="shopFilterSheetBody"><!-- injected --></div>
+  <div class="shop-filter-sheet-footer">
+    <button type="button" class="btn btn-outline" id="shopFilterClearBtn">Clear All</button>
+    <button type="button" class="btn btn-primary" id="shopFilterApplyBtn">Show Results</button>
+  </div>
+</div>
+
+<!-- Shop Sort Sheet (mobile) -->
+<div class="panel address-picker-sheet shop-filter-sheet" id="shopSortSheet" role="dialog" aria-modal="true" aria-labelledby="shopSortSheetTitle" hidden>
+  <div class="address-picker-header">
+    <h2 id="shopSortSheetTitle">Sort By</h2>
+    <button class="panel-close" id="shopSortSheetClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="address-picker-body" id="shopSortSheetBody"><!-- injected --></div>
+</div>
 
 <!-- ============ VIEW: COMING SOON (Family Wear / Couple Sets) ============ -->
 <div id="viewComingSoon" class="view-coming-soon" hidden>
@@ -616,7 +661,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-<script src="supabase-client.js?v=20260829"></script>
-<script src="script.js?v=20260829i"></script>
+<script src="supabase-client.js?v=20260829a"></script>
+<script src="script.js?v=20260829j"></script>
 </body>
 </html>

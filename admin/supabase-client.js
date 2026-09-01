@@ -38,6 +38,7 @@ function mapSupabaseProduct(row) {
     category: row.category,
     subcategory: row.subcategory,
     ageGroup: row.age_group,
+    gender: row.gender || null,
     price: row.sale_price || row.price,
     oldPrice: row.sale_price ? row.price : null,
     images: images,
