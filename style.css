@@ -156,11 +156,11 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .header-inner {
   max-width: var(--max-width);
   margin: 0 auto;
-  padding: 16px 24px;
+  padding: 11px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 20px;
 }
 .navbar-brand {
   display: flex;
@@ -170,9 +170,9 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 }
 .navbar-brand-logo {
   display: block;
-  width: 190px;
+  width: 168px;
   height: auto;
-  max-height: 72px;
+  max-height: 56px;
   object-fit: contain;
   object-position: left center;
   transform: none;
@@ -181,7 +181,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 }
 @media (max-width: 1024px) {
   .navbar-brand-logo {
-    width: 165px;
+    width: 150px;
     height: auto;
   }
 }
@@ -196,7 +196,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .main-nav ul {
   display: flex;
   align-items: center;
-  gap: 30px;
+  gap: 22px;
 }
 .main-nav a {
   font-size: 0.92rem;
@@ -204,6 +204,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   color: var(--color-text-soft);
   position: relative;
   padding-bottom: 4px;
+  white-space: nowrap;
   transition: color 0.2s ease;
 }
 .main-nav a:hover,
@@ -863,6 +864,33 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 }
 
 /* ---------- 11. Responsive ---------- */
+
+/* Desktop header: nav items must never wrap to two lines down to the 721px floor (below that,
+   the hamburger drawer takes over — see the 720px header rules further down). Rather than one
+   jump, gaps/font-size/icon size step down gradually across three widths so nothing crowds or
+   overflows at the in-between desktop sizes (1024/1280/1366 etc). */
+@media (max-width: 1300px) {
+  .header-inner { gap: 14px; }
+  .main-nav ul { gap: 16px; }
+  .deliver-to-btn { max-width: 170px; }
+  .deliver-to-text strong { max-width: 110px; }
+}
+@media (max-width: 1120px) {
+  .main-nav ul { gap: 11px; }
+  .main-nav a { font-size: 0.82rem; }
+  .deliver-to-btn { padding: 6px 10px; max-width: 140px; }
+  .deliver-to-text strong { max-width: 90px; }
+  .icon-btn { width: 34px; height: 34px; }
+  .header-icons { gap: 2px; }
+}
+@media (max-width: 1040px) {
+  .header-inner { padding: 11px 16px; gap: 10px; }
+  .deliver-to-btn { max-width: 118px; padding: 6px 8px; }
+  .deliver-to-text strong { max-width: 68px; }
+  .deliver-to-text small { display: none; }
+  .icon-btn { width: 32px; height: 32px; }
+}
+
 @media (max-width: 1080px) {
   .product-grid { grid-template-columns: repeat(3, 1fr); }
   .collection-grid { grid-template-columns: repeat(3, 1fr); }
