@@ -1574,7 +1574,7 @@
       var events = (s.shipment_events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at); });
       var terminal = ['delivered', 'cancelled', 'returned'].indexOf(s.normalized_status) !== -1;
       return '<div class="amazon-shipping-card">' +
-          '<div class="amazon-shipping-head"><strong>AMAZON SHIPPING</strong><span class="badge badge-active">Shipment Created ✓</span></div>' +
+          '<div class="amazon-shipping-head"><strong>AMAZON SHIPPING</strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></div>' +
           '<div class="amazon-shipping-grid">' +
             '<div><span>Tracking ID</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
             '<div><span>Current Status</span><strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></strong></div>' +
@@ -1629,7 +1629,11 @@
       var events = (s.shipment_events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at); });
       var terminal = ['delivered', 'cancelled', 'returned'].indexOf(s.normalized_status) !== -1;
       return '<div class="amazon-shipping-card">' +
-          '<div class="amazon-shipping-head"><strong>DELHIVERY STATUS</strong><span class="badge badge-active">Shipment Created ✓</span></div>' +
+          // BUG FIX: this used to be a hardcoded "Shipment Created ✓" that never changed no
+          // matter how far the real shipment progressed — the exact cause of Admin showing
+          // "Shipment Created" here at the same time "Current Status" below correctly said
+          // "IN TRANSIT". Now both read the same s.normalized_status — one source of truth.
+          '<div class="amazon-shipping-head"><strong>DELHIVERY STATUS</strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></div>' +
           '<p class="amazon-shipping-hint" style="margin-top:-4px;">Synced automatically from Delhivery — never manually set.</p>' +
           '<div class="amazon-shipping-grid">' +
             '<div><span>AWB</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
@@ -1701,7 +1705,7 @@
       var events = (s.shipment_events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at); });
       var terminal = ['delivered', 'cancelled', 'returned'].indexOf(s.normalized_status) !== -1;
       return '<div class="amazon-shipping-card">' +
-          '<div class="amazon-shipping-head"><strong>SHIPROCKET STATUS</strong><span class="badge badge-active">Shipment Created ✓</span></div>' +
+          '<div class="amazon-shipping-head"><strong>SHIPROCKET STATUS</strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></div>' +
           '<p class="amazon-shipping-hint" style="margin-top:-4px;">Synced automatically from Shiprocket — never manually set.</p>' +
           '<div class="amazon-shipping-grid">' +
             '<div><span>Courier</span><strong>' + (s.courier_name ? esc(s.courier_name) : 'Not yet assigned') + '</strong></div>' +
