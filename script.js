@@ -1574,6 +1574,12 @@
     // create_order() a second time, or it would create a duplicate order and decrement stock
     // twice for one purchase.
     var pendingOrderId = null;
+    // Latest result from Checkout's own PIN-serviceability check (not the header's) — null (no
+    // PIN yet), 'pending' (check in flight), or the real {status, serviceable, ...} result.
+    // Module-scope so updateSubmitState()/runPinCheck() share it across render() calls.
+    var lastPinCheckResult = null;
+    // Set at the end of every render() — see there for why this exists.
+    var formHandlers = null;
 
     // The one gate every purchase path (Buy Now, Add to Cart → Checkout, cart drawer's
     // "Checkout" button) funnels through — see CONFIG-level note at the top of this file.
@@ -1635,16 +1641,45 @@
           '</button>' +
         '</div>';
 
+      // "Delivering to" summary — mirrors the header/product-page control's own real-only data,
+      // shown only when there's a real selected location (browsing PIN) or address to show. A
+      // brand-new guest with nothing selected yet gets no card at all (never an invented default).
+      function locationCardHtml() {
+        var loc = DeliveryLocation.get();
+        if (selectedAddressIdx >= 0) {
+          var a = savedAddresses[selectedAddressIdx];
+          return '<div class="checkout-location-card">' +
+            '<div class="checkout-location-card-text"><small>Delivering to</small>' +
+            '<strong>' + escapeHtml([a.city, a.state].filter(Boolean).join(', ')) + ' ' + escapeHtml(a.pincode || '') + '</strong></div>' +
+            '<button type="button" class="checkout-location-change" id="coLocationChangeBtn">Change</button>' +
+          '</div>';
+        }
+        if (loc && loc.pincode) {
+          var label = [loc.locality || loc.city, loc.state].filter(Boolean).join(', ') || loc.pincode;
+          return '<div class="checkout-location-card">' +
+            '<div class="checkout-location-card-text"><small>Delivering to</small>' +
+            '<strong>' + escapeHtml(label) + (label.indexOf(loc.pincode) === -1 ? ' ' + escapeHtml(loc.pincode) : '') + '</strong></div>' +
+            '<button type="button" class="checkout-location-change" id="coLocationChangeBtn">Change</button>' +
+          '</div>';
+        }
+        return '<div class="checkout-location-card checkout-location-card-empty">' +
+          '<div class="checkout-location-card-text"><strong>No delivery location selected</strong></div>' +
+          '<button type="button" class="checkout-location-change" id="coLocationChangeBtn">Select</button>' +
+        '</div>';
+      }
+
       b.innerHTML =
         '<form id="checkoutForm" novalidate>' +
           '<div class="checkout-section"><h3>Personal Information</h3>' +
             field('coFullName', 'Full Name', 'text', true) + field('coMobile', 'Mobile Number', 'tel', true) + field('coEmail', 'Email (optional)', 'email', false) +
           '</div>' +
           '<div class="checkout-section"><h3>Shipping Address</h3>' +
+            '<div id="coLocationCardWrap">' + locationCardHtml() + '</div>' +
             savedAddressPicker +
             field('coHouse', 'House / Flat / Building', 'text', true) + field('coStreet', 'Street / Area', 'text', true) + field('coLandmark', 'Landmark (optional)', 'text', false) +
             '<div class="form-row">' + field('coCity', 'City', 'text', true) + field('coDistrict', 'District', 'text', true) + '</div>' +
             '<div class="form-row">' + field('coState', 'State', 'text', true) + field('coPin', 'PIN Code', 'text', true) + '</div>' +
+            '<p class="location-result" id="coPinResult"></p>' +
           '</div>' +
           '<div class="checkout-section"><h3>Order Summary</h3>' +
             '<table class="order-summary-table">' + rows + '</table>' +
@@ -1660,10 +1695,11 @@
             '</label>' +
           '</div>' +
           '<p class="checkout-stock-note">Your order is saved the moment you tap Pay — final delivery details are confirmed automatically once payment succeeds.</p>' +
+          '<p class="checkout-submit-hint" id="checkoutSubmitHint"></p>' +
           '<p class="pm-selection-error" id="checkoutSubmitError"></p>' +
-          '<button type="submit" class="btn" id="checkoutPayBtn">' +
+          '<button type="submit" class="btn btn-primary" id="checkoutPayBtn">' +
             '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="#fff" stroke-width="2"/><line x1="2" y1="10" x2="22" y2="10" stroke="#fff" stroke-width="2"/></svg>' +
-            'Pay Securely with Cashfree' +
+            '<span id="checkoutPayBtnText">Pay ' + formatPrice(totals.total) + ' Securely</span>' +
           '</button>' +
         '</form>';
 
@@ -1684,8 +1720,21 @@
         document.getElementById('coMobile').value = a.phone || document.getElementById('coMobile').value;
       }
 
+      // Only City/District/State/PIN — a browsing location (GPS or manual PIN check) never
+      // carries a real House/Street/Landmark, so those are deliberately left for the customer
+      // to type themselves rather than ever being invented.
+      function applyLocationFields(loc) {
+        if (!loc || !loc.pincode) return;
+        document.getElementById('coCity').value = loc.city || document.getElementById('coCity').value;
+        document.getElementById('coDistrict').value = loc.district || document.getElementById('coDistrict').value;
+        document.getElementById('coState').value = loc.state || document.getElementById('coState').value;
+        document.getElementById('coPin').value = loc.pincode;
+      }
+
       // Pre-fill from the account and, if there's a default saved address, from that too — the
       // customer only has to type anything at all the first time they ever check out.
+      // Priority (spec): 1. explicitly-selected saved address  2. the browsing delivery
+      // location (header/product-page)  3. blank, customer types it manually.
       if (user) {
         document.getElementById('coFullName').value = user.name || '';
         document.getElementById('coEmail').value = user.email || '';
@@ -1695,12 +1744,86 @@
         pickerBtn.addEventListener('click', openAddressPicker);
         if (selectedAddressIdx >= 0) { applyAddress(savedAddresses[selectedAddressIdx]); updatePickerTriggerLabel(); }
       }
+      // No saved address is authoritative here — fall back to the browsing delivery location
+      // (header / product-page PIN), if one was ever selected. Never invented.
+      if (selectedAddressIdx === -1) applyLocationFields(DeliveryLocation.get());
 
       function updatePickerTriggerLabel() {
         var el = document.getElementById('coAddressPickerBtnText');
         if (!el) return;
         el.textContent = selectedAddressIdx >= 0 ? (savedAddresses[selectedAddressIdx].label || 'Home') + ' — ' + savedAddresses[selectedAddressIdx].city : 'Add a new address';
       }
+
+      function refreshLocationCard() {
+        var wrap = document.getElementById('coLocationCardWrap');
+        if (!wrap) return;
+        wrap.innerHTML = locationCardHtml();
+        var btn = document.getElementById('coLocationChangeBtn');
+        if (btn) btn.addEventListener('click', function () { DeliveryLocation.open(); });
+      }
+      refreshLocationCard();
+
+      // ---- PIN serviceability: auto-checks whenever Checkout's own PIN field changes (initial
+      // fill included) — never re-uses a stale header-time result silently, always re-runs
+      // against the exact PIN currently in the Checkout form (spec: "Checkout PIN is final"). ----
+      var pinCheckTimer = null;
+      function runPinCheck(pincode) {
+        var resultEl = document.getElementById('coPinResult');
+        if (!/^[1-9][0-9]{5}$/.test(pincode)) { lastPinCheckResult = null; if (resultEl) { resultEl.className = 'location-result'; resultEl.textContent = ''; } updateSubmitState(); return; }
+        lastPinCheckResult = 'pending';
+        if (resultEl) { resultEl.className = 'location-result'; resultEl.textContent = 'Checking delivery availability…'; }
+        updateSubmitState();
+        DeliveryLocation.checkPincode(pincode).then(function (result) {
+          // A newer check (or the field changing again) may have started since — never let a
+          // slow, stale response overwrite a fresher one.
+          if (document.getElementById('coPin').value.trim() !== pincode) return;
+          lastPinCheckResult = result;
+          if (resultEl) {
+            if (result.status === 'error') { resultEl.className = 'location-result location-result-error'; resultEl.textContent = result.error || "We couldn't check delivery availability right now. Please try again."; }
+            else if (result.serviceable) { resultEl.className = 'location-result location-result-ok'; resultEl.textContent = '✓ Delivery available to ' + pincode + (result.etaDays != null ? ' — usually ' + result.etaDays + ' day' + (result.etaDays === 1 ? '' : 's') : ''); }
+            else { resultEl.className = 'location-result location-result-bad'; resultEl.textContent = 'Delivery is currently unavailable to this PIN code.'; }
+          }
+          updateSubmitState();
+        });
+      }
+      var pinInputEl = document.getElementById('coPin');
+      if (pinInputEl) {
+        if (pinInputEl.value.trim()) runPinCheck(pinInputEl.value.trim());
+        pinInputEl.addEventListener('input', function () {
+          window.clearTimeout(pinCheckTimer);
+          var v = pinInputEl.value.trim();
+          pinCheckTimer = window.setTimeout(function () { runPinCheck(v); }, 500);
+        });
+      }
+
+      // ---- Submit CTA: stays disabled (but readable — never a bare grey blob) with a real,
+      // specific reason shown underneath, until every required field is filled and the PIN is
+      // known not to be explicitly unserviceable. An infra failure on the check itself (checked
+      // === false) never blocks the button — only a confirmed "not serviceable" does. ----
+      function updateSubmitState() {
+        var btn = document.getElementById('checkoutPayBtn');
+        var hint = document.getElementById('checkoutSubmitHint');
+        if (!btn) return;
+        var mobile = (document.getElementById('coMobile').value || '').trim();
+        var houseOk = (document.getElementById('coHouse').value || '').trim();
+        var streetOk = (document.getElementById('coStreet').value || '').trim();
+        var cityOk = (document.getElementById('coCity').value || '').trim();
+        var stateOk = (document.getElementById('coState').value || '').trim();
+        var districtOk = (document.getElementById('coDistrict').value || '').trim();
+        var pinOk = (document.getElementById('coPin').value || '').trim();
+        var reason = '';
+        if (!mobile) reason = 'Enter your mobile number to continue.';
+        else if (!houseOk || !streetOk || !cityOk || !districtOk || !stateOk || !pinOk) reason = 'Complete your shipping address to continue.';
+        else if (lastPinCheckResult === 'pending') reason = 'Checking delivery availability…';
+        else if (lastPinCheckResult && lastPinCheckResult.status === 'ok' && lastPinCheckResult.serviceable === false) reason = 'Select a serviceable delivery location to continue.';
+        btn.disabled = !!reason;
+        if (hint) hint.textContent = reason;
+      }
+      ['coFullName', 'coMobile', 'coHouse', 'coStreet', 'coCity', 'coDistrict', 'coState'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('input', updateSubmitState);
+      });
+      updateSubmitState();
 
       function addressLineHtml(a) {
         return escapeHtml(a.line1) + (a.line2 ? ', ' + escapeHtml(a.line2) : '') + (a.landmark ? ' (near ' + escapeHtml(a.landmark) + ')' : '') +
@@ -1727,8 +1850,12 @@
           radio.addEventListener('change', function () {
             selectedAddressIdx = radio.value === 'new' ? -1 : Number(radio.value);
             if (selectedAddressIdx >= 0) applyAddress(savedAddresses[selectedAddressIdx]);
-            else clearAddressFields();
+            else { clearAddressFields(); applyLocationFields(DeliveryLocation.get()); }
             updatePickerTriggerLabel();
+            refreshLocationCard();
+            var pin = document.getElementById('coPin').value.trim();
+            if (pin) runPinCheck(pin); else { document.getElementById('coPinResult').className = 'location-result'; document.getElementById('coPinResult').textContent = ''; lastPinCheckResult = null; }
+            updateSubmitState();
             closePanel(document.getElementById('addressPickerSheet'));
           });
         });
@@ -1745,6 +1872,19 @@
 
       var form = document.getElementById('checkoutForm');
       if (form) form.addEventListener('submit', onSubmit);
+
+      // Exposed so the one persistent DeliveryLocation.onChange listener (registered once in
+      // init(), see below) can react to an explicit "Change" pick from the location modal
+      // without rebuilding this whole form — rebuilding would wipe House/Street/Landmark/etc
+      // the customer may have already typed, which the spec explicitly forbids.
+      formHandlers = {
+        applyLocationFields: applyLocationFields,
+        refreshLocationCard: refreshLocationCard,
+        runPinCheck: runPinCheck,
+        updateSubmitState: updateSubmitState,
+        updatePickerTriggerLabel: updatePickerTriggerLabel,
+        setSelectedAddressIdx: function (v) { selectedAddressIdx = v; }
+      };
     }
 
     function validateField(f) {
@@ -1786,8 +1926,12 @@
       var rpcItems = items.map(function (it) { return { productId: it.productId, size: it.size, color: it.color, quantity: it.qty }; });
 
       var submitBtn = document.getElementById('checkoutPayBtn');
+      var submitBtnText = document.getElementById('checkoutPayBtnText');
       var errorEl = document.getElementById('checkoutSubmitError');
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Checking delivery…'; }
+      var totals = CartService.getTotals();
+      var payLabel = 'Pay ' + formatPrice(totals.total) + ' Securely';
+      if (submitBtn) submitBtn.disabled = true;
+      if (submitBtnText) submitBtnText.textContent = 'Checking delivery…';
       if (errorEl) errorEl.textContent = '';
 
       // Checkout re-check (never trusts a stale browsing-time PIN): re-run serviceability
@@ -1798,14 +1942,15 @@
       DeliveryLocation.checkPincode(address.pincode).then(function (deliveryCheck) {
         if (deliveryCheck.status === 'ok' && deliveryCheck.serviceable === false) {
           if (errorEl) errorEl.textContent = 'Delivery is currently unavailable to PIN code ' + address.pincode + '. Please use a different address.';
-          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Pay Securely with Cashfree'; }
+          if (submitBtn) submitBtn.disabled = false;
+          if (submitBtnText) submitBtnText.textContent = payLabel;
           return;
         }
         proceedWithOrder();
       }).catch(function () { proceedWithOrder(); }); // network hiccup on the check itself — don't block checkout over it
 
       function proceedWithOrder() {
-      if (submitBtn) submitBtn.textContent = 'Placing your order…';
+      if (submitBtnText) submitBtnText.textContent = 'Placing your order…';
       // BUG FIX: this used to close the checkout panel and clear the cart BEFORE knowing
       // whether starting the Cashfree session even succeeded — any failure in
       // cashfree-create-order, or in the checkout() call itself, then had nowhere visible to
@@ -1828,7 +1973,7 @@
 
       orderPromise
         .then(function (rpcResult) {
-          if (submitBtn) submitBtn.textContent = 'Starting secure payment…';
+          if (submitBtnText) submitBtnText.textContent = 'Starting secure payment…';
           return PaymentFlow.startCheckout(rpcResult.id, function onSessionReady() {
             close();
             CartService.clear();
@@ -1836,12 +1981,32 @@
         })
         .catch(function (err) {
           if (errorEl) errorEl.textContent = err.message;
-          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Pay Securely with Cashfree'; }
+          if (submitBtn) submitBtn.disabled = false;
+          if (submitBtnText) submitBtnText.textContent = payLabel;
         });
       }
     }
 
-    function init() { /* body listeners attach in render() */ }
+    function init() {
+      // Fires whenever the shared DeliveryLocation state changes for ANY reason (header pick,
+      // product-page PIN check, or — the one that matters here — the customer explicitly
+      // tapping "Change" on Checkout's own "Delivering to" card and picking a new location in
+      // the same modal). Only actually touches the form while Checkout is the panel currently
+      // open — the header/product-page paths fire this constantly and must never reach into a
+      // closed checkout form.
+      DeliveryLocation.onChange(function () {
+        var p = panel();
+        if (!p || p.hidden || !formHandlers) return;
+        formHandlers.setSelectedAddressIdx(-1);
+        formHandlers.applyLocationFields(DeliveryLocation.get());
+        formHandlers.refreshLocationCard();
+        formHandlers.updatePickerTriggerLabel();
+        var pinEl = document.getElementById('coPin');
+        var pin = pinEl ? pinEl.value.trim() : '';
+        if (pin) formHandlers.runPinCheck(pin);
+        formHandlers.updateSubmitState();
+      });
+    }
 
     return { open: open, close: close, init: init, consumePendingFlag: consumePendingFlag };
   })();
@@ -2189,7 +2354,12 @@
      ever shows what a saved address or the provider APIs themselves actually returned. */
   var DeliveryLocation = (function () {
     var STORAGE_KEY = 'ym_delivery_location';
-    var current = null; // null | { pincode, locality, serviceable, checked, etaDays, error }
+    // null | { pincode, locality, city, district, state, latitude, longitude, source,
+    //          serviceable, checked, etaDays, error }
+    // `source` is one of 'current_location' | 'manual_pin' | 'saved_address' — Checkout uses it
+    // only for its own "Delivering to" summary card, never to silently prefer one over an
+    // explicitly-chosen saved address (see Checkout's own selectedAddressIdx priority).
+    var current = null;
     var listeners = [];
     var savedAddresses = [];
 
@@ -2241,12 +2411,26 @@
         .catch(function () { return { status: 'error' }; });
     }
 
-    function selectPincode(pincode, locality) {
+    // `extra` carries whatever real fields we actually have — city/district/state/locality/
+    // latitude/longitude/source — never invented; any field the caller doesn't supply is simply
+    // absent (not filled with a guess).
+    function selectPincode(pincode, extra) {
+      extra = extra || {};
       return checkPincode(pincode).then(function (result) {
+        var base = {
+          pincode: pincode,
+          locality: extra.locality || null,
+          city: extra.city || null,
+          district: extra.district || null,
+          state: extra.state || null,
+          latitude: extra.latitude != null ? extra.latitude : null,
+          longitude: extra.longitude != null ? extra.longitude : null,
+          source: extra.source || 'manual_pin'
+        };
         if (result.status === 'error') {
-          current = { pincode: pincode, locality: locality || null, serviceable: null, checked: false, error: result.error };
+          current = Object.assign(base, { serviceable: null, checked: false, error: result.error });
         } else {
-          current = { pincode: pincode, locality: locality || null, serviceable: result.serviceable, etaDays: result.etaDays, checked: true };
+          current = Object.assign(base, { serviceable: result.serviceable, etaDays: result.etaDays, checked: true, error: null });
         }
         persist();
         return current;
@@ -2254,7 +2438,13 @@
     }
     function selectAddress(addr) {
       var locality = [addr.city, addr.state].filter(Boolean).join(', ');
-      return selectPincode(addr.pincode, locality || null);
+      return selectPincode(addr.pincode, {
+        locality: locality || null,
+        city: addr.city || null,
+        district: addr.district || null,
+        state: addr.state || null,
+        source: 'saved_address'
+      });
     }
 
     function panel() { return document.getElementById('locationSheet'); }
@@ -2331,7 +2521,8 @@
         navigator.geolocation.getCurrentPosition(
           function (pos) {
             hintEl.textContent = 'Got your location — looking up your PIN code…';
-            reverseGeocode(pos.coords.latitude, pos.coords.longitude).then(function (geo) {
+            var lat = pos.coords.latitude, lng = pos.coords.longitude;
+            reverseGeocode(lat, lng).then(function (geo) {
               currentBtn.disabled = false;
               var pinInput = document.getElementById('locationPinInput');
               var resultEl = document.getElementById('locationResult');
@@ -2339,7 +2530,10 @@
                 hintEl.textContent = 'Found your area — checking delivery for PIN ' + geo.pincode + '…';
                 if (pinInput) pinInput.value = geo.pincode;
                 var locality = [geo.locality, geo.state].filter(Boolean).join(', ');
-                selectPincode(geo.pincode, locality || null).then(function (result) {
+                selectPincode(geo.pincode, {
+                  locality: locality || null, city: geo.city || null, district: geo.district || null,
+                  state: geo.state || null, latitude: lat, longitude: lng, source: 'current_location'
+                }).then(function (result) {
                   hintEl.textContent = 'Detected PIN ' + geo.pincode + (locality ? ' — ' + locality : '') + '.';
                   renderResult(resultEl, result);
                 });

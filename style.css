@@ -1365,6 +1365,49 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .form-field .field-error { color: #C5677A; font-size: 0.72rem; min-height: 1em; }
 .form-field input.invalid, .form-field select.invalid { border-color: #C5677A; }
 
+/* ---------- Checkout: "Delivering to" summary card ---------- */
+.checkout-location-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--color-cream);
+  border: 1px solid rgba(64,46,33,0.1);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+.checkout-location-card-empty { border-style: dashed; }
+.checkout-location-card-text { min-width: 0; }
+.checkout-location-card-text small { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-soft); margin-bottom: 2px; }
+.checkout-location-card-text strong { font-size: 0.92rem; font-weight: 700; color: var(--color-text); }
+.checkout-location-change {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--color-pink);
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+.checkout-location-change:hover { text-decoration: underline; }
+
+/* Reason shown when the final Pay CTA is disabled — always visible text, never a silent grey
+   button (see updateSubmitState() in Checkout). Empty (no height) when the CTA is active. */
+.checkout-submit-hint { font-size: 0.8rem; color: var(--color-text-soft); text-align: center; margin: 0 0 10px; min-height: 1.1em; }
+
+/* A disabled Pay button must still read clearly as "the payment button, not ready yet" — not
+   fade into the generic 0.5-opacity treatment every other disabled .btn uses site-wide. */
+#checkoutPayBtn[disabled] {
+  opacity: 1;
+  background: #F3C3CB;
+  color: #fff;
+  box-shadow: none;
+  transform: none;
+  cursor: not-allowed;
+}
+
 /* Password field + eye toggle — button sits inside the input's own border, not a separate boxy
    control next to it. */
 .password-input-wrap { position: relative; display: flex; }
