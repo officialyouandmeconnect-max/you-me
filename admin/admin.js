@@ -1531,6 +1531,14 @@
   };
   var PROVIDER_LABELS = { manual: 'Custom Delivery', amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery', shiprocket: 'Shiprocket' };
 
+  // Most recent real scan's own location field — "last known location" (not GPS, a courier scan
+  // point). `events` is already sorted newest-first by the caller. Never falls back to anything
+  // invented — returns null (rendered as "Unavailable") if no event carries a location yet.
+  function lastKnownLocation(events) {
+    for (var i = 0; i < (events || []).length; i++) { if (events[i].event_location) return events[i].event_location; }
+    return null;
+  }
+
   function renderShippingCard(o) {
     var s = o.shipment;
     var provider = shippingProviderChoice || (s && s.provider) || 'manual';
@@ -1653,8 +1661,14 @@
             '<div><span>Estimated Delivery</span><strong>' + (s.estimated_delivery ? fmtDate(s.estimated_delivery) : 'Not available yet') + '</strong></div>' +
             '<div><span>Shipping Cost</span><strong>' + (s.shipping_cost != null ? fmtPrice(s.shipping_cost) : 'Unavailable') + '</strong></div>' +
             '<div><span>Pickup Status</span><strong>' + (s.pickup_status ? statusLabel(s.pickup_status) : 'Unavailable') + '</strong></div>' +
+            // Admin-only diagnostic detail — raw provider status alongside the normalized one
+            // (spec: "Admin may additionally see raw provider status, normalized internal
+            // status, ... NSL/status code"), never shown to the customer.
+            '<div><span>Raw Provider Status</span><strong>' + (s.status ? esc(s.status) : '—') + '</strong></div>' +
+            (s.status_type ? '<div><span>Status Type</span><strong>' + esc(s.status_type) + '</strong></div>' : '') +
+            (s.nsl_code ? '<div><span>NSL Code</span><strong>' + esc(s.nsl_code) + '</strong></div>' : '') +
           '</div>' +
-          (s.last_tracking_sync_at ? '<p class="amazon-sync-note">Last synced ' + fmtDate(s.last_tracking_sync_at) + '</p>' : '') +
+          (s.last_tracking_sync_at ? '<p class="amazon-sync-note">Last synced ' + fmtDate(s.last_tracking_sync_at) + ' · Last known location: ' + (lastKnownLocation(events) ? esc(lastKnownLocation(events)) : 'Unavailable') + '</p>' : '') +
           '<div class="amazon-shipping-actions">' +
             (s.label_url ? '<a href="' + esc(s.label_url) + '" target="_blank" class="btn-secondary btn-sm">Print Label</a>' : '') +
             (s.tracking_url ? '<a href="' + esc(s.tracking_url) + '" target="_blank" class="btn-secondary btn-sm">Track Shipment</a>' : '') +
@@ -1724,8 +1738,9 @@
             '<div><span>AWB</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
             '<div><span>Current Status</span><strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></strong></div>' +
             '<div><span>Pickup Status</span><strong>' + (s.pickup_status ? statusLabel(s.pickup_status) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Raw Provider Status</span><strong>' + (s.status ? esc(s.status) : '—') + '</strong></div>' +
           '</div>' +
-          (s.last_tracking_sync_at ? '<p class="amazon-sync-note">Last synced ' + fmtDate(s.last_tracking_sync_at) + '</p>' : '') +
+          (s.last_tracking_sync_at ? '<p class="amazon-sync-note">Last synced ' + fmtDate(s.last_tracking_sync_at) + ' · Last known location: ' + (lastKnownLocation(events) ? esc(lastKnownLocation(events)) : 'Unavailable') + '</p>' : '') +
           '<div class="amazon-shipping-actions">' +
             (s.label_url ? '<a href="' + esc(s.label_url) + '" target="_blank" class="btn-secondary btn-sm">Download Label</a>' : (s.tracking_id ? '<button type="button" class="btn-secondary btn-sm" id="srLabelBtn">Generate Label</button>' : '')) +
             '<button type="button" class="btn-secondary btn-sm" id="srRefreshBtn">Refresh Tracking</button>' +

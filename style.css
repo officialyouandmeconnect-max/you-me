@@ -299,6 +299,10 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .location-section h4 { font-size: 0.82rem; font-weight: 700; margin-bottom: 10px; }
 .location-current-btn { width: 100%; justify-content: center; }
 .location-hint { font-size: 0.78rem; color: var(--color-text-soft); margin-top: 8px; min-height: 1.1em; }
+.location-ios-help-toggle { display: block; margin-top: 6px; font-size: 0.76rem; color: var(--color-pink); font-weight: 600; }
+.location-ios-help { margin-top: 8px; padding: 10px 12px; background: var(--color-cream); border-radius: var(--radius-sm); }
+.location-ios-help p { font-size: 0.76rem; color: var(--color-text-soft); margin: 0 0 6px; }
+.location-ios-help p:last-child { margin-bottom: 0; }
 .location-pin-row { display: flex; gap: 8px; }
 .location-pin-row input {
   flex: 1; border: 1.5px solid rgba(64,46,33,0.16); border-radius: var(--radius-sm);
@@ -1862,6 +1866,13 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .tracking-step.done .tracking-dot { background: var(--color-sage); border-color: var(--color-sage); color: #fff; }
 .tracking-step-body { display: flex; flex-direction: column; gap: 1px; }
 .tracking-step-time { font-size: 0.74rem; font-weight: 400; color: var(--color-text-soft); }
+
+/* ---------- Transit History (full real courier scan list) ---------- */
+.transit-history-list { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(64,46,33,0.08); max-height: 360px; overflow-y: auto; }
+.transit-event-row { display: flex; flex-direction: column; gap: 2px; padding-left: 14px; border-left: 2px solid rgba(64,46,33,0.12); }
+.transit-event-time { font-size: 0.72rem; color: var(--color-text-soft); }
+.transit-event-label { font-size: 0.86rem; color: var(--color-text); }
+.transit-event-location { font-size: 0.78rem; color: var(--color-text-soft); }
 
 /* ---- Addresses ---- */
 .address-card { background: var(--color-surface); border-radius: var(--radius-md); box-shadow: var(--shadow-soft); padding: 18px; margin-bottom: 12px; }

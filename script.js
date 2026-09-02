@@ -999,6 +999,7 @@
         var pincode = (pinInput.value || '').trim();
         if (!/^[1-9][0-9]{5}$/.test(pincode)) { resultEl.className = 'location-result location-result-error'; resultEl.textContent = 'Enter a valid 6-digit PIN code.'; return; }
         event.target.disabled = true;
+        DeliveryLocation.markExplicit();
         DeliveryLocation.selectPincode(pincode, null).then(function () {
           if (state.product) render(); // re-render now shows the checked state via deliveryBlockHtml()
         });
@@ -2354,6 +2355,14 @@
      ever shows what a saved address or the provider APIs themselves actually returned. */
   var DeliveryLocation = (function () {
     var STORAGE_KEY = 'ym_delivery_location';
+    // Set only by an actual user click (Use Current Location / manual Check / picking a saved
+    // address) — never by applyLoginDefaultAddress() itself. Lets login-time default-address
+    // priority (#11 in the location spec) know whether the customer already made an explicit
+    // choice THIS browser session, which must never be silently overridden — vs. a value merely
+    // left over in localStorage from an earlier day, which the spec ranks below a saved default.
+    var EXPLICIT_FLAG_KEY = 'ym_location_explicit_session';
+    function markExplicit() { try { sessionStorage.setItem(EXPLICIT_FLAG_KEY, '1'); } catch (e) { /* ignore */ } }
+    function wasExplicitThisSession() { try { return sessionStorage.getItem(EXPLICIT_FLAG_KEY) === '1'; } catch (e) { return false; } }
     // null | { pincode, locality, city, district, state, latitude, longitude, source,
     //          serviceable, checked, etaDays, error }
     // `source` is one of 'current_location' | 'manual_pin' | 'saved_address' — Checkout uses it
@@ -2447,6 +2456,21 @@
       });
     }
 
+    // Location priority on login (spec #11): 1. an explicit pick already made this session
+    // (never overridden) 2. the customer's default saved address 3. whatever was already in
+    // localStorage from a previous visit 4. "Select location". Called once, right after the
+    // initial session check resolves — never re-fires mid-session, so it can't clobber a later
+    // explicit choice either.
+    function applyLoginDefaultAddress() {
+      if (wasExplicitThisSession()) return Promise.resolve();
+      return supabaseClient.from('addresses').select('*').eq('is_default', true).limit(1).maybeSingle()
+        .then(function (res) {
+          if (!res.data) return; // no default address — leave whatever localStorage already had (priority 3) or "Select location" (priority 4)
+          return selectAddress(res.data);
+        })
+        .catch(function () { /* not fatal — header just keeps whatever it already had */ });
+    }
+
     function panel() { return document.getElementById('locationSheet'); }
     function body() { return document.getElementById('locationSheetBody'); }
 
@@ -2469,6 +2493,12 @@
             'Use My Current Location' +
           '</button>' +
           '<p class="location-hint" id="locationCurrentHint"></p>' +
+          '<button type="button" class="link-btn location-ios-help-toggle" id="locationIosHelpToggle">How to enable location</button>' +
+          '<div class="location-ios-help" id="locationIosHelp" hidden>' +
+            '<p>On iPhone (Safari): Settings app &rarr; Safari &rarr; Location &rarr; Allow, or the "aA" menu in the address bar &rarr; Website Settings &rarr; Location &rarr; Allow.</p>' +
+            '<p>On Android (Chrome): tap the lock/info icon next to the address bar &rarr; Permissions &rarr; Location &rarr; Allow.</p>' +
+            '<p>You can also just enter your PIN code below — location access is optional.</p>' +
+          '</div>' +
         '</div>' +
         '<div class="location-section">' +
           '<h4>Enter Pincode</h4>' +
@@ -2514,8 +2544,15 @@
     function bind() {
       var currentBtn = document.getElementById('locationUseCurrentBtn');
       var hintEl = document.getElementById('locationCurrentHint');
+      var iosHelpEl = document.getElementById('locationIosHelp');
       if (currentBtn) currentBtn.addEventListener('click', function () {
-        if (!navigator.geolocation) { hintEl.textContent = 'Location isn\'t supported on this device — please enter your PIN code below.'; return; }
+        // Called synchronously, directly inside this click handler — nothing async runs before
+        // it. Safari (iOS in particular) only honors getCurrentPosition() when it's invoked
+        // straight from a real user gesture; deferring it behind any await/promise first is a
+        // documented cause of silent failures there.
+        markExplicit();
+        if (iosHelpEl) iosHelpEl.hidden = true;
+        if (!navigator.geolocation) { hintEl.textContent = 'Location isn\'t supported on this browser — please enter your PIN code below.'; return; }
         currentBtn.disabled = true;
         hintEl.textContent = 'Getting your location…';
         navigator.geolocation.getCurrentPosition(
@@ -2546,12 +2583,35 @@
               }
             });
           },
-          function () {
+          // Real browser geolocation errors have three distinct codes — never collapsed into
+          // one generic message, per the spec's explicit PERMISSION_DENIED / POSITION_UNAVAILABLE
+          // / TIMEOUT split. The PIN input stays visible and usable in every case; the prompt is
+          // never re-triggered automatically (that's the browser's own decision on the next click).
+          function (err) {
             currentBtn.disabled = false;
-            hintEl.textContent = 'Location permission was not granted — please enter your PIN code below.';
+            var pinInput = document.getElementById('locationPinInput');
+            if (err && err.code === 1 /* PERMISSION_DENIED */) {
+              hintEl.textContent = 'Location access is turned off for this website. You can allow location access in your browser settings, or enter your PIN code below.';
+              if (iosHelpEl) iosHelpEl.hidden = false;
+            } else if (err && err.code === 2 /* POSITION_UNAVAILABLE */) {
+              hintEl.textContent = "We couldn't detect your current location. Please enter your PIN code manually.";
+            } else if (err && err.code === 3 /* TIMEOUT */) {
+              hintEl.textContent = 'Location detection took too long. Please try again or enter your PIN code.';
+            } else {
+              hintEl.textContent = 'Location permission was not granted — please enter your PIN code below.';
+            }
+            if (pinInput) pinInput.focus();
           },
-          { timeout: 10000 }
+          // Deliberately not GPS-level accuracy — a PIN-code check only needs neighbourhood
+          // precision, and enableHighAccuracy:true is slower and drains battery for no benefit
+          // here. maximumAge lets a very recent cached fix answer instantly instead of
+          // re-polling the radio, without risking a stale multi-hour-old position.
+          { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 }
         );
+      });
+      var iosHelpToggle = document.getElementById('locationIosHelpToggle');
+      if (iosHelpToggle) iosHelpToggle.addEventListener('click', function () {
+        if (iosHelpEl) iosHelpEl.hidden = !iosHelpEl.hidden;
       });
 
       var pinInput = document.getElementById('locationPinInput');
@@ -2561,6 +2621,7 @@
         var pincode = (pinInput.value || '').trim();
         if (!/^[1-9][0-9]{5}$/.test(pincode)) { resultEl.className = 'location-result location-result-error'; resultEl.textContent = 'Enter a valid 6-digit PIN code.'; return; }
         checkBtn.disabled = true; checkBtn.textContent = 'Checking…';
+        markExplicit();
         selectPincode(pincode, null).then(function (result) {
           checkBtn.disabled = false; checkBtn.textContent = 'Check';
           renderResult(resultEl, result);
@@ -2574,6 +2635,7 @@
           var addr = savedAddresses.filter(function (a) { return String(a.id) === btn.dataset.selectAddress; })[0];
           if (!addr) return;
           btn.disabled = true;
+          markExplicit();
           selectAddress(addr).then(function () { close(); });
         });
       });
@@ -2590,7 +2652,7 @@
       if (closeBtn) closeBtn.addEventListener('click', close);
     }
 
-    return { init: init, get: get, onChange: onChange, checkPincode: checkPincode, selectPincode: selectPincode, open: open };
+    return { init: init, get: get, onChange: onChange, checkPincode: checkPincode, selectPincode: selectPincode, open: open, applyLoginDefaultAddress: applyLoginDefaultAddress, markExplicit: markExplicit };
   })();
 
   /* ---------- 18b. Account dashboard (/account) ---------- */
@@ -3219,6 +3281,13 @@
                 '</div>') +
             '<div class="panel-card"><h4>Shipping</h4>' + shippingSectionHtml(shipment) +
             '</div>' +
+            (shipment && (shipment.shipment_events || []).length
+              ? '<div class="panel-card"><h4>Transit History</h4>' +
+                  '<p class="account-payment-note">Every real courier scan for this shipment, most recent first.</p>' +
+                  '<button type="button" class="link-btn" id="transitHistoryToggle">Show Transit History (' + shipment.shipment_events.length + ')</button>' +
+                  '<div class="transit-history-list" id="transitHistoryList" hidden>' + transitHistoryHtml(shipment.shipment_events) + '</div>' +
+                '</div>'
+              : '') +
             '<div class="panel-card"><h4>Invoice</h4>' +
               (invoice
                 ? '<p>Invoice #' + escapeHtml(invoice.invoice_number) + '</p><button type="button" class="btn btn-sm btn-outline" id="downloadInvoiceBtn">Download Invoice</button>'
@@ -3240,6 +3309,15 @@
 
           var payAgainDetailBtn = document.getElementById('payAgainDetailBtn');
           if (payAgainDetailBtn) payAgainDetailBtn.addEventListener('click', function () { payAgain(o.id, payAgainDetailBtn); });
+
+          var transitToggle = document.getElementById('transitHistoryToggle');
+          if (transitToggle) transitToggle.addEventListener('click', function () {
+            var list = document.getElementById('transitHistoryList');
+            var nowHidden = !list.hidden;
+            list.hidden = nowHidden;
+            var count = (shipment.shipment_events || []).length;
+            transitToggle.textContent = (nowHidden ? 'Show' : 'Hide') + ' Transit History (' + count + ')';
+          });
 
           var downloadBtn = document.getElementById('downloadInvoiceBtn');
           if (downloadBtn) downloadBtn.addEventListener('click', function () {
@@ -3292,6 +3370,32 @@
     // must never be described as "Shipped".
     var PRE_PICKUP_STATUSES = ['shipment_created', 'pickup_scheduled'];
 
+    // Cosmetic-only cleanup of a raw courier facility code (e.g. "Kozhikode_Central_H") —
+    // underscores become spaces, nothing else. Deliberately does NOT try to expand suffix
+    // letters like "_H"/"_D" into words such as "Hub"/"Delivery Center": Delhivery doesn't
+    // document what every suffix means, and guessing would risk claiming a facility is a "Hub"
+    // when it might not be — the spec's own rule is "do not change the actual meaning". The raw
+    // value is always what's stored in shipment_events; this only affects display.
+    function friendlyLocation(raw) {
+      if (!raw) return null;
+      return String(raw).replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    // Full real transit history, newest first (spec: customer default). Never synthesizes a row
+    // — only what shipment_events actually holds, one row per real courier scan.
+    function transitHistoryHtml(events) {
+      var sorted = (events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at || 0) - new Date(a.event_time || a.created_at || 0); });
+      return sorted.map(function (e) {
+        var label = e.description || courierStatusLabel(e.normalized_status) || e.provider_status || 'Update';
+        var loc = friendlyLocation(e.event_location);
+        return '<div class="transit-event-row">' +
+          '<span class="transit-event-time">' + (e.event_time ? formatDateTime(e.event_time) : 'Time unavailable') + '</span>' +
+          '<strong class="transit-event-label">' + escapeHtml(label) + '</strong>' +
+          (loc ? '<span class="transit-event-location">' + escapeHtml(loc) + '</span>' : '') +
+        '</div>';
+      }).join('');
+    }
+
     function shippingSectionHtml(shipment) {
       if (!shipment) return PREPARING_MESSAGE;
 
@@ -3325,7 +3429,9 @@
           (shipment.last_tracking_sync_at ? '<p>Last Updated: <strong>' + formatDateTime(shipment.last_tracking_sync_at) + '</strong></p>' : '') +
           (isPrePickup
             ? '<p class="account-payment-note">Your shipment has been created with ' + COURIER_PROVIDER_LABELS[shipment.provider] + '. Pickup will be scheduled soon.</p>'
-            : (latestEvent && latestEvent.description ? '<p>Latest Update: <strong>' + escapeHtml(latestEvent.description) + (latestEvent.event_location ? ' — ' + escapeHtml(latestEvent.event_location) : '') + '</strong></p>' : '')) +
+            : (latestEvent && latestEvent.description ? '<p>Latest Update: <strong>' + escapeHtml(latestEvent.description) + '</strong></p>' +
+                (latestEvent.event_location ? '<p>Last Scanned At: <strong>' + escapeHtml(friendlyLocation(latestEvent.event_location)) + '</strong></p>' : '')
+              : '')) +
           (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track with ' + COURIER_PROVIDER_LABELS[shipment.provider] + '</a>' : '');
       }
 
@@ -4013,6 +4119,11 @@
       // router's own initial-route handling closes every open panel — opening the account
       // panel first and letting the router run after would just have it slammed shut again.
       SessionService.check().then(function (user) {
+        // Delivery-location priority on load (spec #11) — a logged-in customer with a default
+        // saved address and no explicit pick yet this session sees it applied automatically.
+        // Never requests geolocation itself — that stays a manual, optional click always.
+        if (user && user.role !== 'admin') DeliveryLocation.applyLoginDefaultAddress();
+
         var path = window.location.pathname;
         var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account', resetPasswordPath = BASE_PATH + '/reset-password', paymentResultPath = BASE_PATH + '/payment-result';
 
