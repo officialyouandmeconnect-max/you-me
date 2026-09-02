@@ -1375,7 +1375,7 @@
             '</div></div>' : '') +
             (loc && loc.pincode ? '<p class="account-payment-note">' + (loc.serviceable ? '✓ Delivers to ' + escapeHtml(loc.pincode) : 'Delivery to ' + escapeHtml(loc.pincode) + ' — check availability') + '</p>' : '') +
             '<p class="pm-selection-error" id="quickViewError"></p>' +
-            '<div class="pm-actions">' +
+            '<div class="action-row">' +
               '<button type="button" class="btn btn-primary" id="quickViewAddBtn"' + (p.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
             '</div>' +
             '<button type="button" class="link-btn" id="quickViewFullDetails">View Full Details</button>' +
@@ -4108,7 +4108,7 @@
           '</select>' +
         '</div>' +
         '<p class="account-submit-feedback" id="littleOneFeedback"></p>' +
-        '<div class="pm-actions">' +
+        '<div class="action-row">' +
           '<button type="button" class="btn btn-primary" id="littleOneSaveBtn">Save</button>' +
           '<button type="button" class="btn btn-outline" id="littleOneCancelBtn">Cancel</button>' +
         '</div>' +

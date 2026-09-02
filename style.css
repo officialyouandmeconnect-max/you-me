@@ -1380,6 +1380,12 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 
 .pm-actions { display: flex; gap: 10px; }
 .pm-actions .btn { flex: 1; justify-content: center; }
+/* Same look as .pm-actions but intentionally NOT covered by the mobile "hide the inline product
+   modal actions, sticky bar takes over" rule below — for action rows outside the product modal
+   (Quick View's Add to Cart, My Little One's Save/Cancel) that have no sticky-bar counterpart
+   and must stay visible on mobile. */
+.action-row { display: flex; gap: 10px; margin-top: 4px; }
+.action-row .btn { flex: 1; justify-content: center; }
 .pm-stock-note {
   margin-top: 16px;
   font-size: 0.74rem;
