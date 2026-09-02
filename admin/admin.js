@@ -2708,6 +2708,58 @@
       });
   }
 
+  // Real newsletter signups (migration 0022_newsletter_subscribers.sql) — the customer-site
+  // homepage/footer forms used to just fake a success message and discard the email; they now
+  // really insert here. Admin-read-only list + a client-side CSV export (no server function
+  // needed for a low-volume, low-frequency export like this).
+  function newsletterCardHtml() {
+    return '<div class="panel-card"><h3>Newsletter Subscribers</h3>' +
+      '<p style="font-size:0.8rem;color:var(--text-soft);margin-bottom:14px;">Everyone who signed up via the homepage or footer &ldquo;Stay Connected&rdquo; form. Unsubscribes (once that flow exists) will show here too, not just be silently removed.</p>' +
+      '<div id="newsletterSummary" style="font-size:0.85rem;margin-bottom:10px;">Loading…</div>' +
+      '<button type="button" class="btn-secondary btn-sm" id="exportNewsletterBtn" style="margin-bottom:14px;" disabled>Export CSV</button>' +
+      '<div id="newsletterListWrap"><p class="empty-state">Loading…</p></div>' +
+    '</div>';
+  }
+
+  function renderNewsletterList() {
+    supabaseClient.from('newsletter_subscribers').select('*').order('subscribed_at', { ascending: false })
+      .then(function (res) {
+        var summary = document.getElementById('newsletterSummary');
+        var wrap = document.getElementById('newsletterListWrap');
+        var exportBtn = document.getElementById('exportNewsletterBtn');
+        if (!summary || !wrap) return;
+        if (res.error) { summary.textContent = ''; wrap.innerHTML = '<p class="empty-state">' + esc(res.error.message) + '</p>'; return; }
+        var rows = res.data || [];
+        var active = rows.filter(function (r) { return !r.unsubscribed_at; });
+        summary.textContent = active.length + ' active subscriber' + (active.length === 1 ? '' : 's') +
+          (rows.length !== active.length ? ' (' + (rows.length - active.length) + ' unsubscribed)' : '');
+
+        if (!rows.length) { wrap.innerHTML = '<p class="empty-state">No subscribers yet.</p>'; return; }
+        wrap.innerHTML = '<table class="data-table"><thead><tr><th>Email</th><th>Source</th><th>Subscribed</th><th>Status</th></tr></thead><tbody>' +
+          rows.map(function (r) {
+            return '<tr><td>' + esc(r.email) + '</td><td>' + esc(r.source || '—') + '</td>' +
+              '<td>' + esc(new Date(r.subscribed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })) + '</td>' +
+              '<td>' + (r.unsubscribed_at ? '<span class="badge badge-cancelled">Unsubscribed</span>' : '<span class="badge badge-paid">Active</span>') + '</td></tr>';
+          }).join('') + '</tbody></table>';
+
+        if (exportBtn) {
+          exportBtn.disabled = false;
+          exportBtn.onclick = function () {
+            var csv = 'Email,Source,Subscribed At,Status\n' + rows.map(function (r) {
+              return [r.email, r.source || '', r.subscribed_at, r.unsubscribed_at ? 'Unsubscribed' : 'Active']
+                .map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(',');
+            }).join('\n');
+            var blob = new Blob([csv], { type: 'text/csv' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url; a.download = 'newsletter-subscribers.csv';
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+          };
+        }
+      });
+  }
+
   ROUTE_RENDERERS.settings = function () {
     content().innerHTML =
       '<div class="panel-card"><h3>Account</h3><p style="font-size:0.85rem;">Logged in as <strong>' + esc(document.getElementById('topbarUsername').textContent) + '</strong>.</p></div>' +
@@ -2716,9 +2768,11 @@
         '<p class="empty-state" id="pickupAddressLoading">Loading…</p>' +
       '</div>' +
       '<div class="panel-card"><h3>Store Info</h3><p style="font-size:0.85rem;color:var(--text-soft);">WhatsApp number, delivery threshold and shipping cost are configured in the customer site\'s <code>CONFIG</code> and in <code>create_order()</code> in the Supabase migration.</p></div>' +
-      sizeGuideCardHtml();
+      sizeGuideCardHtml() +
+      newsletterCardHtml();
 
     renderSizeGuideList();
+    renderNewsletterList();
 
     AdminAPI.settings.get().then(function (s) {
       var card = document.getElementById('pickupAddressLoading').closest('.panel-card');

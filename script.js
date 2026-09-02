@@ -4392,7 +4392,12 @@
     window.addEventListener('resize', update);
   }
 
-  function bindNewsletterForm(formId, emailInputId, feedbackId) {
+  // BUG FIX: this used to just validate the email format, show "Thanks for subscribing!", and
+  // reset the form — the email was never actually stored anywhere. Now really inserts into
+  // newsletter_subscribers (migration 0022_newsletter_subscribers.sql). A duplicate submit (an
+  // email already on the list) still shows the same success message — never reveals whether an
+  // address was already subscribed, same enumeration-safe pattern as password reset elsewhere.
+  function bindNewsletterForm(formId, emailInputId, feedbackId, source) {
     var form = document.getElementById(formId);
     var feedback = document.getElementById(feedbackId);
     if (!form || !feedback) return;
@@ -4403,15 +4408,31 @@
       var email = emailInput ? emailInput.value.trim() : '';
       var isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
       if (!isValid) { feedback.textContent = 'Please enter a valid email address.'; feedback.style.color = '#C5677A'; return; }
-      feedback.textContent = 'Thanks for subscribing! Welcome to the You & Me family.';
-      feedback.style.color = '';
-      form.reset();
+
+      var submitBtn = form.querySelector('button[type="submit"], button');
+      if (submitBtn) submitBtn.disabled = true;
+      feedback.textContent = '';
+      supabaseClient.from('newsletter_subscribers').insert({ email: email, source: source || null })
+        .then(function (res) {
+          // A unique-violation on the case-insensitive email index just means this address is
+          // already subscribed — that's a success from the customer's point of view too, not an
+          // error worth surfacing (and never confirms/denies prior subscription either way).
+          if (res.error && res.error.code !== '23505') throw res.error;
+          feedback.textContent = 'Thanks for subscribing! Welcome to the You & Me family.';
+          feedback.style.color = '';
+          form.reset();
+        })
+        .catch(function () {
+          feedback.textContent = 'Could not subscribe right now — please try again.';
+          feedback.style.color = '#C5677A';
+        })
+        .then(function () { if (submitBtn) submitBtn.disabled = false; });
     });
   }
 
   function initNewsletterForm() {
-    bindNewsletterForm('newsletterForm', 'newsletterEmail', 'newsletterFeedback');
-    bindNewsletterForm('footerNewsletterForm', 'footerNewsletterEmail', 'footerNewsletterFeedback');
+    bindNewsletterForm('newsletterForm', 'newsletterEmail', 'newsletterFeedback', 'homepage');
+    bindNewsletterForm('footerNewsletterForm', 'footerNewsletterEmail', 'footerNewsletterFeedback', 'footer');
   }
 
   /* ---------- Footer: logo, info modal, footer-link routing ---------- */
