@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260903d">
+<link rel="stylesheet" href="style.css?v=20260903e">
 </head>
 <body>
 
@@ -146,7 +146,7 @@
   </section>
 
   <!-- ============ 3b. SHOP BY AGE (real product ageGroup values only, see script.js renderShopByAge) ============ -->
-  <section class="shop-quicknav" id="shopByAgeSection" hidden aria-label="Shop by age">
+  <section class="shop-quicknav" id="shopByAgeSection" hidden aria-label="Shop by age" data-reveal="stagger">
     <div class="shop-quicknav-inner">
       <h2 class="shop-quicknav-heading">Shop by Age</h2>
       <div class="shop-quicknav-scroll" id="shopByAgeChips"></div>
@@ -154,7 +154,7 @@
   </section>
 
   <!-- ============ 3c. BABY BOYS / GIRLS / UNISEX (real product gender values only) ============ -->
-  <section class="shop-quicknav" id="shopByGenderSection" hidden aria-label="Shop by gender">
+  <section class="shop-quicknav" id="shopByGenderSection" hidden aria-label="Shop by gender" data-reveal="stagger">
     <div class="shop-quicknav-inner">
       <h2 class="shop-quicknav-heading">Shop by Gender</h2>
       <div class="shop-quicknav-scroll" id="shopByGenderChips"></div>
@@ -162,7 +162,7 @@
   </section>
 
   <!-- ============ 4. CATEGORY HIGHLIGHT STRIP ============ -->
-  <section class="category-strip" aria-label="Shop by category">
+  <section class="category-strip" aria-label="Shop by category" data-reveal="fade-up">
     <div class="category-strip-inner">
       <a href="#kids" class="category-item">
         <span class="category-icon icon-blue" aria-hidden="true">
@@ -204,7 +204,7 @@
   </section>
 
   <!-- ============ 4b. NEW ARRIVALS (real Admin-flagged products only) ============ -->
-  <section class="section products-section" id="homeNewArrivals" hidden>
+  <section class="section products-section" id="homeNewArrivals" hidden data-reveal="fade-up">
     <div class="section-inner">
       <div class="section-heading">
         <h2>New Arrivals</h2>
@@ -217,7 +217,7 @@
   </section>
 
   <!-- ============ 5. FEATURED PRODUCTS ============ -->
-  <section class="section products-section" id="featured-products">
+  <section class="section products-section" id="featured-products" data-reveal="fade-up">
     <div class="section-inner">
       <div class="section-heading">
         <h2>Featured Products</h2>
@@ -231,7 +231,7 @@
   </section>
 
   <!-- ============ 6. SHOP BY COLLECTION ============ -->
-  <section class="section collection-section" id="shop-by-collection">
+  <section class="section collection-section" id="shop-by-collection" data-reveal="fade-up">
     <div class="section-inner">
       <div class="section-heading">
         <h2>Shop by Collection</h2>
@@ -269,7 +269,7 @@
   </section>
 
   <!-- ============ 6b. MORE STYLES DISCOVERY ============ -->
-  <section class="section" id="more-styles">
+  <section class="section" id="more-styles" data-reveal="fade-up">
     <div class="section-inner">
       <div class="section-heading">
         <h2>More Styles You&rsquo;ll Love</h2>
@@ -282,7 +282,7 @@
   </section>
 
   <!-- ============ 7. ABOUT SECTION ============ -->
-  <section class="section about-section" id="about">
+  <section class="section about-section" id="about" data-reveal="fade">
     <div class="section-inner about-inner">
       <div class="about-visual" aria-hidden="true">
         <div class="about-illustration">
@@ -331,7 +331,7 @@
   </section>
 
   <!-- ============ 8. TESTIMONIALS ============ -->
-  <section class="section testimonials-section" id="testimonials">
+  <section class="section testimonials-section" id="testimonials" data-reveal="fade">
     <div class="section-inner">
       <h2 class="centered-heading">Loved by Families <span aria-hidden="true">&#10084;</span></h2>
 
@@ -384,7 +384,7 @@
   </section>
 
   <!-- ============ 9. NEWSLETTER / SUBSCRIBE ============ -->
-  <section class="section newsletter-section" id="contact">
+  <section class="section newsletter-section" id="contact" data-reveal="fade">
     <div class="section-inner newsletter-inner">
       <div class="newsletter-copy">
         <h2>Stay Connected for New Arrivals &amp; Special Offers!</h2>
@@ -667,6 +667,14 @@
   <div class="address-picker-body" id="quickAddSheetBody"><!-- injected --></div>
 </div>
 
+<div class="panel quick-view-sheet" id="quickViewSheet" role="dialog" aria-modal="true" aria-labelledby="quickViewSheetTitle" hidden>
+  <div class="address-picker-header">
+    <h2 id="quickViewSheetTitle">Quick View</h2>
+    <button class="panel-close" id="quickViewSheetClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="address-picker-body" id="quickViewSheetBody"><!-- injected --></div>
+</div>
+
 <!-- Confirm Modal — reusable branded yes/no confirmation (Remove Order, Clear History, Sign Out).
      Never window.confirm(). Same .panel/.overlay-scrim infra as every other popup on this site. -->
 <div class="panel confirm-sheet" id="confirmModal" role="alertdialog" aria-modal="true" aria-labelledby="confirmModalTitle" hidden>
@@ -739,6 +747,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260903c"></script>
+<script src="script.js?v=20260903e"></script>
 </body>
 </html>

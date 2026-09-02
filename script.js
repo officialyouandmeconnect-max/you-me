@@ -394,7 +394,7 @@
       btn.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
       btn.setAttribute('aria-pressed', String(!shown));
     });
-    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose', 'shopFilterSheetClose', 'shopSortSheetClose', 'locationSheetClose', 'quickAddSheetClose'].forEach(function (id) {
+    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose', 'shopFilterSheetClose', 'shopSortSheetClose', 'locationSheetClose', 'quickAddSheetClose', 'quickViewSheetClose'].forEach(function (id) {
       var btn = document.getElementById(id);
       if (btn) btn.addEventListener('click', closeTopPanel);
     });
@@ -406,20 +406,40 @@
   // modal pre-set to the cart intent, same as before — clicking Quick Add here still goes
   // through the exact same size/color validation there, nothing about that changed). Only a
   // low-stock/out-of-stock note is shown — "In Stock" on every single card was just noise.
+  // Real-data-only badges — never "Bestseller"/"Trending"/fake urgency. NEW uses the same
+  // Admin-set new_arrival flag New Arrivals already reads; SALE only when a real oldPrice
+  // exists (Admin's sale_price < price); OUT OF STOCK from the real aggregate variant stock.
+  // At most one shows at a time — priority Out of Stock > Sale > New, so a card never
+  // contradicts itself (e.g. "NEW" on something that's actually out of stock).
+  function productBadgeHtml(product) {
+    if (product.stock <= 0) return '<span class="product-badge product-badge-oos">Out of Stock</span>';
+    if (product.oldPrice) return '<span class="product-badge product-badge-sale">Sale</span>';
+    if (product.newArrival) return '<span class="product-badge product-badge-new">New</span>';
+    return '';
+  }
+
+  var MAX_VISIBLE_COLOR_DOTS = 4;
   function renderProductCard(product) {
     var discount = discountPercent(product);
     var stock = stockInfo(product.stock);
     var oldPriceHtml = product.oldPrice ? '<span class="product-old-price">' + formatPrice(product.oldPrice) + '</span>' : '';
     var discountHtml = discount > 0 ? '<span class="product-discount">' + discount + '% OFF</span>' : '';
-    var colorDots = product.colors.slice(0, 5).map(function (c) { return '<span class="product-color-dot" style="background:' + c.hex + '" title="' + escapeHtml(c.name) + '"></span>'; }).join('');
+    var visibleColors = product.colors.slice(0, MAX_VISIBLE_COLOR_DOTS);
+    var extraColors = product.colors.length - visibleColors.length;
+    var colorDots = visibleColors.map(function (c) { return '<span class="product-color-dot" style="background:' + c.hex + '" title="' + escapeHtml(c.name) + '"></span>'; }).join('') +
+      (extraColors > 0 ? '<span class="product-color-dot-more">+' + extraColors + '</span>' : '');
     var wishActive = WishlistService.has(product.id);
 
     return (
       '<article class="product-card" data-id="' + product.id + '">' +
         '<div class="product-img" data-open-product="' + product.id + '">' +
           productImageHtml(product.images[0]) +
+          productBadgeHtml(product) +
           '<button class="wishlist-btn' + (wishActive ? ' active' : '') + '" type="button" aria-label="Toggle wishlist for ' + escapeHtml(product.name) + '" data-wishlist="' + product.id + '">' +
             heartIconSVG(wishActive) +
+          '</button>' +
+          '<button class="product-quick-view" type="button" aria-label="Quick view ' + escapeHtml(product.name) + '" data-quick-view="' + product.id + '">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>' +
           '</button>' +
           '<button class="product-quick-add" type="button" aria-label="Add ' + escapeHtml(product.name) + ' to cart" data-add-to-cart="' + product.id + '"' + (product.stock <= 0 ? ' disabled' : '') + '>' +
             '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>' +
@@ -471,6 +491,9 @@
       // data-wishlist is already checked before data-open-product above).
       var addBtn = event.target.closest('[data-add-to-cart]');
       if (addBtn && !addBtn.disabled) { QuickAdd.open(addBtn.dataset.addToCart); return; }
+
+      var quickViewBtn = event.target.closest('[data-quick-view]');
+      if (quickViewBtn) { QuickView.open(quickViewBtn.dataset.quickView); return; }
 
       var buyBtn = event.target.closest('[data-buy-now]');
       if (buyBtn && !buyBtn.disabled) { ProductModal.open(buyBtn.dataset.buyNow, 'buynow'); return; }
@@ -1120,8 +1143,11 @@
         close();
         window.setTimeout(function () { Checkout.open(); }, 320);
       } else {
-        showToast(state.product.name + ' added to cart');
+        // Phase 2: Add to Cart opens the existing slide-out Cart Drawer instead of just a toast
+        // + close — the customer sees their real cart state immediately, same drawer/data as
+        // everywhere else, no second cart UI.
         close();
+        window.setTimeout(function () { CartDrawer.open(); }, 260);
       }
     }
 
@@ -1232,7 +1258,7 @@
         var onlyVariant = product.variants[0];
         if (onlyVariant && onlyVariant.stock <= 0) { showToast('That item is currently out of stock.'); return; }
         CartService.addItem(product.id, product.sizes[0] || null, (product.colors[0] && product.colors[0].name) || null, 1);
-        showToast('Added to Cart ♡');
+        CartDrawer.open();
         return;
       }
       state.product = product;
@@ -1278,8 +1304,8 @@
         var ready = (p.sizes.length <= 1 || state.size) && (p.colors.length <= 1 || state.color);
         if (!ready) { document.getElementById('quickAddError').textContent = 'Please select ' + (p.sizes.length > 1 && !state.size ? 'a size' : 'a colour') + '.'; return; }
         CartService.addItem(p.id, state.size || (p.sizes[0] || null), state.color || (p.colors[0] && p.colors[0].name) || null, 1);
-        showToast('Added to Cart ♡');
         close();
+        window.setTimeout(function () { CartDrawer.open(); }, 200);
         return;
       }
 
@@ -1292,6 +1318,91 @@
         NotifyMeService.subscribe(state.product.id, variant ? variant.id : null, email)
           .then(function () { feedback.textContent = "We'll email you when this is back in stock."; })
           .catch(function () { feedback.textContent = "Couldn't save that right now — please try again."; });
+      }
+    }
+
+    function init() {
+      var b = body();
+      if (b) b.addEventListener('click', onClick);
+    }
+
+    return { open: open, close: close, init: init };
+  })();
+
+  // Phase 2 Quick View — a fast, compact look from a listing card without leaving the grid.
+  // Reuses the exact same real product data (images/price/sizes/colors/stock/delivery) as the
+  // full Product Modal; "View Full Details" hands off to that same modal for the complete page
+  // (fabric/accordion/Similar Styles/etc) rather than duplicating that content here.
+  var QuickView = (function () {
+    var state = { product: null, size: null, color: null };
+
+    function panel() { return document.getElementById('quickViewSheet'); }
+    function body() { return document.getElementById('quickViewSheetBody'); }
+
+    function open(productId) {
+      var product = findProduct(productId);
+      if (!product) return;
+      state.product = product;
+      state.size = product.sizes.length === 1 ? product.sizes[0] : null;
+      state.color = product.colors.length === 1 ? product.colors[0].name : null;
+      RecentlyViewedService.record(product.id);
+      render();
+      openPanel(panel());
+    }
+    function close() { closePanel(panel()); }
+
+    function render() {
+      var p = state.product;
+      var discount = discountPercent(p);
+      var stock = stockInfo(p.stock);
+      var loc = DeliveryLocation.get();
+
+      body().innerHTML =
+        '<div class="qv-layout">' +
+          '<div class="qv-image">' + productImageHtml(p.images[0]) + '</div>' +
+          '<div class="qv-info">' +
+            '<h3 class="pm-name">' + escapeHtml(p.name) + '</h3>' +
+            '<div class="pm-price-row"><span class="pm-price">' + formatPrice(p.price) + '</span>' +
+              (p.oldPrice ? '<span class="product-old-price">' + formatPrice(p.oldPrice) + '</span>' : '') +
+              (discount > 0 ? '<span class="product-discount">' + discount + '% OFF</span>' : '') +
+            '</div>' +
+            '<div class="pm-stock ' + stock.cls + '">' + stock.label + '</div>' +
+            (p.sizes.length > 1 ? '<div class="pm-option-block"><div class="pm-option-label"><span>Size</span></div><div class="pm-size-options">' +
+              p.sizes.map(function (s) { return '<button type="button" class="pm-size-btn' + (state.size === s ? ' selected' : '') + '" data-qv-size="' + escapeHtml(s) + '">' + escapeHtml(s) + '</button>'; }).join('') +
+            '</div></div>' : '') +
+            (p.colors.length > 1 ? '<div class="pm-option-block"><div class="pm-option-label"><span>Colour</span></div><div class="pm-color-options">' +
+              p.colors.map(function (c) { return '<button type="button" class="pm-color-btn' + (state.color === c.name ? ' selected' : '') + '" data-qv-color="' + escapeHtml(c.name) + '" aria-label="' + escapeHtml(c.name) + '"><span class="swatch" style="background:' + c.hex + '"></span></button>'; }).join('') +
+            '</div></div>' : '') +
+            (loc && loc.pincode ? '<p class="account-payment-note">' + (loc.serviceable ? '✓ Delivers to ' + escapeHtml(loc.pincode) : 'Delivery to ' + escapeHtml(loc.pincode) + ' — check availability') + '</p>' : '') +
+            '<p class="pm-selection-error" id="quickViewError"></p>' +
+            '<div class="pm-actions">' +
+              '<button type="button" class="btn btn-primary" id="quickViewAddBtn"' + (p.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
+            '</div>' +
+            '<button type="button" class="link-btn" id="quickViewFullDetails">View Full Details</button>' +
+          '</div>' +
+        '</div>';
+    }
+
+    function onClick(event) {
+      var sizeBtn = event.target.closest('[data-qv-size]');
+      if (sizeBtn) { state.size = sizeBtn.dataset.qvSize; render(); return; }
+      var colorBtn = event.target.closest('[data-qv-color]');
+      if (colorBtn) { state.color = colorBtn.dataset.qvColor; render(); return; }
+
+      if (event.target.id === 'quickViewFullDetails') {
+        var id = state.product.id;
+        close();
+        ProductModal.open(id);
+        return;
+      }
+
+      if (event.target.id === 'quickViewAddBtn') {
+        var p = state.product;
+        var ready = (p.sizes.length <= 1 || state.size) && (p.colors.length <= 1 || state.color);
+        if (!ready) { document.getElementById('quickViewError').textContent = 'Please select ' + (p.sizes.length > 1 && !state.size ? 'a size' : 'a colour') + '.'; return; }
+        CartService.addItem(p.id, state.size || (p.sizes[0] || null), state.color || (p.colors[0] && p.colors[0].name) || null, 1);
+        close();
+        window.setTimeout(function () { CartDrawer.open(); }, 200);
       }
     }
 
@@ -4038,6 +4149,32 @@
     onScroll();
   }
 
+  // Phase 2 motion — ONE reusable scroll-reveal system (spec explicitly asks for one shared
+  // system, not per-section custom IntersectionObserver code). Reveals every [data-reveal]
+  // element once, the first time it enters the viewport, then stops observing it — never
+  // replays on scroll-up/down. Respects prefers-reduced-motion by skipping straight to the
+  // revealed state (no animation, but the exact same final layout — nothing about the page's
+  // actual content or usability changes either way). Deliberately not applied to checkout,
+  // forms, admin, or the tracking timeline — homepage/listing sections only.
+  function initScrollReveal() {
+    var els = document.querySelectorAll('[data-reveal]');
+    if (!els.length) return;
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion || typeof IntersectionObserver === 'undefined') {
+      els.forEach(function (el) { el.classList.add('is-revealed'); });
+      return;
+    }
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-revealed');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+    els.forEach(function (el) { observer.observe(el); });
+  }
+
   function initTestimonialCarousel() {
     var track = document.getElementById('testimonialTrack');
     var dotsWrap = document.getElementById('testimonialDots');
@@ -4448,6 +4585,7 @@
     initPanelChrome();
     ProductModal.init();
     QuickAdd.init();
+    QuickView.init();
     CartDrawer.init();
     WishlistDrawer.init();
     SearchOverlay.init();
@@ -4462,6 +4600,7 @@
     initBadgesAndButtons();
     initMobileNav();
     initScrollEffects();
+    initScrollReveal();
     initTestimonialCarousel();
     initNewsletterForm();
 

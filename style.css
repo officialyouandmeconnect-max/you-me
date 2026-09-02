@@ -605,6 +605,54 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 }
 .product-quick-add:hover { transform: scale(1.08); }
 .product-quick-add:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Quick View (Phase 2) — mirrors Quick Add's position/size on the opposite corner. */
+.product-quick-view {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--color-text);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 10px rgba(64,46,33,0.12);
+  transition: transform 0.15s ease;
+}
+.product-quick-view:hover { transform: scale(1.08); color: var(--color-pink); }
+
+/* Real-data-only badges — see productBadgeHtml() in script.js. */
+.product-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #fff;
+}
+.product-badge-new { background: var(--color-sage); }
+.product-badge-sale { background: var(--color-pink); }
+.product-badge-oos { background: rgba(64,46,33,0.55); }
+
+.product-color-dot-more { font-size: 0.66rem; color: var(--color-text-soft); font-weight: 600; margin-left: 2px; }
+
+/* Quick View layout — image + info side by side on wider screens, stacked on mobile (the
+   shared .address-picker-sheet/.panel infra already handles bottom-sheet-vs-centered-modal). */
+.qv-layout { display: flex; flex-direction: column; gap: 16px; }
+.qv-image { position: relative; width: 100%; aspect-ratio: 1; border-radius: var(--radius-md); overflow: hidden; background: var(--color-cream); }
+.qv-info { min-width: 0; }
+@media (min-width: 640px) {
+  .qv-layout { flex-direction: row; align-items: flex-start; }
+  .qv-image { width: 220px; flex-shrink: 0; }
+}
 .product-card h3 {
   font-family: var(--font-body);
   font-weight: 500;
@@ -2219,3 +2267,23 @@ a.footer-social-icon:hover { background: var(--color-surface); transform: transl
   .campaign-banner-text .campaign-description { font-size: 0.88rem; }
   .campaign-banner-overlay .btn, .campaign-banner-text .btn { min-height: 44px; padding: 10px 22px; }
 }
+
+/* =========================================================
+   Phase 2 — Scroll Reveal (one shared system, see initScrollReveal() in script.js)
+   Soft, premium, subtle — transform+opacity only (no layout-triggering properties), so this
+   never contributes to layout shift, and is a no-op with prefers-reduced-motion (the element
+   just starts in its .is-revealed state, same final look, zero animation).
+   ========================================================= */
+@media (prefers-reduced-motion: no-preference) {
+  [data-reveal] { opacity: 0; transition: opacity 0.6s ease, transform 0.6s ease; }
+  [data-reveal="fade-up"] { transform: translateY(22px); }
+  [data-reveal="fade"] { transform: none; }
+  [data-reveal="stagger"] > * { opacity: 0; transform: translateY(16px); transition: opacity 0.5s ease, transform 0.5s ease; }
+  [data-reveal="stagger"].is-revealed > *:nth-child(1) { transition-delay: 0.02s; }
+  [data-reveal="stagger"].is-revealed > *:nth-child(2) { transition-delay: 0.08s; }
+  [data-reveal="stagger"].is-revealed > *:nth-child(3) { transition-delay: 0.14s; }
+  [data-reveal="stagger"].is-revealed > *:nth-child(4) { transition-delay: 0.2s; }
+  [data-reveal="stagger"].is-revealed > *:nth-child(n+5) { transition-delay: 0.26s; }
+  [data-reveal="stagger"].is-revealed > * { opacity: 1; transform: none; }
+}
+[data-reveal].is-revealed { opacity: 1; transform: none; }
