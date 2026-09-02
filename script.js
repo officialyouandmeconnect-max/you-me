@@ -64,7 +64,10 @@
   function productImageHtml(url) {
     if (!url) return '<div class="placeholder-img img-beige img-fill-parent"></div>';
     if (isPlaceholderImage(url)) return '<div class="placeholder-img ' + placeholderClass(url) + ' img-fill-parent"></div>';
-    return '<img class="img-fill-parent" src="' + escapeHtml(url) + '" alt="">';
+    // loading="lazy" — this one function renders every real product image site-wide (cards,
+    // cart, order history, modal gallery), so this single change is the real, low-risk win; a
+    // browser still fetches an already-in-viewport image immediately regardless of the attribute.
+    return '<img class="img-fill-parent" src="' + escapeHtml(url) + '" alt="" loading="lazy">';
   }
 
   var SUBCATEGORY_LABELS = {
@@ -247,6 +250,43 @@
 
     load();
     return { has: has, toggle: toggle, remove: remove, getIds: getIds, getCount: getCount, onChange: onChange };
+  })();
+
+  // Guest-only, localStorage — most-recently-viewed product id first, capped so it never grows
+  // unbounded. Real browsing history only, nothing invented; a logged-in customer's real
+  // activity already lives in their own order/wishlist data, so this doesn't need a server table.
+  var RecentlyViewedService = (function () {
+    var STORAGE_KEY = 'youandme_recently_viewed';
+    var MAX_ITEMS = 12;
+    var ids = [];
+
+    function load() {
+      try {
+        var raw = window.localStorage.getItem(STORAGE_KEY);
+        ids = raw ? JSON.parse(raw) : [];
+      } catch (e) { ids = []; }
+    }
+    function persist() {
+      try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(ids)); } catch (e) { /* unavailable */ }
+    }
+    function record(productId) {
+      ids = ids.filter(function (id) { return String(id) !== String(productId); });
+      ids.unshift(productId);
+      if (ids.length > MAX_ITEMS) ids = ids.slice(0, MAX_ITEMS);
+      persist();
+    }
+    // Real products only — an id that no longer resolves (deleted/unpublished product) is
+    // silently dropped, never shown as a broken card.
+    function get(excludeId, limit) {
+      return ids
+        .filter(function (id) { return String(id) !== String(excludeId); })
+        .map(function (id) { return findProduct(id); })
+        .filter(Boolean)
+        .slice(0, limit || MAX_ITEMS);
+    }
+
+    load();
+    return { record: record, get: get };
   })();
 
   /* ---------- 6. Toast ---------- */
@@ -538,6 +578,13 @@
     }
 
     function titleEl() { return document.getElementById('galleryTitle'); }
+    // Desktop-only breadcrumb (hidden on mobile via CSS) — mirrors whatever real title this view
+    // just set, never a separate/invented label.
+    function setTitle(text) {
+      titleEl().textContent = text;
+      var crumb = document.getElementById('galleryBreadcrumbCurrent');
+      if (crumb) crumb.textContent = text;
+    }
     function subtitleEl() { return document.getElementById('gallerySubtitle'); }
     function quickChipsEl() { return document.getElementById('shopQuickChips'); }
     function gridEl() { return document.getElementById('galleryGrid'); }
@@ -734,7 +781,7 @@
       quickChipKey = 'subcategory';
       resetFilters();
       if (initialFilter && SUBCATEGORY_ORDER.indexOf(initialFilter) !== -1) filters.quickChip = initialFilter;
-      titleEl().textContent = 'Kids Wear';
+      setTitle('Kids Wear');
       subtitleEl().textContent = 'Comfort-first styles for every little moment.';
       render();
     }
@@ -744,7 +791,7 @@
       pool = PRODUCTS.slice();
       quickChipKey = 'category';
       resetFilters();
-      titleEl().textContent = 'All Products';
+      setTitle('All Products');
       subtitleEl().textContent = 'Everything from You & Me, in one place.';
       render();
     }
@@ -754,7 +801,7 @@
       pool = PRODUCTS.filter(function (p) { return p.newArrival; });
       quickChipKey = null;
       resetFilters();
-      titleEl().textContent = 'New Arrivals';
+      setTitle('New Arrivals');
       subtitleEl().textContent = 'Fresh styles, just landed.';
       render();
     }
@@ -854,6 +901,7 @@
       state.galleryIndex = 0;
       state.sizeGuideOpen = false;
       state.pendingIntent = intent || null;
+      RecentlyViewedService.record(product.id);
       render();
       openPanel(panel());
     }
@@ -924,12 +972,26 @@
           '<button type="button" class="btn btn-outline" id="pmAddToCart"' + (p.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
           '<button type="button" class="btn btn-primary" id="pmBuyNow"' + (p.stock <= 0 ? ' disabled' : '') + '>Buy Now</button>' +
         '</div>' +
-        '<p class="pm-stock-note">Final availability will be confirmed by our team on WhatsApp.</p>' +
+        '<p class="pm-stock-note">Stock and price are confirmed automatically when you check out.</p>' +
         '<div class="pm-sticky-actions">' +
           '<button type="button" class="btn btn-outline" id="pmAddToCartSticky"' + (p.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
           '<button type="button" class="btn btn-primary" id="pmBuyNowSticky"' + (p.stock <= 0 ? ' disabled' : '') + '>Buy Now</button>' +
         '</div>' +
-        '<div class="pm-delivery-block">' + deliveryBlockHtml() + '</div>';
+        '<div class="pm-delivery-block">' + deliveryBlockHtml() + '</div>' +
+        discoveryRowHtml('You May Also Like', PRODUCTS.filter(function (o) { return o.id !== p.id && o.category === p.category; }).slice(0, 8)) +
+        discoveryRowHtml('Recently Viewed', RecentlyViewedService.get(p.id, 8));
+    }
+
+    // Deterministic-only discovery — same category ("You May Also Like") or the guest's own real
+    // browsing history ("Recently Viewed"). Never a "customers also bought"-style claim, since
+    // that would need real co-purchase data this project doesn't compute. Renders nothing at all
+    // when there's genuinely no real data to show, rather than an empty/awkward heading.
+    function discoveryRowHtml(title, products) {
+      if (!products.length) return '';
+      return '<div class="pm-discovery-row">' +
+        '<h3 class="pm-discovery-heading">' + escapeHtml(title) + '</h3>' +
+        '<div class="pm-discovery-scroll">' + products.map(renderProductCard).join('') + '</div>' +
+      '</div>';
     }
 
     // Real-only delivery check for this product page — reads the SAME DeliveryLocation state
@@ -1065,6 +1127,9 @@
             '</div>' +
             '<div class="cart-item-controls">' +
               '<button type="button" class="cart-item-remove" data-remove="' + item.lineId + '">Remove</button>' +
+              '<button type="button" class="cart-item-save" data-save-for-later="' + item.lineId + '" data-save-product="' + item.productId + '">' +
+                (WishlistService.has(item.productId) ? 'In Wishlist' : 'Save for Later') +
+              '</button>' +
               '<div class="qty-stepper">' +
                 '<button type="button" data-cart-qty="-1" data-line="' + item.lineId + '" aria-label="Decrease quantity">&minus;</button>' +
                 '<span>' + item.qty + '</span>' +
@@ -1099,6 +1164,18 @@
       }
       var removeBtn = event.target.closest('[data-remove]');
       if (removeBtn) { CartService.removeItem(removeBtn.dataset.remove); render(); return; }
+
+      // Moves the line to Wishlist and removes it from the cart — never adds a duplicate
+      // Wishlist entry if the product is already saved there.
+      var saveBtn = event.target.closest('[data-save-for-later]');
+      if (saveBtn) {
+        var productId = saveBtn.dataset.saveProduct;
+        if (!WishlistService.has(productId)) WishlistService.toggle(productId);
+        CartService.removeItem(saveBtn.dataset.saveForLater);
+        showToast('Saved for later ♡');
+        render();
+        return;
+      }
 
       if (event.target.id === 'cartContinueShopping' || event.target.id === 'cartContinueShopping2') { close(); return; }
       if (event.target.id === 'cartClearBtn') { CartService.clear(); render(); return; }
@@ -1154,12 +1231,34 @@
 
   /* ---------- 15. Search overlay ---------- */
   var SearchOverlay = (function () {
+    // The customer's own real past queries only — guest, localStorage, capped. Never a
+    // site-wide "popular searches" list, since that would need real search-analytics data this
+    // project doesn't collect.
+    var RECENT_KEY = 'youandme_recent_searches';
+    var MAX_RECENT = 8;
+    function getRecentSearches() {
+      try { var raw = window.localStorage.getItem(RECENT_KEY); return raw ? JSON.parse(raw) : []; } catch (e) { return []; }
+    }
+    function recordSearch(query) {
+      var list = getRecentSearches().filter(function (q) { return q.toLowerCase() !== query.toLowerCase(); });
+      list.unshift(query);
+      if (list.length > MAX_RECENT) list = list.slice(0, MAX_RECENT);
+      try { window.localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch (e) { /* unavailable */ }
+    }
+    function clearRecentSearches() {
+      try { window.localStorage.removeItem(RECENT_KEY); } catch (e) { /* unavailable */ }
+    }
+
     function panel() { return document.getElementById('searchOverlay'); }
     function input() { return document.getElementById('searchInput'); }
     function body() { return document.getElementById('searchOverlayBody'); }
 
     function open() {
       openPanel(panel());
+      // Refresh the body every time the overlay opens — this is what actually surfaces Recent
+      // Searches (the static HTML fallback in index.html only covers a fresh page load before
+      // any JS has run once).
+      runSearch(input() ? input().value : '');
       window.setTimeout(function () { if (input()) input().focus(); }, 100);
     }
     function close() { closePanel(panel()); }
@@ -1173,16 +1272,29 @@
       return haystack.indexOf(query) !== -1;
     }
 
-    function runSearch(query) {
+    function recentSearchesHtml() {
+      var recent = getRecentSearches();
+      if (!recent.length) return '';
+      return '<div class="search-recent"><div class="search-recent-head"><span>Recent Searches</span><button type="button" class="link-btn" id="searchClearRecent">Clear</button></div>' +
+        '<div class="search-recent-chips">' + recent.map(function (q) {
+          return '<button type="button" class="search-recent-chip" data-recent-search="' + escapeHtml(q) + '">' + escapeHtml(q) + '</button>';
+        }).join('') + '</div></div>';
+    }
+
+    function runSearch(query, opts) {
       var b = body();
       query = query.trim().toLowerCase();
 
       if (!query) {
-        b.innerHTML = '<p class="search-hint">Try &ldquo;baby&rdquo;, &ldquo;cotton&rdquo;, &ldquo;pink&rdquo; or a product name.</p>';
+        b.innerHTML = recentSearchesHtml() + '<p class="search-hint">Try &ldquo;baby&rdquo;, &ldquo;cotton&rdquo;, &ldquo;pink&rdquo; or a product name.</p>';
         return;
       }
 
       var results = PRODUCTS.filter(function (p) { return matches(p, query); });
+
+      // Only record a search that a customer deliberately committed to (Enter, or picking a
+      // recent chip) — not every keystroke while they're still mid-typing.
+      if (opts && opts.record) recordSearch(query);
 
       if (results.length === 0) {
         b.innerHTML = '<div class="gallery-empty"><p><strong>No products found</strong></p><p>Try another search term.</p></div>';
@@ -1197,7 +1309,16 @@
       var btn = document.getElementById('searchBtn');
       if (btn) btn.addEventListener('click', open);
       var inp = input();
-      if (inp) inp.addEventListener('input', function () { runSearch(inp.value); });
+      if (inp) {
+        inp.addEventListener('input', function () { runSearch(inp.value); });
+        inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' && inp.value.trim()) runSearch(inp.value, { record: true }); });
+      }
+      var b = body();
+      if (b) b.addEventListener('click', function (event) {
+        var chip = event.target.closest('[data-recent-search]');
+        if (chip && inp) { inp.value = chip.dataset.recentSearch; runSearch(inp.value, { record: true }); return; }
+        if (event.target.id === 'searchClearRecent') { clearRecentSearches(); if (!inp.value.trim()) runSearch(''); }
+      });
     }
 
     return { open: open, close: close, init: init };
@@ -3207,6 +3328,7 @@
                   ? '<button type="button" class="btn btn-sm btn-outline" id="downloadInvoiceBtn">Download Invoice</button>'
                   : '<p class="account-payment-note">Invoice will be available after your order is confirmed.</p>') +
             '</div>' +
+            '<div class="panel-card"><button type="button" class="link-btn" data-info="orderHelp">Need help with this order?</button></div>' +
             (!o.customer_hidden_at && hideEligible(o)
               ? '<div class="panel-card"><button type="button" class="btn btn-sm btn-outline" id="removeOrderDetailBtn">Remove Order</button></div>'
               : '');
@@ -3769,11 +3891,21 @@
 
   /* ---------- Footer: logo, info modal, footer-link routing ---------- */
   var InfoModal = (function () {
+    // BUG FIX (P0 — customer-misleading content): every entry here used to describe a
+    // WhatsApp-only "message us to place an order, we confirm manually, no online payment yet"
+    // flow — accurate for an old version of this site, but false now: checkout is real (cart →
+    // Cashfree payment, price/stock authoritatively computed server-side by create_order()) and
+    // WhatsApp is a manual fallback method that's never actually invoked anywhere in the current
+    // checkout code (OrderService.methods.whatsapp exists but nothing calls it). A customer
+    // reading the old FAQ could reasonably conclude "this site doesn't take online payment,"
+    // which isn't true. WhatsApp is still real for one thing — post-purchase support — and that
+    // part is left as-is.
     var CONTENT = {
       shipping: {
         title: 'Shipping Information',
-        html: '<p>We currently ship across India. Orders are dispatched within 1&ndash;2 business days of your order being confirmed on WhatsApp, and typically arrive within 5&ndash;7 business days depending on your location.</p>' +
-          '<p>Delivery charges (if any) are calculated at checkout and shown before you place your order &mdash; orders over &#8377;999 ship free.</p>'
+        html: '<p>We currently ship across India. Once your order is confirmed, delivery is handled by our courier partners and typically arrives within a few business days depending on your location.</p>' +
+          '<p>Delivery charges (if any) are calculated at checkout and shown before you pay &mdash; orders over &#8377;999 ship free. Before you order, you can check whether we deliver to your PIN code using the &ldquo;Deliver to&rdquo; option in the header or on any product page.</p>' +
+          '<p>Once your order ships, track its real-time status any time from My Orders in your account.</p>'
       },
       returns: {
         title: 'Returns & Exchanges',
@@ -3792,25 +3924,27 @@
       },
       faq: {
         title: 'Frequently Asked Questions',
-        html: '<h3>How do I place an order?</h3><p>Add items to your cart, go to checkout, fill in your details, and tap &ldquo;Place Order on WhatsApp&rdquo; &mdash; it opens WhatsApp with everything filled in for you.</p>' +
-          '<h3>Do you accept online payment?</h3><p>Not yet &mdash; our team shares payment details/QR directly on WhatsApp once your order is confirmed.</p>' +
-          '<h3>Can I change my size after ordering?</h3><p>Yes, just let us know on WhatsApp before the order ships.</p>'
+        html: '<h3>How do I place an order?</h3><p>Add items to your cart, go to checkout, fill in your delivery details, and complete payment securely &mdash; your order is placed as soon as payment succeeds.</p>' +
+          '<h3>Do you accept online payment?</h3><p>Yes &mdash; we accept UPI, credit/debit cards, netbanking and more through our secure payment partner, Cashfree.</p>' +
+          '<h3>How do I know if you deliver to my area?</h3><p>Use the &ldquo;Deliver to&rdquo; option in the header, or check right on a product page, to confirm delivery availability for your PIN code before you order.</p>' +
+          '<h3>How do I track my order?</h3><p>Open My Orders in your account and select the order &mdash; you&rsquo;ll see real courier updates there once it ships, no tracking ID needed.</p>' +
+          '<h3>Can I change my size or address after ordering?</h3><p>If your order hasn&rsquo;t shipped yet, message us on WhatsApp with your Order ID and we&rsquo;ll do our best to help.</p>'
       },
       orderHelp: {
         title: 'Order Help',
-        html: '<p>Every order on this site is confirmed manually over WhatsApp &mdash; after checkout, you&rsquo;ll get a ready-made message to send us with your order details.</p>' +
-          '<p>Our team replies to confirm availability and share payment details. If you need help with an existing order, just message us on WhatsApp with your Order ID.</p>'
+        html: '<p>Your order is placed and paid for securely right on the site &mdash; there&rsquo;s no manual confirmation step. You can check its status any time from My Orders in your account.</p>' +
+          '<p>Need help with an existing order? Message us on WhatsApp with your Order ID and we&rsquo;ll sort it out.</p>'
       },
       privacy: {
         title: 'Privacy Policy',
-        html: '<p>We collect only the details you give us at checkout &mdash; your name, phone number, email (optional) and delivery address &mdash; solely to fulfil your order via WhatsApp. We don&rsquo;t sell or share your information with third parties.</p>' +
-          '<p>Your cart and wishlist are stored locally in your own browser, not on a server.</p>' +
+        html: '<p>We collect the details you give us at checkout &mdash; your name, phone number, email (optional) and delivery address &mdash; to fulfil your order and keep you updated on its status. Payment is processed securely by our payment partner, Cashfree; we don&rsquo;t store your card/UPI details ourselves.</p>' +
+          '<p>We don&rsquo;t sell or share your information with third parties beyond what&rsquo;s needed to deliver your order (our courier partners) and process payment.</p>' +
           '<p class="info-disclaimer">This is placeholder policy text for the current version of the site &mdash; replace with your finalized policy before launch.</p>'
       },
       terms: {
         title: 'Terms & Conditions',
-        html: '<p>Orders placed through this site are requests for purchase, confirmed manually by our team over WhatsApp &mdash; availability and final pricing are confirmed at that stage, not guaranteed at checkout.</p>' +
-          '<p>Product colors may vary slightly from what you see on screen. By placing an order you agree to be contacted on WhatsApp regarding that order.</p>' +
+        html: '<p>Orders placed through this site are confirmed automatically once payment succeeds &mdash; pricing, stock, and delivery charges are calculated at checkout and are final at that point.</p>' +
+          '<p>Product colors may vary slightly from what you see on screen. For help with an order, you can reach us on WhatsApp.</p>' +
           '<p class="info-disclaimer">This is placeholder terms text for the current version of the site &mdash; replace with your finalized terms before launch.</p>'
       }
     };
@@ -4077,6 +4211,17 @@
     // New Arrivals / Search all filter the same live array) waits for the store API first.
     loadProducts().then(function () {
       renderProductGrid(grid, PRODUCTS.filter(function (p) { return p.featured; }));
+
+      // "More Styles You'll Love" — real, non-featured stock so this doesn't just repeat the
+      // Featured Products grid above it. Renders nothing (section stays empty, no fake filler)
+      // if every real product happens to already be featured.
+      var moreStylesEl = document.getElementById('moreStylesScroll');
+      if (moreStylesEl) {
+        var moreStyles = PRODUCTS.filter(function (p) { return !p.featured; }).slice(0, 12);
+        moreStylesEl.innerHTML = moreStyles.map(renderProductCard).join('');
+        var moreStylesSection = document.getElementById('more-styles');
+        if (moreStylesSection) moreStylesSection.hidden = moreStyles.length === 0;
+      }
 
       // The one and only campaign read for the whole homepage — see CampaignService above.
       // Runs after PRODUCTS is loaded (the offer section needs real product data), but never

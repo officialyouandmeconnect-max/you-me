@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260903a">
+<link rel="stylesheet" href="style.css?v=20260903b">
 </head>
 <body>
 
@@ -239,6 +239,19 @@
     </div>
   </section>
 
+  <!-- ============ 6b. MORE STYLES DISCOVERY ============ -->
+  <section class="section" id="more-styles">
+    <div class="section-inner">
+      <div class="section-heading">
+        <h2>More Styles You&rsquo;ll Love</h2>
+        <a href="#all" class="view-all">View All <span class="arrow">&#8594;</span></a>
+      </div>
+      <div class="pm-discovery-scroll" id="moreStylesScroll">
+        <!-- Product cards injected via JS from PRODUCTS data, see script.js -->
+      </div>
+    </div>
+  </section>
+
   <!-- ============ 7. ABOUT SECTION ============ -->
   <section class="section about-section" id="about">
     <div class="section-inner about-inner">
@@ -368,6 +381,9 @@
 <!-- ============ VIEW: GALLERY (Kids Wear / View All / New Arrivals) ============ -->
 <div id="viewGallery" class="view-gallery" hidden>
   <div class="section-inner gallery-inner">
+    <nav class="breadcrumb" id="galleryBreadcrumb" aria-label="Breadcrumb">
+      <a href="#home">Home</a><span aria-hidden="true">&#8250;</span><span id="galleryBreadcrumbCurrent"></span>
+    </nav>
     <button type="button" class="gallery-back link-btn" id="galleryBack">&#8592; Back to Home</button>
     <div class="section-heading">
       <h2 id="galleryTitle">Products</h2>
@@ -454,6 +470,7 @@
         <button type="button" class="account-nav-item" data-tab="addresses">Addresses</button>
         <button type="button" class="account-nav-item" data-tab="wishlist">Wishlist</button>
         <button type="button" class="account-nav-item" data-tab="profile">Profile</button>
+        <button type="button" class="account-nav-item" data-info="orderHelp">Help</button>
         <button type="button" class="account-nav-item account-nav-logout" id="accountDashLogout">Logout</button>
       </nav>
       <div class="account-dash-content" id="accountDashContent"><!-- injected --></div>
@@ -685,6 +702,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260903a"></script>
+<script src="script.js?v=20260903b"></script>
 </body>
 </html>

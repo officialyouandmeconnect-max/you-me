@@ -1289,6 +1289,22 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .pm-delivery-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.82rem; }
 .pm-delivery-row .link-btn { background: none; border: none; color: var(--color-pink); font-weight: 600; cursor: pointer; font-size: 0.78rem; }
 
+/* Discovery rows ("You May Also Like" / "Recently Viewed") — one lightweight horizontal-scroll
+   module, reusing the exact same .product-card markup/CSS as every grid on the site (just a
+   fixed card width + no-wrap flex container instead of a grid). */
+.pm-discovery-row { margin-top: 28px; }
+.pm-discovery-heading { font-size: 0.95rem; font-weight: 700; margin: 0 0 12px; }
+.pm-discovery-scroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.pm-discovery-scroll .product-card { flex: 0 0 150px; scroll-snap-align: start; }
+@media (min-width: 640px) { .pm-discovery-scroll .product-card { flex-basis: 180px; } }
+
 .pm-size-guide-table {
   width: 100%;
   border-collapse: collapse;
@@ -1332,6 +1348,7 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .cart-item-price { font-size: 0.8rem; font-weight: 600; color: var(--color-pink); }
 .cart-item-controls { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 6px; }
 .cart-item-remove { background: none; border: none; color: var(--color-text-soft); cursor: pointer; font-size: 0.72rem; text-decoration: underline; }
+.cart-item-save { background: none; border: none; color: var(--color-pink); cursor: pointer; font-size: 0.72rem; text-decoration: underline; }
 .cart-item .qty-stepper button { width: 26px; height: 26px; font-size: 0.9rem; }
 .cart-item .qty-stepper span { width: 26px; font-size: 0.8rem; }
 
@@ -1551,6 +1568,13 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
    ========================================================= */
 .view-gallery, .view-coming-soon { min-height: 60vh; padding: 40px 24px 88px; }
 .gallery-inner { max-width: var(--max-width); margin: 0 auto; }
+/* Desktop-only, minimal — real navigational value on wide screens where there's room; on
+   mobile the existing "Back to Home" link already covers the same job more compactly. */
+.breadcrumb { display: none; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--color-text-soft); margin-bottom: 10px; }
+.breadcrumb a { color: var(--color-text-soft); text-decoration: none; }
+.breadcrumb a:hover { color: var(--color-pink); }
+.breadcrumb span:last-child { color: var(--color-text); font-weight: 600; }
+@media (min-width: 900px) { .breadcrumb { display: flex; } }
 .gallery-back {
   display: inline-block;
   margin-bottom: 18px;
@@ -1727,6 +1751,12 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .search-overlay-header .panel-close { position: static; }
 .search-overlay-body { padding: 24px; overflow-y: auto; max-height: calc(100vh - 90px); }
 .search-hint { color: var(--color-text-soft); font-size: 0.85rem; }
+.search-recent { margin-bottom: 18px; }
+.search-recent-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.search-recent-head span { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-soft); }
+.search-recent-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.search-recent-chip { background: var(--color-cream); border: none; border-radius: 999px; padding: 7px 14px; font-size: 0.82rem; color: var(--color-text); cursor: pointer; }
+.search-recent-chip:hover { background: var(--color-beige); }
 .search-results-grid { grid-template-columns: repeat(4, 1fr); }
 .search-results-count { font-size: 0.82rem; color: var(--color-text-soft); margin-bottom: 16px; }
 
