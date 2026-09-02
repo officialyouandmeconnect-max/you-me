@@ -3220,7 +3220,16 @@
         .then(function (res) {
           if (res.error || !res.data) throw new Error('Order not found.');
           var o = res.data;
-          var shipment = (o.shipments || [])[0] || null;
+          // ROOT-CAUSE BUG FIX: shipments.order_id is UNIQUE (see migration 0001_init.sql), so
+          // PostgREST embeds `shipments(*)` here as a single OBJECT, not an array — this is a
+          // 1:1 relation from the `orders` side, same class of bug as the earlier campaign-embed
+          // fix. `(o.shipments || [])[0]` on an object is always undefined, which silently made
+          // `shipment` undefined even when a real, fully-synced Delhivery shipment existed —
+          // exactly why the Shipping card kept showing "Preparing your order" and Packed showed
+          // "Time unavailable" (courierTrackingStepsDone/stageTime both silently fell back to the
+          // no-shipment path). Handle both shapes so this can't regress if PostgREST's embed
+          // heuristic ever changes.
+          var shipment = Array.isArray(o.shipments) ? (o.shipments[0] || null) : (o.shipments || null);
           // Any provider with its own real tracking (Amazon Shipping, Delhivery, …) — Manual
           // Shipping and "no shipment yet" both fall back to the generic order-status timeline.
           var courierSteps = shipment && COURIER_TRACKING_STEPS[shipment.provider];
@@ -3302,6 +3311,8 @@
           var back = document.getElementById('orderDetailBack');
           if (back) back.addEventListener('click', function () { render('orders'); });
 
+          bindTrackingTimelineToggle();
+
           var removeBtn = document.getElementById('removeOrderDetailBtn');
           if (removeBtn) removeBtn.addEventListener('click', function () {
             confirmRemoveOrder(o.id, function () { render('orders'); });
@@ -3342,16 +3353,72 @@
         });
     }
 
+    // Short, honest internal-event descriptions — real facts about what You & Me itself did,
+    // never a guess about courier movement (those steps expand to the real transit history
+    // instead — see COURIER_MOVEMENT_KEYS below). Covers both TRACKING_STEPS' and
+    // COURIER_TRACKING_STEPS' key spellings ("packing" vs "packed") since the same map serves
+    // both timelines.
+    var MILESTONE_DESCRIPTIONS = {
+      placed: 'Your order was received by You & Me.',
+      paid: 'Your payment has been verified.',
+      confirmed: 'You & Me confirmed your order.',
+      packing: 'You & Me packed your order.',
+      packed: 'You & Me packed your order.',
+      ready_to_ship: 'Your order is ready to be handed to the courier.'
+    };
+    // Steps where "what happened" is real courier movement, not a You & Me-side fact — expanding
+    // any of these shows the shared, real transit history (shipment_events) instead of a canned
+    // sentence, exactly the same list regardless of which step under it the customer opened.
+    var COURIER_MOVEMENT_KEYS = ['ready_for_pickup', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'shipped'];
+
+    // Milestones are individually expandable (accordion — one open at a time, spec #4/#11).
+    // Only a DONE step is ever clickable; nothing to show for a stage that hasn't happened yet.
     function trackingTimelineHtml(done, steps, o, shipment, isCourier) {
-      return '<div class="tracking-timeline">' + (steps || TRACKING_STEPS).map(function (step) {
+      var events = (shipment && shipment.shipment_events) || [];
+      return '<div class="tracking-timeline" id="trackingTimelineRoot">' + (steps || TRACKING_STEPS).map(function (step, idx) {
         var isDone = !!done[step.key];
         var time = isDone && o ? stageTime(step.key, o, shipment, isCourier) : null;
         var timeHtml = isDone && o ? '<span class="tracking-step-time">' + (time ? formatDateTime(time) : 'Time unavailable') + '</span>' : '';
+        var isCourierMovement = COURIER_MOVEMENT_KEYS.indexOf(step.key) !== -1;
+        var panelId = 'trackingStepPanel' + idx;
+        var panelHtml = '';
+        if (isDone) {
+          if (isCourierMovement) {
+            panelHtml = events.length ? transitHistoryHtml(events) : '<p class="account-payment-note">No courier scans available yet.</p>';
+          } else if (MILESTONE_DESCRIPTIONS[step.key]) {
+            panelHtml = '<p class="account-payment-note">' + escapeHtml(MILESTONE_DESCRIPTIONS[step.key]) + '</p>';
+          }
+        }
+        var headerTag = isDone && panelHtml ? 'button type="button" class="tracking-step-header" data-tracking-toggle="' + panelId + '"' : 'div class="tracking-step-header"';
+        var headerCloseTag = isDone && panelHtml ? 'button' : 'div';
         return '<div class="tracking-step' + (isDone ? ' done' : '') + '">' +
           '<span class="tracking-dot">' + (isDone ? '&#10003;' : '') + '</span>' +
-          '<span class="tracking-step-body"><span class="tracking-step-label">' + step.label + '</span>' + timeHtml + '</span>' +
+          '<span class="tracking-step-body">' +
+            '<' + headerTag + '>' +
+              '<span class="tracking-step-label">' + step.label + '</span>' + timeHtml +
+              (isDone && panelHtml ? '<svg class="tracking-step-chevron" viewBox="0 0 24 24" width="16" height="16"><polyline points="6 9 12 15 18 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '') +
+            '</' + headerCloseTag + '>' +
+            (panelHtml ? '<div class="tracking-step-panel" id="' + panelId + '" hidden>' + panelHtml + '</div>' : '') +
+          '</span>' +
         '</div>';
       }).join('') + '</div>';
+    }
+
+    // Wires the accordion's expand/collapse — call once after trackingTimelineHtml's markup is
+    // in the DOM. Single-open-at-a-time (spec #11): opening one panel closes any other.
+    function bindTrackingTimelineToggle() {
+      var root = document.getElementById('trackingTimelineRoot');
+      if (!root) return;
+      root.querySelectorAll('[data-tracking-toggle]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var panel = document.getElementById(btn.dataset.trackingToggle);
+          if (!panel) return;
+          var willOpen = panel.hidden;
+          root.querySelectorAll('.tracking-step-panel').forEach(function (p) { p.hidden = true; });
+          root.querySelectorAll('.tracking-step-chevron').forEach(function (c) { c.classList.remove('open'); });
+          if (willOpen) { panel.hidden = false; btn.querySelector('.tracking-step-chevron').classList.add('open'); }
+        });
+      });
     }
 
     var COURIER_PROVIDER_LABELS = { amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery' };
@@ -3381,16 +3448,19 @@
       return String(raw).replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
     }
 
-    // Full real transit history, newest first (spec: customer default). Never synthesizes a row
-    // — only what shipment_events actually holds, one row per real courier scan.
+    // Full real transit history — oldest first (spec: easiest for a customer to follow "where it
+    // started → where it is now"), with the single most recent real event highlighted so it's
+    // still obvious at a glance where the package currently stands. Never synthesizes a row —
+    // only what shipment_events actually holds, one row per real courier scan.
     function transitHistoryHtml(events) {
-      var sorted = (events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at || 0) - new Date(a.event_time || a.created_at || 0); });
-      return sorted.map(function (e) {
+      var sorted = (events || []).slice().sort(function (a, b) { return new Date(a.event_time || a.created_at || 0) - new Date(b.event_time || b.created_at || 0); });
+      return sorted.map(function (e, i) {
         var label = e.description || courierStatusLabel(e.normalized_status) || e.provider_status || 'Update';
         var loc = friendlyLocation(e.event_location);
-        return '<div class="transit-event-row">' +
+        var isLatest = i === sorted.length - 1;
+        return '<div class="transit-event-row' + (isLatest ? ' transit-event-latest' : '') + '">' +
           '<span class="transit-event-time">' + (e.event_time ? formatDateTime(e.event_time) : 'Time unavailable') + '</span>' +
-          '<strong class="transit-event-label">' + escapeHtml(label) + '</strong>' +
+          '<strong class="transit-event-label">' + escapeHtml(label) + (isLatest ? ' <span class="transit-event-latest-tag">Latest</span>' : '') + '</strong>' +
           (loc ? '<span class="transit-event-location">' + escapeHtml(loc) + '</span>' : '') +
         '</div>';
       }).join('');
