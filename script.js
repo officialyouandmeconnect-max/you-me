@@ -3268,19 +3268,22 @@
     // shipment was already IN TRANSIT): this used to sort by `event_time || 0` alone — a real
     // scan whose event_time failed to parse fell all the way back to the Unix epoch and sorted
     // as the OLDEST possible row, while the shipment-creation system event (always given a real,
-    // recent event_time at creation) then looked like the newest. Falls back to created_at first,
-    // exactly like transitHistoryHtml's own sort already did — the two were inconsistent, this
-    // makes them the same rule.
+    // recent event_time at creation) then looked like the newest. Falls back to created_at first.
     function latestRealEvent(events) {
       var sorted = (events || []).slice().sort(function (a, b) { return new Date(a.event_time || a.created_at || 0) - new Date(b.event_time || b.created_at || 0); });
       return sorted.length ? sorted[sorted.length - 1] : null;
     }
 
-    // Full real transit history as a vertical node/line journey graph (spec: "Design the
-    // expanded tracking history as a vertical line... circle/node + connecting line + event
-    // title + timestamp + location"). Oldest first (easiest to follow "where it started → where
-    // it is now"), latest real event highlighted. Never synthesizes a row — one node per real
-    // shipment_events row, nothing invented.
+    // The ONE customer-facing filter — reads shipment_events.customer_visible, computed once
+    // server-side by delhivery-shipping's classifyDelhiveryScan (see its comment for the full
+    // root-cause story). Admin's own rendering never calls this and keeps seeing every raw row;
+    // this is presentation-only, nothing is ever deleted from shipment_events.
+    function getCustomerTrackingEvents(events) {
+      return (events || []).filter(function (e) { return e.customer_visible !== false; });
+    }
+
+    // Vertical node/line journey graph for a bucket of real events — oldest first, latest
+    // highlighted. Never synthesizes a row — one node per real shipment_events row.
     function transitHistoryHtml(events) {
       var sorted = (events || []).slice().sort(function (a, b) { return new Date(a.event_time || a.created_at || 0) - new Date(b.event_time || b.created_at || 0); });
       if (!sorted.length) return '<p class="account-payment-note">No courier scans available yet.</p>';
@@ -3291,21 +3294,21 @@
         return '<div class="journey-node' + (isLatest ? ' journey-node-latest' : '') + '">' +
           '<span class="journey-dot"></span>' +
           '<div class="journey-node-body">' +
-            '<strong class="journey-node-title">' + escapeHtml(label) + (isLatest ? ' <span class="transit-event-latest-tag">Latest</span>' : '') + '</strong>' +
-            '<span class="journey-node-time">' + (e.event_time ? formatDateTime(e.event_time) : 'Time unavailable') + '</span>' +
+            '<strong class="journey-node-title">' + escapeHtml(label) + '</strong>' +
             (loc ? '<span class="journey-node-loc">' + escapeHtml(loc) + '</span>' : '') +
+            '<span class="journey-node-time">' + (e.event_time ? formatDateTime(e.event_time) : 'Time unavailable') + '</span>' +
           '</div>' +
         '</div>';
       }).join('') + '</div>';
     }
 
     // ---------- Simplified 4-stage customer tracking (Ordered / Shipped / Out for Delivery /
-    // Delivered) — replaces the old 7-10-step internal timeline and the separate technical
-    // "Shipping" card. Internal prep stages (Confirmed/Packed/Ready to Ship) still exist and are
-    // still tracked in order_status_history/Admin — they just aren't primary customer-facing
-    // milestones any more; Packed gets one small line between Ordered and Shipped instead. ----------
+    // Delivered) — internal prep stages (Confirmed/Packed/Ready to Ship) still exist in
+    // order_status_history/Admin, they just aren't primary customer-facing milestones. "See all
+    // updates" expands INLINE inside the Shipped node itself — never a separate card/section. ----------
     function simpleTrackingHtml(o, shipment, isCourier) {
-      var events = (shipment && shipment.shipment_events) || [];
+      var allEvents = (shipment && shipment.shipment_events) || [];
+      var visibleEvents = getCustomerTrackingEvents(allEvents);
       var courierRank = isCourier ? (COURIER_MOVEMENT_RANK[shipment.normalized_status] != null ? COURIER_MOVEMENT_RANK[shipment.normalized_status] : 0) : null;
       var orderRank = ORDER_STATUS_RANK[o.order_status] != null ? ORDER_STATUS_RANK[o.order_status] : 0;
 
@@ -3313,15 +3316,24 @@
       var ofdDone = isCourier ? (shipment.normalized_status === 'out_for_delivery' || shipment.normalized_status === 'delivered') : orderRank >= 6;
       var deliveredDone = isCourier ? shipment.normalized_status === 'delivered' : orderRank >= 7;
 
-      var shippedTime = isCourier ? findEventTime(events, ['picked_up']) : findHistoryTime(o.order_status_history, 'shipped');
-      var ofdTime = isCourier ? findEventTime(events, ['out_for_delivery']) : findHistoryTime(o.order_status_history, 'out_for_delivery');
-      var deliveredTime = isCourier ? findEventTime(events, ['delivered']) : findHistoryTime(o.order_status_history, 'delivered');
-
-      var latestEvent = isCourier ? latestRealEvent(events) : null;
-      // ORDER_STATUS_RANK uses 'packing' as the Admin-facing stage name, but a real
-      // order_status_history row can be logged under either spelling depending on when it was
-      // written — check both, never guess a time.
+      // Real timestamps looked up against the FULL raw event set (never the filtered/visible
+      // one) — a milestone's own timestamp accuracy shouldn't depend on whether that exact scan
+      // happens to be customer-display-worthy; classifyDelhiveryScan always tags the real pickup/
+      // OFD/delivered scan as visible anyway, this is just the more correct source to read from.
+      var shippedTime = isCourier ? findEventTime(allEvents, ['picked_up']) : findHistoryTime(o.order_status_history, 'shipped');
+      var ofdTime = isCourier ? findEventTime(allEvents, ['out_for_delivery']) : findHistoryTime(o.order_status_history, 'out_for_delivery');
+      var deliveredTime = isCourier ? findEventTime(allEvents, ['delivered']) : findHistoryTime(o.order_status_history, 'delivered');
       var packedTime = findHistoryTime(o.order_status_history, 'packed') || findHistoryTime(o.order_status_history, 'packing');
+
+      // Bucket the customer-visible events by which stage they belong to, so "See all updates"
+      // under Shipped shows exactly the journey up to (not including) OFD/Delivered — matching
+      // spec's own mockup, which stops the Shipped-expand list right before Out for Delivery.
+      var shippedBucket = visibleEvents.filter(function (e) { return ['shipment_created', 'pickup_scheduled', 'picked_up', 'in_transit'].indexOf(e.normalized_status) !== -1; });
+      var ofdBucket = visibleEvents.filter(function (e) { return e.normalized_status === 'out_for_delivery'; });
+      var deliveredBucket = visibleEvents.filter(function (e) { return e.normalized_status === 'delivered'; });
+      var latestShippedEvent = latestRealEvent(shippedBucket);
+      var latestOfdEvent = latestRealEvent(ofdBucket);
+      var latestDeliveredEvent = latestRealEvent(deliveredBucket);
 
       // ---- ETA, prominent, top of card — real provider value only, hidden entirely otherwise ----
       var etaHtml = '';
@@ -3331,65 +3343,68 @@
         etaHtml = '<div class="tracking-eta"><small>Expected by</small><strong>' + (isToday ? 'Arriving today' : formatDate(shipment.estimated_delivery)) + '</strong></div>';
       }
 
-      function node(label, done, timeVal, bodyHtml) {
-        return '<div class="simple-node' + (done ? ' done' : '') + '">' +
-          '<span class="simple-node-dot">' + (done ? '&#10003;' : '') + '</span>' +
+      // Three real states (spec #2) — done (past, soft green), current (the most recently
+      // reached stage, brand pink), future (not yet reached, muted). No checkmark icon.
+      var doneFlags = { ordered: true, shipped: shippedDone, out_for_delivery: ofdDone, delivered: deliveredDone };
+      var order = ['ordered', 'shipped', 'out_for_delivery', 'delivered'];
+      var currentKey = null;
+      order.forEach(function (k) { if (doneFlags[k]) currentKey = k; });
+
+      function node(key, label, timeVal, bodyHtml) {
+        var isDone = doneFlags[key];
+        var isCurrent = key === currentKey;
+        var stateClass = !isDone ? 'future' : (isCurrent ? 'current' : 'done');
+        return '<div class="simple-node ' + stateClass + '">' +
+          '<span class="simple-node-dot"></span>' +
           '<div class="simple-node-body">' +
             '<span class="simple-node-label">' + label + '</span>' +
-            (done ? '<span class="simple-node-time">' + (timeVal ? formatDateTime(timeVal) : 'Time unavailable') + '</span>' : '') +
-            (done && bodyHtml ? bodyHtml : '') +
+            (isDone ? '<span class="simple-node-time">' + (timeVal ? formatDateTime(timeVal) : 'Time unavailable') + '</span>' : '') +
+            (isDone && bodyHtml ? bodyHtml : '') +
           '</div>' +
         '</div>';
       }
 
       var shippedBody = '';
       if (shippedDone) {
-        if (isCourier && latestEvent) {
-          var loc = friendlyLocation(latestEvent.event_location);
-          shippedBody = '<p class="simple-node-update">' + escapeHtml(latestEvent.description || courierStatusLabel(latestEvent.normalized_status)) + (loc ? '<br>' + escapeHtml(loc) : '') + '</p>' +
-            (events.length ? '<button type="button" class="link-btn" id="seeAllUpdatesBtn">See All Updates</button>' : '');
+        if (isCourier && latestShippedEvent) {
+          var loc = friendlyLocation(latestShippedEvent.event_location);
+          shippedBody = '<p class="simple-node-update">' + escapeHtml(latestShippedEvent.description || courierStatusLabel(latestShippedEvent.normalized_status)) + (loc ? '<br>' + escapeHtml(loc) : '') + '</p>';
         } else if (!isCourier && shipment && shipment.courier) {
           shippedBody = '<p class="simple-node-update">Courier: ' + escapeHtml(shipment.courier) + '</p>';
         }
+        if (isCourier && shippedBucket.length) {
+          shippedBody += '<button type="button" class="link-btn" id="seeAllUpdatesBtn">See all updates</button>' +
+            '<div class="journey-inline" id="journeyInline" hidden>' + transitHistoryHtml(shippedBucket) + '</div>';
+        }
       }
-      var ofdBody = ofdDone && isCourier && latestEvent && latestEvent.normalized_status === 'out_for_delivery'
-        ? '<p class="simple-node-update">' + escapeHtml(latestEvent.description || 'Package is out for delivery.') + '</p>' : '';
-      var deliveredBody = deliveredDone && isCourier && latestEvent && latestEvent.normalized_status === 'delivered' && latestEvent.event_location
-        ? '<p class="simple-node-update">' + escapeHtml(friendlyLocation(latestEvent.event_location)) + '</p>' : '';
+      var ofdBody = ofdDone && isCourier && latestOfdEvent
+        ? '<p class="simple-node-update">' + escapeHtml(latestOfdEvent.description || 'Package is out for delivery.') + '</p>' : '';
+      var deliveredBody = deliveredDone && isCourier && latestDeliveredEvent && latestDeliveredEvent.event_location
+        ? '<p class="simple-node-update">' + escapeHtml(friendlyLocation(latestDeliveredEvent.event_location)) + '</p>' : '';
 
+      // Deliberately secondary — small, muted, no external link (spec #10/#11: the customer
+      // stays on officialyouandme.in, no "Track with Delhivery"/"View on courier website").
       var courierNoteHtml = isCourier && COURIER_PROVIDER_LABELS[shipment.provider]
-        ? '<p class="tracking-courier-note">Delivery partner: ' + COURIER_PROVIDER_LABELS[shipment.provider] + '</p>' : '';
+        ? '<p class="tracking-courier-note">Delivery partner: ' + COURIER_PROVIDER_LABELS[shipment.provider] +
+            (shipment.tracking_id ? ' &middot; Tracking ID: ' + escapeHtml(shipment.tracking_id) : '') + '</p>' : '';
 
       return '<h4>Order Status</h4>' + etaHtml +
         '<div class="simple-tracking" id="simpleTrackingRoot">' +
-          node('Ordered', true, o.created_at, '') +
-          (packedTime ? '<div class="simple-subnote">You & Me packed your order<br><span class="simple-node-time">' + formatDateTime(packedTime) + '</span></div>' : '') +
-          node('Shipped', shippedDone, shippedTime, shippedBody) +
-          node('Out for Delivery', ofdDone, ofdTime, ofdBody) +
-          node('Delivered', deliveredDone, deliveredTime, deliveredBody) +
+          node('ordered', 'Ordered', o.created_at, packedTime ? '<div class="simple-subnote">You & Me packed your order<br><span class="simple-node-time">' + formatDateTime(packedTime) + '</span></div>' : '') +
+          node('shipped', 'Shipped', shippedTime, shippedBody) +
+          node('out_for_delivery', 'Out for Delivery', ofdTime, ofdBody) +
+          node('delivered', 'Delivered', deliveredTime, deliveredBody) +
         '</div>' +
-        courierNoteHtml +
-        (shipment && shipment.tracking_id ? '<p class="tracking-id-line">Tracking ID: <strong>' + escapeHtml(shipment.tracking_id) + '</strong></p>' : '') +
-        '<div class="journey-sheet" id="journeySheet" hidden>' +
-          '<h5>Current Update</h5>' +
-          (latestEvent
-            ? '<p class="journey-current"><strong>' + escapeHtml(latestEvent.description || courierStatusLabel(latestEvent.normalized_status)) + '</strong>' +
-                (latestEvent.event_location ? '<br>' + escapeHtml(friendlyLocation(latestEvent.event_location)) : '') +
-                (latestEvent.event_time ? '<br><span class="journey-node-time">' + formatDateTime(latestEvent.event_time) + '</span>' : '') + '</p>'
-            : '') +
-          transitHistoryHtml(events) +
-          (shipment && shipment.tracking_url ? '<a class="journey-external-link" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">View on courier website</a>' : '') +
-        '</div>';
+        courierNoteHtml;
     }
 
     function bindSimpleTracking() {
       var btn = document.getElementById('seeAllUpdatesBtn');
-      var sheet = document.getElementById('journeySheet');
-      if (btn && sheet) btn.addEventListener('click', function () {
-        var willOpen = sheet.hidden;
-        sheet.hidden = !willOpen;
-        btn.textContent = willOpen ? 'Hide Updates' : 'See All Updates';
-        if (willOpen) sheet.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      var inline = document.getElementById('journeyInline');
+      if (btn && inline) btn.addEventListener('click', function () {
+        var willOpen = inline.hidden;
+        inline.hidden = !willOpen;
+        btn.textContent = willOpen ? 'Hide updates' : 'See all updates';
       });
     }
 

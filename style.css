@@ -1867,30 +1867,29 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 
 .simple-tracking { display: flex; flex-direction: column; }
 .simple-node { display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; font-size: 0.88rem; color: var(--color-text-soft); position: relative; }
-.simple-node:not(:last-child)::before { content: ''; position: absolute; left: 11px; top: 32px; bottom: -4px; width: 2px; background: rgba(64,46,33,0.12); }
-.simple-node.done:not(:last-child)::before { background: var(--color-sage); }
-.simple-node-dot { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(64,46,33,0.16); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; flex-shrink: 0; background: var(--color-bg); position: relative; z-index: 1; }
-.simple-node.done .simple-node-dot { background: var(--color-sage); border-color: var(--color-sage); color: #fff; }
-.simple-node-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; padding-top: 2px; }
-.simple-node.done { color: var(--color-text); }
+.simple-node:not(:last-child)::before { content: ''; position: absolute; left: 8px; top: 26px; bottom: -4px; width: 2px; background: rgba(64,46,33,0.12); }
+.simple-node.done:not(:last-child)::before, .simple-node.current:not(:last-child)::before { background: var(--color-sage); }
+/* No checkmark icon (spec #2) — three plain states, color/fill is the only signal. */
+.simple-node-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(64,46,33,0.18); flex-shrink: 0; margin-top: 3px; background: var(--color-bg); position: relative; z-index: 1; }
+.simple-node.done .simple-node-dot { background: var(--color-sage); border-color: var(--color-sage); }
+.simple-node.current .simple-node-dot { background: var(--color-pink); border-color: var(--color-pink); box-shadow: 0 0 0 4px rgba(230,138,152,0.2); }
+.simple-node-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; padding-top: 1px; }
+.simple-node.done, .simple-node.current { color: var(--color-text); }
+.simple-node.current .simple-node-label { color: var(--color-pink); }
 .simple-node-label { font-weight: 700; font-size: 0.92rem; }
 .simple-node-time { font-size: 0.74rem; color: var(--color-text-soft); }
 .simple-node-update { font-size: 0.82rem; color: var(--color-text); margin: 2px 0 0; line-height: 1.4; }
 
 /* Packed — deliberately not its own node/circle (spec: keep the primary progress to just the
    four stages), just a small indented line between Ordered and Shipped. */
-.simple-subnote { margin: -2px 0 2px 36px; font-size: 0.76rem; color: var(--color-text-soft); line-height: 1.4; }
+.simple-subnote { margin: -2px 0 2px 30px; font-size: 0.76rem; color: var(--color-text-soft); line-height: 1.4; }
 
-.tracking-courier-note { font-size: 0.76rem; color: var(--color-text-soft); margin: 10px 0 2px; }
-.tracking-id-line { font-size: 0.78rem; color: var(--color-text-soft); margin: 2px 0 0; }
-.tracking-id-line strong { color: var(--color-text); }
+.tracking-courier-note { font-size: 0.74rem; color: var(--color-text-soft); margin: 12px 0 0; }
+.tracking-courier-note strong { color: var(--color-text-soft); }
 
-/* "See All Updates" — expands in place (spec allows an expanded section as one of three valid
-   presentations), not a new global modal. */
-.journey-sheet { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(64,46,33,0.08); }
-.journey-sheet h5 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-pink); margin: 0 0 8px; }
-.journey-current { background: var(--color-cream); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 0.86rem; margin: 0 0 16px; line-height: 1.5; }
-.journey-external-link { display: inline-block; margin-top: 14px; font-size: 0.76rem; color: var(--color-text-soft); text-decoration: underline; }
+/* "See all updates" expands INLINE, nested directly inside the Shipped node's own body — never
+   a separate card/section (spec #5/#9: no "Current Update" card, no new panel). */
+.journey-inline { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(64,46,33,0.08); }
 
 .journey-timeline { display: flex; flex-direction: column; }
 .journey-node { display: flex; align-items: flex-start; gap: 12px; position: relative; padding: 0 0 20px; }
