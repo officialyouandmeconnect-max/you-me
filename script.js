@@ -4597,6 +4597,59 @@
     '</div>';
   }
 
+  // ---- Animated Campaign Hero (see migration 0021_animated_campaign_hero.sql) ----
+  // Strictly campaign-gated: this only ever runs from renderCampaign() below, which only ever
+  // runs when CampaignService.load() actually found a row in the LIVE campaign view — never on
+  // a normal day, never speculatively, never as a permanent homepage fixture. When there's no
+  // live campaign (the common case, every ordinary day) or animated_hero_enabled is false (the
+  // default for every campaign, even ones with a plain banner), removeAnimatedHero() runs and
+  // the site's real, calm, non-animated hero shows exactly as it always has — no code deploy,
+  // no cron, no admin click needed for that reversion, since it's just "campaign row disappeared
+  // from the live view" doing its job.
+  var ANIMATED_HERO_ID = 'animatedCampaignHero';
+  function removeAnimatedHero() {
+    var el = document.getElementById(ANIMATED_HERO_ID);
+    if (el) el.remove();
+    var hero = document.querySelector('.hero');
+    if (hero) hero.hidden = false;
+  }
+  // Shared by the live site and nothing else — Admin's own preview (renderCampaignBannerPreviewHtml
+  // equivalent in admin.js) is a deliberately simplified mockup, not this function, since Admin
+  // doesn't load the customer site's full script.js.
+  function animatedHeroInnerHtml(media, content) {
+    var isMobile = window.matchMedia('(max-width: 720px)').matches;
+    var bgUrl = (isMobile && media.mobile_url) || media.desktop_url;
+    var preset = media.hero_animation_style || 'soft_float';
+    var ctaAttrs = campaignCtaAttrs(media.text_cta_target_type, media.text_cta_target_value);
+    return '<div class="hero-deco" aria-hidden="true">' +
+        (bgUrl ? '<div class="anim-hero-bg" style="background-image:url(\'' + escapeHtml(bgUrl) + '\')"></div>' : '<span class="deco star-1">&#10022;</span><span class="deco cloud-1">&#9729;</span><span class="deco heart-1">&#10084;</span>') +
+      '</div>' +
+      (media.hero_left_media_url ? '<img class="anim-hero-side anim-hero-left" src="' + escapeHtml(media.hero_left_media_url) + '" alt="" aria-hidden="true">' : '') +
+      (media.hero_right_media_url ? '<img class="anim-hero-side anim-hero-right" src="' + escapeHtml(media.hero_right_media_url) + '" alt="" aria-hidden="true">' : '') +
+      '<div class="hero-inner">' +
+        '<div class="hero-copy">' +
+          (media.text_headline ? '<h1>' + escapeHtml(media.text_headline) + '</h1>' : '') +
+          (media.text_subheadline ? '<p>' + escapeHtml(media.text_subheadline) + '</p>' : '') +
+          (media.text_cta_text ? '<a class="btn btn-primary" ' + ctaAttrs + '>' + escapeHtml(media.text_cta_text) + ' <span class="arrow">&#8594;</span></a>' : '') +
+        '</div>' +
+      '</div>';
+  }
+  function renderAnimatedHero(media, content) {
+    removeAnimatedHero();
+    var hero = document.querySelector('.hero');
+    if (!hero) return;
+    var preset = media.hero_animation_style || 'soft_float';
+    hero.hidden = true;
+    hero.insertAdjacentHTML('beforebegin',
+      '<section class="hero animated-campaign-hero anim-preset-' + escapeHtml(preset) + '" id="' + ANIMATED_HERO_ID + '">' + animatedHeroInnerHtml(media, content) + '</section>');
+    var el = document.getElementById(ANIMATED_HERO_ID);
+    if (el && media.text_cta_target_type === 'product') {
+      el.querySelectorAll('[data-open-product]').forEach(function (a) {
+        a.addEventListener('click', function (e) { e.preventDefault(); ProductModal.open(Number(a.dataset.openProduct)); });
+      });
+    }
+  }
+
   var CAMPAIGN_BANNER_ID = 'campaignBanner';
   function removeCampaignBanner() {
     var el = document.getElementById(CAMPAIGN_BANNER_ID);
@@ -4698,9 +4751,19 @@
   }
 
   function renderCampaign(data) {
-    if (!data) { renderAnnouncementBar(null); removeCampaignBanner(); removeCampaignOffer(); return; }
+    if (!data) { renderAnnouncementBar(null); removeCampaignBanner(); removeAnimatedHero(); removeCampaignOffer(); return; }
     renderAnnouncementBar(data.content);
-    renderBanner(data.media, data.content);
+    // The animated hero and the plain banner both ultimately want the hero slot — an animated
+    // hero, when enabled, always takes priority over a plain banner there (see the "opt-in" note
+    // on animated_hero_enabled above). Every other banner placement (before_footer etc.) is
+    // unaffected either way, since renderBanner() only touches the hero for replace_hero/above_hero.
+    if (data.media && data.media.animated_hero_enabled) {
+      removeCampaignBanner();
+      renderAnimatedHero(data.media, data.content);
+    } else {
+      removeAnimatedHero();
+      renderBanner(data.media, data.content);
+    }
     renderOfferSection(data.content, data.products);
   }
 

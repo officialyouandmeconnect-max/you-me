@@ -2349,6 +2349,28 @@
           '<div id="bannerPreviewArea"></div>' +
         '</div>' +
 
+        '<div class="panel-card"><h3>Animated Campaign Hero</h3>' +
+          '<p style="font-size:0.78rem;color:var(--text-soft);margin-bottom:10px;">Off by default for every campaign, including this one. On a normal day (no live campaign, or this switch off) the website always shows its normal, calm hero — nothing animated ever shows without a real live campaign. Reuses the Headline / Subheadline / CTA and Desktop / Mobile media from Website Banner above as this hero&rsquo;s background and copy — only the two floating side images and the animation style below are new.</p>' +
+          '<div class="form-field" style="flex-direction:row;align-items:center;gap:10px;">' +
+            '<label style="margin:0;">Enable Animated Hero</label>' +
+            '<label class="switch"><input type="checkbox" id="hEnabled"' + (cm.animated_hero_enabled ? ' checked' : '') + '><span class="switch-track"></span></label>' +
+          '</div>' +
+          '<div class="form-field"><label>Animation Style</label><select id="hPreset">' +
+            [['soft_float', 'Soft Float'], ['festive_sparkle', 'Festive Sparkle'], ['gentle_hearts', 'Gentle Hearts'], ['fabric_breeze', 'Fabric Breeze'], ['soft_confetti', 'Soft Confetti']]
+              .map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === (cm.hero_animation_style || 'soft_float') ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Left Product/Media URL</label><input type="text" id="hLeftUrl" value="' + esc(cm.hero_left_media_url || '') + '" placeholder="https://…"></div>' +
+            '<div class="form-field"><label>Upload Left</label><input type="file" id="hLeftUpload" accept="image/*"></div>' +
+          '</div>' +
+          '<div class="form-row">' +
+            '<div class="form-field"><label>Right Product/Media URL</label><input type="text" id="hRightUrl" value="' + esc(cm.hero_right_media_url || '') + '" placeholder="https://…"></div>' +
+            '<div class="form-field"><label>Upload Right</label><input type="file" id="hRightUpload" accept="image/*"></div>' +
+          '</div>' +
+          '<div class="amazon-shipping-actions"><button type="button" class="btn-secondary btn-sm" id="previewHeroBtn">Preview Animated Hero (Desktop / Mobile)</button></div>' +
+          '<div id="heroPreviewArea"></div>' +
+        '</div>' +
+
         '<div class="panel-card"><h3>Offer Section</h3>' +
           '<div class="form-field" style="flex-direction:row;align-items:center;gap:10px;">' +
             '<label style="margin:0;">Show Offer Section</label>' +
@@ -2433,6 +2455,8 @@
       }
       wireUpload('mDesktopUpload', 'mDesktopUrl');
       wireUpload('mMobileUpload', 'mMobileUrl');
+      wireUpload('hLeftUpload', 'hLeftUrl');
+      wireUpload('hRightUpload', 'hRightUrl');
 
       document.getElementById('previewBannerBtn').addEventListener('click', function () {
         var draftMedia = collectMediaPayload();
@@ -2441,6 +2465,15 @@
           '<div class="campaign-preview-cols">' +
             '<div><h4 style="font-size:0.78rem;color:var(--text-soft);">Desktop Preview</h4><div class="campaign-preview-frame desktop">' + renderCampaignBannerPreviewHtml(draftMedia, draftContent, false) + '</div></div>' +
             '<div><h4 style="font-size:0.78rem;color:var(--text-soft);">Mobile Preview</h4><div class="campaign-preview-frame mobile">' + renderCampaignBannerPreviewHtml(draftMedia, draftContent, true) + '</div></div>' +
+          '</div>';
+      });
+
+      document.getElementById('previewHeroBtn').addEventListener('click', function () {
+        var draftMedia = collectMediaPayload();
+        document.getElementById('heroPreviewArea').innerHTML =
+          '<div class="campaign-preview-cols">' +
+            '<div><h4 style="font-size:0.78rem;color:var(--text-soft);">Desktop Preview</h4><div class="campaign-preview-frame desktop">' + renderAnimatedHeroPreviewHtml(draftMedia, false) + '</div></div>' +
+            '<div><h4 style="font-size:0.78rem;color:var(--text-soft);">Mobile Preview</h4><div class="campaign-preview-frame mobile">' + renderAnimatedHeroPreviewHtml(draftMedia, true) + '</div></div>' +
           '</div>';
       });
 
@@ -2483,7 +2516,11 @@
           text_align: document.getElementById('mAlign').value,
           text_bg_color: document.getElementById('mBgColor').value.trim() || null,
           text_color: document.getElementById('mTextColor').value.trim() || null,
-          text_animation: document.getElementById('mAnimation').value
+          text_animation: document.getElementById('mAnimation').value,
+          animated_hero_enabled: document.getElementById('hEnabled').checked,
+          hero_animation_style: document.getElementById('hPreset').value,
+          hero_left_media_url: document.getElementById('hLeftUrl').value.trim() || null,
+          hero_right_media_url: document.getElementById('hRightUrl').value.trim() || null
         };
       }
 
@@ -2571,6 +2608,34 @@
       (media.text_description ? '<div style="font-size:0.8rem;margin-top:8px;">' + esc(media.text_description) + '</div>' : '') +
       (media.text_cta_text ? '<div style="margin-top:14px;"><span style="background:#E68A98;color:#fff;padding:8px 18px;border-radius:999px;font-size:0.8rem;font-weight:600;">' + esc(media.text_cta_text) + '</span></div>' : '') +
     '</div>';
+  }
+
+  // Same small preset set as the live customer site (script.js's animatedHeroInnerHtml /
+  // .anim-preset-* CSS) — real inline @keyframes here rather than the live site's stylesheet
+  // classes, since Admin doesn't load the customer site's CSS. Kept in sync deliberately: same
+  // 5 preset names, same transform/opacity-only motion, same durations.
+  var HERO_PREVIEW_ANIM_CSS =
+    '@keyframes hpvSoftFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}' +
+    '@keyframes hpvSparkle{0%,100%{opacity:.88;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}' +
+    '@keyframes hpvHearts{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-8px) rotate(-2deg)}}' +
+    '@keyframes hpvBreeze{0%,100%{transform:rotate(0)}50%{transform:rotate(3deg)}}';
+  var HERO_PREVIEW_ANIM_NAME = { soft_float: 'hpvSoftFloat', festive_sparkle: 'hpvSparkle', gentle_hearts: 'hpvHearts', fabric_breeze: 'hpvBreeze', soft_confetti: 'hpvSoftFloat' };
+
+  function renderAnimatedHeroPreviewHtml(media, isMobile) {
+    if (!media.animated_hero_enabled) return '<p style="padding:20px;color:var(--text-soft);font-size:0.85rem;">Animated Hero is off — the normal You &amp; Me hero shows instead.</p>';
+    var bgUrl = (isMobile && media.mobile_url) || media.desktop_url;
+    var anim = HERO_PREVIEW_ANIM_NAME[media.hero_animation_style] || 'hpvSoftFloat';
+    var sideStyle = 'position:absolute;width:' + (isMobile ? '70px' : '110px') + ';filter:drop-shadow(0 8px 14px rgba(64,46,33,0.18));animation:' + anim + ' 4.5s ease-in-out infinite;';
+    return '<style>' + HERO_PREVIEW_ANIM_CSS + '</style>' +
+      '<div style="position:relative;overflow:hidden;min-height:' + (isMobile ? '220px' : '260px') + ';background:' + (bgUrl ? 'center/cover no-repeat url(\'' + esc(bgUrl) + '\')' : 'linear-gradient(135deg,#FBEFEA,#F7DEE1)') + ';display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;">' +
+        (media.hero_left_media_url ? '<img src="' + esc(media.hero_left_media_url) + '" style="' + sideStyle + 'left:4%;bottom:8%;">' : '') +
+        (media.hero_right_media_url ? '<img src="' + esc(media.hero_right_media_url) + '" style="' + sideStyle + 'right:4%;top:10%;animation-delay:.5s;">' : '') +
+        '<div style="position:relative;z-index:2;max-width:340px;">' +
+          (media.text_headline ? '<div style="font-family:var(--font-heading, serif);font-size:' + (isMobile ? '1.3rem' : '1.7rem') + ';font-weight:700;color:#2E2A26;">' + esc(media.text_headline) + '</div>' : '') +
+          (media.text_subheadline ? '<div style="font-size:0.92rem;color:#5A4B3E;margin-top:6px;">' + esc(media.text_subheadline) + '</div>' : '') +
+          (media.text_cta_text ? '<div style="margin-top:14px;"><span style="background:#E68A98;color:#fff;padding:9px 20px;border-radius:999px;font-size:0.8rem;font-weight:600;">' + esc(media.text_cta_text) + '</span></div>' : '') +
+        '</div>' +
+      '</div>';
   }
 
   /* ---------- 12. Settings ---------- */

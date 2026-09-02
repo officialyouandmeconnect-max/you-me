@@ -2299,3 +2299,52 @@ a.footer-social-icon:hover { background: var(--color-surface); transform: transl
   [data-reveal="stagger"].is-revealed > * { opacity: 1; transform: none; }
 }
 [data-reveal].is-revealed { opacity: 1; transform: none; }
+
+/* =========================================================
+   Phase 2 — Animated Campaign Hero (campaign-gated only — see renderAnimatedHero() in
+   script.js and migration 0021_animated_campaign_hero.sql). Never shown without a real live
+   campaign with animated_hero_enabled = true; the normal .hero rules above are completely
+   untouched by any of this, and apply as-is on every ordinary day.
+   ========================================================= */
+.animated-campaign-hero { position: relative; overflow: hidden; }
+.animated-campaign-hero .anim-hero-bg {
+  position: absolute; inset: 0; background-size: cover; background-position: center;
+  border-radius: inherit;
+}
+.anim-hero-side {
+  position: absolute; width: 150px; max-width: 24vw; z-index: 3; pointer-events: none;
+  filter: drop-shadow(0 10px 18px rgba(64,46,33,0.16));
+}
+.anim-hero-left { left: 3%; bottom: 8%; }
+.anim-hero-right { right: 3%; top: 12%; }
+@media (max-width: 720px) { .anim-hero-side { width: 92px; } }
+
+/* A small, fixed, safe set of presets — plain CSS transforms/opacity only, capped duration, no
+   JS animation loop, no arbitrary/heavy motion. All of it is skipped entirely under reduced
+   motion: the side images just sit still in place, same layout, zero animation. */
+@media (prefers-reduced-motion: no-preference) {
+  .anim-preset-soft_float .anim-hero-side { animation: heroSoftFloat 5s ease-in-out infinite; }
+  .anim-preset-soft_float .anim-hero-right { animation-delay: 0.6s; }
+  @keyframes heroSoftFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+
+  .anim-preset-festive_sparkle .anim-hero-side { animation: heroFestiveSparkle 2.6s ease-in-out infinite; }
+  .anim-preset-festive_sparkle .anim-hero-right { animation-delay: 0.4s; }
+  @keyframes heroFestiveSparkle { 0%, 100% { opacity: 0.88; transform: scale(1); } 50% { opacity: 1; transform: scale(1.05); } }
+
+  .anim-preset-gentle_hearts .anim-hero-side { animation: heroGentleHearts 6s ease-in-out infinite; }
+  .anim-preset-gentle_hearts .anim-hero-right { animation-delay: 0.8s; }
+  @keyframes heroGentleHearts { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-10px) rotate(-2deg); } }
+
+  .anim-preset-fabric_breeze .anim-hero-side { animation: heroFabricBreeze 4.5s ease-in-out infinite; transform-origin: top center; }
+  .anim-preset-fabric_breeze .anim-hero-right { animation-delay: 0.5s; }
+  @keyframes heroFabricBreeze { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(3deg); } }
+
+  .anim-preset-soft_confetti .anim-hero-side { animation: heroSoftFloat 5s ease-in-out infinite; }
+  .anim-preset-soft_confetti::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+    background-image: radial-gradient(circle, rgba(255,255,255,0.6) 2px, transparent 2.5px);
+    background-size: 44px 44px;
+    animation: heroSoftConfettiDrift 10s linear infinite;
+  }
+  @keyframes heroSoftConfettiDrift { from { background-position: 0 0; } to { background-position: 0 420px; } }
+}
