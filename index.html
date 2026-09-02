@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260903e">
+<link rel="stylesheet" href="style.css?v=20260903f">
 </head>
 <body>
 
@@ -143,6 +143,16 @@
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- ============ 3a2. RETURNING CUSTOMER PERSONALIZATION (logged-in only, real data only) ============ -->
+  <!-- Hidden by default and left empty until renderPersonalizedSection() in script.js decides
+       there's genuinely enough real data (My Little One age match, wishlist, or browsing
+       history) to justify showing it. Guests and thin-data returning customers simply never see
+       this section — the New Arrivals / Featured Products sections beneath it are the fallback,
+       nothing extra is rendered for them. -->
+  <section class="section personalized-section" id="personalizedSection" hidden aria-label="Just for you" data-reveal="fade-up">
+    <div class="section-inner" id="personalizedSectionInner"><!-- rows injected via JS --></div>
   </section>
 
   <!-- ============ 3b. SHOP BY AGE (real product ageGroup values only, see script.js renderShopByAge) ============ -->
@@ -498,6 +508,7 @@
         <button type="button" class="account-nav-item" data-tab="orders">My Orders</button>
         <button type="button" class="account-nav-item" data-tab="addresses">Addresses</button>
         <button type="button" class="account-nav-item" data-tab="wishlist">Wishlist</button>
+        <button type="button" class="account-nav-item" data-tab="little-one">My Little One</button>
         <button type="button" class="account-nav-item" data-tab="profile">Profile</button>
         <button type="button" class="account-nav-item" data-info="orderHelp">Help</button>
         <button type="button" class="account-nav-item account-nav-logout" id="accountDashLogout">Logout</button>
@@ -747,6 +758,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260903e"></script>
+<script src="script.js?v=20260903f"></script>
 </body>
 </html>

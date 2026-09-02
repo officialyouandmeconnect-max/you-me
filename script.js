@@ -1731,6 +1731,78 @@
     return { check: check, getUser: getUser, login: login, register: register, logout: logout, loginWithGoogle: loginWithGoogle, resetPassword: resetPassword, updatePassword: updatePassword };
   })();
 
+  /* ---------- 15b. My Little One (optional child profiles — Phase 2 #10/#11) ----------
+     Strictly owner-only server data (see migration 0020_child_profiles.sql — no admin read
+     policy at all), never required to shop, never shown to anyone but the signed-in owner.
+     Used only to derive a real-data age-group suggestion for shopping personalization — never
+     collects more than nickname/DOB/gender, and a child's DOB is only ever compared against
+     the site's own real, Admin-entered product ageGroup strings; nothing is invented. */
+  var ChildProfileService = (function () {
+    function list() {
+      var user = SessionService.getUser();
+      if (!user) return Promise.resolve([]);
+      return supabaseClient.from('child_profiles').select('*').eq('user_id', user.id).order('created_at', { ascending: true })
+        .then(function (res) { return res.error ? [] : (res.data || []); })
+        .catch(function () { return []; });
+    }
+    function create(fields) {
+      var user = SessionService.getUser();
+      if (!user) return Promise.reject(new Error('Not signed in.'));
+      return supabaseClient.from('child_profiles').insert({
+        user_id: user.id, nickname: fields.nickname || null, dob: fields.dob || null, gender: fields.gender || null
+      }).select().single().then(function (res) { if (res.error) throw res.error; return res.data; });
+    }
+    function update(id, fields) {
+      return supabaseClient.from('child_profiles').update({
+        nickname: fields.nickname || null, dob: fields.dob || null, gender: fields.gender || null
+      }).eq('id', id).select().single().then(function (res) { if (res.error) throw res.error; return res.data; });
+    }
+    function remove(id) {
+      return supabaseClient.from('child_profiles').delete().eq('id', id).then(function (res) { if (res.error) throw res.error; });
+    }
+
+    // Extracts a numeric [min, max] range in months from a real, freeform ageGroup string (see
+    // audit note at Gallery.getRealAgeGroups — Admin types these by hand, e.g. "0-1", "3-6M",
+    // "1-3 Years"). An explicit M/month suffix means months; an explicit Y/year suffix means
+    // years; with no unit at all, real catalog data so far (e.g. "0-1") reads as years — that's
+    // the default. A single bare number (no range) is treated as unusable and skipped, since
+    // there's no reliable way to guess whether it's a lower or upper bound.
+    function parseAgeGroupRangeMonths(label) {
+      var nums = label.match(/\d+(\.\d+)?/g);
+      if (!nums || nums.length < 2) return null;
+      var isMonths = /\bm(o|onths?)?\b/i.test(label) && !/year|yr/i.test(label);
+      var mult = isMonths ? 1 : 12;
+      var a = parseFloat(nums[0]) * mult, b = parseFloat(nums[1]) * mult;
+      return { min: Math.min(a, b), max: Math.max(a, b) };
+    }
+    function monthsBetween(from, to) {
+      var m = (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());
+      if (to.getDate() < from.getDate()) m -= 1;
+      return m;
+    }
+    // Returns a real ageGroup string this child's age falls inside (tightest range wins when
+    // more than one matches), or null when DOB is missing/invalid/future, or when no real
+    // product ageGroup happens to cover that age yet. Never fabricates a bucket that doesn't
+    // already exist as real product data.
+    function deriveAgeGroupForDob(dob) {
+      if (!dob) return null;
+      var dobDate = new Date(dob + 'T00:00:00');
+      if (isNaN(dobDate.getTime())) return null;
+      var months = monthsBetween(dobDate, new Date());
+      if (months < 0) return null;
+      var best = null, bestSpan = Infinity;
+      Gallery.getRealAgeGroups().forEach(function (g) {
+        var r = parseAgeGroupRangeMonths(g);
+        if (!r || months < r.min || months > r.max) return;
+        var span = r.max - r.min;
+        if (span < bestSpan) { bestSpan = span; best = g; }
+      });
+      return best;
+    }
+
+    return { list: list, create: create, update: update, remove: remove, deriveAgeGroupForDob: deriveAgeGroupForDob };
+  })();
+
   /* ---------- 16. Account panel ---------- */
   // This panel is the sign-in/create-account gate — the only place any customer authenticates.
   // A logged-in customer never sees it (the header Account icon goes straight to the /account
@@ -3138,6 +3210,7 @@
       else if (currentTab === 'orders') renderOrders();
       else if (currentTab === 'addresses') renderAddresses();
       else if (currentTab === 'wishlist') renderWishlist();
+      else if (currentTab === 'little-one') renderLittleOne();
       else if (currentTab === 'profile') renderProfile();
     }
 
@@ -3998,6 +4071,109 @@
     }
     WishlistService.onChange(function () { if (currentTab === 'wishlist' && document.getElementById('viewAccountDashboard') && !document.getElementById('viewAccountDashboard').hidden) renderWishlist(); });
 
+    /* ---- My Little One (optional child profiles — Phase 2 #10) ---- */
+    var GENDER_LABELS = { boy: 'Boy', girl: 'Girl', unisex: 'Unisex' };
+    var littleOneEditingId = null; // null = "add new" mode when the form is open
+
+    function littleOneCardHtml(child) {
+      var dobLabel = child.dob ? formatDate(child.dob) : null;
+      var suggested = ChildProfileService.deriveAgeGroupForDob(child.dob);
+      return '<div class="panel-card little-one-card">' +
+        '<div class="little-one-card-info">' +
+          '<strong>' + escapeHtml(child.nickname || 'Little One') + '</strong>' +
+          '<span class="account-payment-note">' +
+            (dobLabel ? 'Born ' + dobLabel : 'Date of birth not added') +
+            (child.gender ? ' &middot; ' + escapeHtml(GENDER_LABELS[child.gender] || child.gender) : '') +
+          '</span>' +
+          (suggested ? '<p class="account-payment-note">Suggested styles: <a href="#all?age=' + encodeURIComponent(suggested) + '">' + escapeHtml(suggested) + '</a></p>' : '') +
+        '</div>' +
+        '<div class="little-one-card-actions">' +
+          '<button type="button" class="link-btn" data-edit-child="' + child.id + '">Edit</button>' +
+          '<button type="button" class="link-btn" data-remove-child="' + child.id + '">Remove</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function littleOneFormHtml(child) {
+      var c = child || {};
+      return '<div class="panel-card" id="littleOneForm">' +
+        '<div class="form-field"><label for="littleOneNickname">Nickname (optional)</label><input type="text" id="littleOneNickname" value="' + escapeHtml(c.nickname || '') + '" maxlength="40" placeholder="e.g. Little Star"></div>' +
+        '<div class="form-field"><label for="littleOneDob">Date of Birth (optional)</label><input type="date" id="littleOneDob" value="' + (c.dob || '') + '" max="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+        '<div class="form-field"><label for="littleOneGender">Shopping preference (optional)</label>' +
+          '<select id="littleOneGender">' +
+            '<option value="">Prefer not to say</option>' +
+            '<option value="boy"' + (c.gender === 'boy' ? ' selected' : '') + '>Boy</option>' +
+            '<option value="girl"' + (c.gender === 'girl' ? ' selected' : '') + '>Girl</option>' +
+            '<option value="unisex"' + (c.gender === 'unisex' ? ' selected' : '') + '>Unisex</option>' +
+          '</select>' +
+        '</div>' +
+        '<p class="account-submit-feedback" id="littleOneFeedback"></p>' +
+        '<div class="pm-actions">' +
+          '<button type="button" class="btn btn-primary" id="littleOneSaveBtn">Save</button>' +
+          '<button type="button" class="btn btn-outline" id="littleOneCancelBtn">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function renderLittleOne() {
+      ChildProfileService.list().then(function (children) {
+        content().innerHTML =
+          '<h3>My Little One</h3>' +
+          '<p class="account-payment-note">Optional. Add your child\'s details to see styles for their age — this is never required to shop, and it\'s never shown to anyone but you.</p>' +
+          '<div id="littleOneList">' +
+            (children.length ? children.map(littleOneCardHtml).join('') : '<div class="account-empty-state"><p>No child profiles added yet.</p></div>') +
+          '</div>' +
+          '<button type="button" class="btn btn-outline" id="littleOneAddBtn">+ Add Child Profile</button>' +
+          '<div id="littleOneFormWrap"></div>';
+
+        var addBtn = document.getElementById('littleOneAddBtn');
+        if (addBtn) addBtn.addEventListener('click', function () { littleOneEditingId = null; openLittleOneForm(null); });
+
+        var list = document.getElementById('littleOneList');
+        if (list) list.addEventListener('click', function (e) {
+          var editBtn = e.target.closest('[data-edit-child]');
+          if (editBtn) {
+            var child = children.find(function (c) { return String(c.id) === editBtn.dataset.editChild; });
+            littleOneEditingId = editBtn.dataset.editChild;
+            openLittleOneForm(child);
+            return;
+          }
+          var removeBtn = e.target.closest('[data-remove-child]');
+          if (removeBtn) {
+            var childId = removeBtn.dataset.removeChild;
+            ConfirmModal.open({
+              title: 'Remove this child profile?',
+              message: 'This will delete the profile and stop any personalization based on it. This cannot be undone.',
+              confirmLabel: 'Remove',
+              cancelLabel: 'Cancel',
+              onConfirm: function () {
+                ChildProfileService.remove(childId).then(function () { renderLittleOne(); })
+                  .catch(function (err) { showToast(err.message || 'Could not remove profile.'); });
+              }
+            });
+          }
+        });
+      });
+    }
+
+    function openLittleOneForm(child) {
+      var wrap = document.getElementById('littleOneFormWrap');
+      if (!wrap) return;
+      wrap.innerHTML = littleOneFormHtml(child);
+      document.getElementById('littleOneCancelBtn').addEventListener('click', function () { wrap.innerHTML = ''; });
+      document.getElementById('littleOneSaveBtn').addEventListener('click', function () {
+        var fields = {
+          nickname: document.getElementById('littleOneNickname').value.trim(),
+          dob: document.getElementById('littleOneDob').value || null,
+          gender: document.getElementById('littleOneGender').value || null
+        };
+        var feedback = document.getElementById('littleOneFeedback');
+        var action = littleOneEditingId ? ChildProfileService.update(littleOneEditingId, fields) : ChildProfileService.create(fields);
+        action.then(function () { renderLittleOne(); })
+          .catch(function (err) { feedback.textContent = err.message || 'Could not save profile.'; });
+      });
+    }
+
     /* ---- Profile ---- */
     function renderProfile() {
       var user = SessionService.getUser();
@@ -4578,6 +4754,66 @@
     section.hidden = items.length === 0;
   }
 
+  // Returning-customer personalization (Phase 2 #11) — logged-in only, built entirely from
+  // real data the site already collects for other features (My Little One age match, guest-
+  // local recently-viewed history): never a separate tracking mechanism, never invasive
+  // profiling. Renders nothing at all — not even a heading — when there genuinely isn't enough
+  // real data yet; the New Arrivals / Featured Products sections right below it are the fallback
+  // for a first-time or thin-data visitor, so nothing extra needs to be faked here.
+  function personalizedRowHtml(title, products, viewAllHref) {
+    if (!products.length) return '';
+    return '<div class="pm-discovery-row">' +
+      '<div class="section-heading" style="margin-bottom:12px;"><h3 class="pm-discovery-heading" style="margin:0;">' + escapeHtml(title) + '</h3>' +
+        (viewAllHref ? '<a href="' + viewAllHref + '" class="view-all">View All <span class="arrow">&#8594;</span></a>' : '') +
+      '</div>' +
+      '<div class="pm-discovery-scroll">' + products.map(renderProductCard).join('') + '</div>' +
+    '</div>';
+  }
+
+  function renderPersonalizedSection(user) {
+    var section = document.getElementById('personalizedSection');
+    var inner = document.getElementById('personalizedSectionInner');
+    if (!section || !inner) return;
+    if (!user) { section.hidden = true; return; }
+
+    ChildProfileService.list().then(function (children) {
+      var rows = [];
+
+      // Styles for Your Little One — only the first child with a real age-group match; showing
+      // every child's row would crowd the homepage, and most accounts have one active profile.
+      var match = children.map(function (c) { return { child: c, age: ChildProfileService.deriveAgeGroupForDob(c.dob) }; })
+        .filter(function (m) { return m.age; })[0];
+      if (match) {
+        var ageProducts = PRODUCTS.filter(function (p) { return p.ageGroup === match.age; }).slice(0, 8);
+        if (ageProducts.length) {
+          rows.push(personalizedRowHtml('Styles for ' + (match.child.nickname || match.age), ageProducts, '#all?age=' + encodeURIComponent(match.age)));
+        }
+      }
+
+      // Continue Shopping — a single link back into whatever real category the customer most
+      // recently looked at (their own recently-viewed history), not a fabricated recommendation.
+      var recent = RecentlyViewedService.get(null, 8);
+      var continueLine = '';
+      if (recent.length && recent[0].category) {
+        var cat = recent[0].category;
+        var catLabel = cat.charAt(0).toUpperCase() + cat.slice(1);
+        continueLine = '<a href="#kids?category=' + encodeURIComponent(cat) + '" class="link-btn" style="display:inline-block;margin-bottom:16px;">Continue Shopping in ' + escapeHtml(catLabel) + ' &#8594;</a>';
+      }
+
+      // Recently Viewed — the customer's own real browsing history, same source as the
+      // product-page discovery row.
+      if (recent.length) rows.push(personalizedRowHtml('Recently Viewed', recent, null));
+
+      if (!rows.length && !continueLine) { section.hidden = true; return; }
+
+      var firstName = user.name ? user.name.split(' ')[0] : '';
+      inner.innerHTML =
+        '<div class="section-heading"><h2>Welcome Back' + (firstName ? ', ' + escapeHtml(firstName) : '') + '</h2></div>' +
+        continueLine + rows.join('');
+      section.hidden = false;
+    });
+  }
+
   /* ---------- 21. Init ---------- */
   document.addEventListener('DOMContentLoaded', function () {
     // Chrome that doesn't depend on product data can wire up immediately.
@@ -4645,6 +4881,8 @@
         // saved address and no explicit pick yet this session sees it applied automatically.
         // Never requests geolocation itself — that stays a manual, optional click always.
         if (user && user.role !== 'admin') DeliveryLocation.applyLoginDefaultAddress();
+        if (user && user.role !== 'admin') renderPersonalizedSection(user);
+        else renderPersonalizedSection(null);
 
         var path = window.location.pathname;
         var loginPath = BASE_PATH + '/login', accountPath = BASE_PATH + '/account', resetPasswordPath = BASE_PATH + '/reset-password', paymentResultPath = BASE_PATH + '/payment-result';
