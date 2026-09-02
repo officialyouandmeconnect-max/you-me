@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260902e">
+<link rel="stylesheet" href="style.css?v=20260903a">
 </head>
 <body>
 
@@ -187,7 +187,21 @@
     </div>
   </section>
 
-  <!-- ============ 5. SHOP BY COLLECTION ============ -->
+  <!-- ============ 5. FEATURED PRODUCTS ============ -->
+  <section class="section products-section" id="featured-products">
+    <div class="section-inner">
+      <div class="section-heading">
+        <h2>Featured Products</h2>
+        <a href="#all" class="view-all">View All <span class="arrow">&#8594;</span></a>
+      </div>
+
+      <div class="product-grid" id="productGrid">
+        <!-- Product cards injected via JS from PRODUCTS data, see script.js -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6. SHOP BY COLLECTION ============ -->
   <section class="section collection-section" id="shop-by-collection">
     <div class="section-inner">
       <div class="section-heading">
@@ -221,20 +235,6 @@
           <h3>Seasonal Styles</h3>
           <span class="shop-now">Shop Now <span class="arrow">&#8594;</span></span>
         </a>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ 6. FEATURED PRODUCTS ============ -->
-  <section class="section products-section" id="featured-products">
-    <div class="section-inner">
-      <div class="section-heading">
-        <h2>Featured Products</h2>
-        <a href="#all" class="view-all">View All <span class="arrow">&#8594;</span></a>
-      </div>
-
-      <div class="product-grid" id="productGrid">
-        <!-- Product cards injected via JS from PRODUCTS data, see script.js -->
       </div>
     </div>
   </section>
@@ -685,6 +685,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260902e"></script>
+<script src="script.js?v=20260903a"></script>
 </body>
 </html>

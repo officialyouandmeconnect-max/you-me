@@ -416,10 +416,21 @@
       });
     }
 
+    // BUG FIX (root cause of Account Dashboard appearing stacked below the homepage): the
+    // Account Dashboard's own visibility (#viewAccountDashboard) was toggled by a completely
+    // separate mechanism (showAccountDashboardView/hideAccountDashboardView, further down this
+    // file) that Router never knew about — so any hash-based navigation while on /account (e.g.
+    // clicking "Home" in the nav, which just sets window.location.hash and fires 'hashchange')
+    // called showView('home') here, which unhid #viewHome but never re-hid
+    // #viewAccountDashboard, leaving BOTH visible at once. #viewAccountDashboard is now always
+    // explicitly included in the same mutual-exclusion set as every other top-level view, no
+    // matter which code path triggers a view change.
     function showView(name) {
       views.home.hidden = name !== 'home';
       views.gallery.hidden = name !== 'gallery';
       views.comingSoon.hidden = name !== 'comingSoon';
+      var accountView = document.getElementById('viewAccountDashboard');
+      if (accountView) accountView.hidden = name !== 'accountDashboard';
     }
 
     function handle() {
@@ -3615,6 +3626,11 @@
   function hideAccountDashboardView() {
     var dash = document.getElementById('viewAccountDashboard');
     if (dash) dash.hidden = true;
+    // Falls back to Home specifically (never leaves gallery/comingSoon in whatever stale hidden
+    // state they were in before Account was entered) — every caller of this function either
+    // immediately calls Router.navigate() right after (which then hides Home again correctly)
+    // or genuinely wants to land on Home (e.g. after Add to Cart from the dashboard).
+    ['viewGallery', 'viewComingSoon'].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = true; });
     var home = document.getElementById('viewHome');
     if (home) home.hidden = false;
   }

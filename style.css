@@ -905,11 +905,15 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 }
 
 @media (max-width: 860px) {
-  .hero-inner { grid-template-columns: 1fr; }
-  .hero-copy { order: 2; text-align: center; }
+  .hero-inner { grid-template-columns: 1fr; padding-top: 40px; padding-bottom: 32px; gap: 20px; }
+  /* Shopping-first: copy + "Shop Now" comes before the illustration on mobile, not after — a
+     customer shouldn't have to scroll past a full-width image before reaching the CTA. */
+  .hero-copy { order: 1; text-align: center; }
   .hero-copy h1, .hero-copy p { margin-left: auto; margin-right: auto; }
-  .hero-rule { justify-content: center; }
-  .hero-visual { order: 1; }
+  .hero-rule { justify-content: center; margin: 14px 0; }
+  .hero-copy p { margin-bottom: 20px; }
+  .hero-visual { order: 2; }
+  .hero-art { aspect-ratio: 16 / 9; padding: 20px; }
   .category-strip-inner { grid-template-columns: repeat(2, 1fr); }
   .testimonial-track { grid-template-columns: 1fr; }
   .carousel-arrow { display: none; }
@@ -987,7 +991,9 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   .mobile-nav-action:active { background: var(--color-cream); }
   .section { padding: 60px 20px; }
   .section-heading h2, .centered-heading { font-size: 1.6rem; }
-  .hero-copy h1 { font-size: 2.2rem; }
+  .hero-copy h1 { font-size: 1.9rem; }
+  .hero-inner { padding-top: 28px; padding-bottom: 24px; }
+  .hero-art { aspect-ratio: 16 / 10; padding: 16px; }
   .collection-grid { grid-template-columns: repeat(2, 1fr); }
   .product-grid { grid-template-columns: repeat(2, 1fr); }
   .newsletter-inner { padding: 36px 24px; justify-content: center; text-align: center; }
