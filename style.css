@@ -1884,8 +1884,6 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
    four stages), just a small indented line between Ordered and Shipped. */
 .simple-subnote { margin: -2px 0 2px 30px; font-size: 0.76rem; color: var(--color-text-soft); line-height: 1.4; }
 
-.tracking-courier-note { font-size: 0.74rem; color: var(--color-text-soft); margin: 12px 0 0; }
-.tracking-courier-note strong { color: var(--color-text-soft); }
 
 /* "See all updates" expands INLINE, nested directly inside the Shipped node's own body — never
    a separate card/section (spec #5/#9: no "Current Update" card, no new panel). */

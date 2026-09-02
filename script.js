@@ -3382,20 +3382,13 @@
       var deliveredBody = deliveredDone && isCourier && latestDeliveredEvent && latestDeliveredEvent.event_location
         ? '<p class="simple-node-update">' + escapeHtml(friendlyLocation(latestDeliveredEvent.event_location)) + '</p>' : '';
 
-      // Deliberately secondary — small, muted, no external link (spec #10/#11: the customer
-      // stays on officialyouandme.in, no "Track with Delhivery"/"View on courier website").
-      var courierNoteHtml = isCourier && COURIER_PROVIDER_LABELS[shipment.provider]
-        ? '<p class="tracking-courier-note">Delivery partner: ' + COURIER_PROVIDER_LABELS[shipment.provider] +
-            (shipment.tracking_id ? ' &middot; Tracking ID: ' + escapeHtml(shipment.tracking_id) : '') + '</p>' : '';
-
       return '<h4>Order Status</h4>' + etaHtml +
         '<div class="simple-tracking" id="simpleTrackingRoot">' +
           node('ordered', 'Ordered', o.created_at, packedTime ? '<div class="simple-subnote">You & Me packed your order<br><span class="simple-node-time">' + formatDateTime(packedTime) + '</span></div>' : '') +
           node('shipped', 'Shipped', shippedTime, shippedBody) +
           node('out_for_delivery', 'Out for Delivery', ofdTime, ofdBody) +
           node('delivered', 'Delivered', deliveredTime, deliveredBody) +
-        '</div>' +
-        courierNoteHtml;
+        '</div>';
     }
 
     function bindSimpleTracking() {
