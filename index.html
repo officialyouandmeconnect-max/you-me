@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260903b">
+<link rel="stylesheet" href="style.css?v=20260903c">
 </head>
 <body>
 
@@ -145,6 +145,22 @@
     </div>
   </section>
 
+  <!-- ============ 3b. SHOP BY AGE (real product ageGroup values only, see script.js renderShopByAge) ============ -->
+  <section class="shop-quicknav" id="shopByAgeSection" hidden aria-label="Shop by age">
+    <div class="shop-quicknav-inner">
+      <h2 class="shop-quicknav-heading">Shop by Age</h2>
+      <div class="shop-quicknav-scroll" id="shopByAgeChips"></div>
+    </div>
+  </section>
+
+  <!-- ============ 3c. BABY BOYS / GIRLS / UNISEX (real product gender values only) ============ -->
+  <section class="shop-quicknav" id="shopByGenderSection" hidden aria-label="Shop by gender">
+    <div class="shop-quicknav-inner">
+      <h2 class="shop-quicknav-heading">Shop by Gender</h2>
+      <div class="shop-quicknav-scroll" id="shopByGenderChips"></div>
+    </div>
+  </section>
+
   <!-- ============ 4. CATEGORY HIGHLIGHT STRIP ============ -->
   <section class="category-strip" aria-label="Shop by category">
     <div class="category-strip-inner">
@@ -184,6 +200,19 @@
           <small>Fresh styles every week</small>
         </span>
       </a>
+    </div>
+  </section>
+
+  <!-- ============ 4b. NEW ARRIVALS (real Admin-flagged products only) ============ -->
+  <section class="section products-section" id="homeNewArrivals" hidden>
+    <div class="section-inner">
+      <div class="section-heading">
+        <h2>New Arrivals</h2>
+        <a href="#new-arrivals" class="view-all">View All <span class="arrow">&#8594;</span></a>
+      </div>
+      <div class="product-grid" id="homeNewArrivalsGrid">
+        <!-- Product cards injected via JS from PRODUCTS data, see script.js -->
+      </div>
     </div>
   </section>
 
@@ -630,6 +659,14 @@
   <div class="address-picker-body" id="locationSheetBody"><!-- injected --></div>
 </div>
 
+<div class="panel address-picker-sheet" id="quickAddSheet" role="dialog" aria-modal="true" aria-labelledby="quickAddSheetTitle" hidden>
+  <div class="address-picker-header">
+    <h2 id="quickAddSheetTitle">Select Options</h2>
+    <button class="panel-close" id="quickAddSheetClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="address-picker-body" id="quickAddSheetBody"><!-- injected --></div>
+</div>
+
 <!-- Confirm Modal — reusable branded yes/no confirmation (Remove Order, Clear History, Sign Out).
      Never window.confirm(). Same .panel/.overlay-scrim infra as every other popup on this site. -->
 <div class="panel confirm-sheet" id="confirmModal" role="alertdialog" aria-modal="true" aria-labelledby="confirmModalTitle" hidden>
@@ -702,6 +739,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260903b"></script>
+<script src="script.js?v=20260903c"></script>
 </body>
 </html>

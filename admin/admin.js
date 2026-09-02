@@ -2574,6 +2574,75 @@
   }
 
   /* ---------- 12. Settings ---------- */
+  // Real Baby Size Guide data (supabase/migrations/0019_size_guide_and_notify.sql) — keyed by
+  // age_group (the same free-text field Admin already types per product) + size, so it's a
+  // shared brand-wide guide, not something re-entered per product. The customer-facing Size
+  // Guide (product modal + footer) reads exactly these rows, nothing invented on either side.
+  function sizeGuideCardHtml() {
+    return '<div class="panel-card"><h3>Baby Size Guide</h3>' +
+      '<p style="font-size:0.8rem;color:var(--text-soft);margin-bottom:14px;">Real measurements customers see in Size Guide — keyed by Age Group (matches a product\'s own Age Group field) + Size. Adding a row with the same Age Group + Size again updates it. Leave a measurement blank if you don\'t have it &mdash; it just won\'t show to customers rather than displaying a guess.</p>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Age Group</label><input type="text" id="sgAgeGroup" placeholder="e.g. 0-3M"></div>' +
+        '<div class="form-field"><label>Size</label><input type="text" id="sgSize" placeholder="e.g. 0-3M"></div>' +
+      '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Height (cm)</label><input type="number" step="0.1" id="sgHeight"></div>' +
+        '<div class="form-field"><label>Weight (kg)</label><input type="number" step="0.1" id="sgWeight"></div>' +
+      '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Chest (in)</label><input type="number" step="0.1" id="sgChest"></div>' +
+        '<div class="form-field"><label>Waist (in)</label><input type="number" step="0.1" id="sgWaist"></div>' +
+      '</div>' +
+      '<div class="form-field"><label>Garment Length (in)</label><input type="number" step="0.1" id="sgLength"></div>' +
+      '<p class="login-error" id="sizeGuideError"></p>' +
+      '<button type="button" class="btn-primary btn-sm" id="saveSizeGuideRowBtn">Save Row</button>' +
+      '<div id="sizeGuideListWrap" style="margin-top:18px;"><p class="empty-state">Loading…</p></div>' +
+    '</div>';
+  }
+
+  function renderSizeGuideList() {
+    var saveBtn = document.getElementById('saveSizeGuideRowBtn');
+    if (saveBtn) saveBtn.addEventListener('click', function () {
+      var num = function (id) { var v = document.getElementById(id).value; return v === '' ? null : Number(v); };
+      var payload = {
+        age_group: document.getElementById('sgAgeGroup').value.trim(),
+        size: document.getElementById('sgSize').value.trim(),
+        height_cm: num('sgHeight'), weight_kg: num('sgWeight'), chest_in: num('sgChest'),
+        waist_in: num('sgWaist'), garment_length_in: num('sgLength'), updated_at: new Date().toISOString()
+      };
+      var errorEl = document.getElementById('sizeGuideError');
+      errorEl.textContent = '';
+      if (!payload.age_group || !payload.size) { errorEl.textContent = 'Age Group and Size are both required.'; return; }
+      supabaseClient.from('size_guide_entries').upsert(payload, { onConflict: 'age_group,size' })
+        .then(function (res) { if (res.error) throw res.error; renderSizeGuideList(); })
+        .catch(function (err) { errorEl.textContent = err.message; });
+    });
+
+    supabaseClient.from('size_guide_entries').select('*').order('age_group').order('sort_order')
+      .then(function (res) {
+        var wrap = document.getElementById('sizeGuideListWrap');
+        if (!wrap) return;
+        var rows = res.data || [];
+        if (!rows.length) { wrap.innerHTML = '<p class="empty-state">No size guide rows yet.</p>'; return; }
+        wrap.innerHTML = '<table class="data-table"><thead><tr><th>Age Group</th><th>Size</th><th>Height</th><th>Weight</th><th>Chest</th><th>Waist</th><th>Length</th><th></th></tr></thead><tbody>' +
+          rows.map(function (r) {
+            return '<tr><td>' + esc(r.age_group) + '</td><td>' + esc(r.size) + '</td>' +
+              '<td>' + (r.height_cm != null ? r.height_cm + ' cm' : '&mdash;') + '</td>' +
+              '<td>' + (r.weight_kg != null ? r.weight_kg + ' kg' : '&mdash;') + '</td>' +
+              '<td>' + (r.chest_in != null ? r.chest_in + ' in' : '&mdash;') + '</td>' +
+              '<td>' + (r.waist_in != null ? r.waist_in + ' in' : '&mdash;') + '</td>' +
+              '<td>' + (r.garment_length_in != null ? r.garment_length_in + ' in' : '&mdash;') + '</td>' +
+              '<td><button type="button" class="btn-danger btn-sm" data-delete-size-guide="' + r.id + '">Delete</button></td></tr>';
+          }).join('') + '</tbody></table>';
+        wrap.querySelectorAll('[data-delete-size-guide]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            if (!window.confirm('Delete this size guide row?')) return;
+            supabaseClient.from('size_guide_entries').delete().eq('id', btn.dataset.deleteSizeGuide).then(function () { renderSizeGuideList(); });
+          });
+        });
+      });
+  }
+
   ROUTE_RENDERERS.settings = function () {
     content().innerHTML =
       '<div class="panel-card"><h3>Account</h3><p style="font-size:0.85rem;">Logged in as <strong>' + esc(document.getElementById('topbarUsername').textContent) + '</strong>.</p></div>' +
@@ -2581,7 +2650,10 @@
         '<p style="font-size:0.8rem;color:var(--text-soft);margin-bottom:14px;">Used as the ship-from address on every Amazon Shipping shipment created from an order — see Orders → an order → Shipping.</p>' +
         '<p class="empty-state" id="pickupAddressLoading">Loading…</p>' +
       '</div>' +
-      '<div class="panel-card"><h3>Store Info</h3><p style="font-size:0.85rem;color:var(--text-soft);">WhatsApp number, delivery threshold and shipping cost are configured in the customer site\'s <code>CONFIG</code> and in <code>create_order()</code> in the Supabase migration.</p></div>';
+      '<div class="panel-card"><h3>Store Info</h3><p style="font-size:0.85rem;color:var(--text-soft);">WhatsApp number, delivery threshold and shipping cost are configured in the customer site\'s <code>CONFIG</code> and in <code>create_order()</code> in the Supabase migration.</p></div>' +
+      sizeGuideCardHtml();
+
+    renderSizeGuideList();
 
     AdminAPI.settings.get().then(function (s) {
       var card = document.getElementById('pickupAddressLoading').closest('.panel-card');

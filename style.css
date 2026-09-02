@@ -456,6 +456,29 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   transition: background 0.2s ease, transform 0.2s ease;
 }
 .category-item:hover { background: var(--color-cream); transform: translateY(-2px); }
+
+/* Shop by Age / Baby Boys-Girls-Unisex — compact horizontal chip rows, real data only. */
+.shop-quicknav { padding: 22px 24px 4px; }
+.shop-quicknav-inner { max-width: var(--max-width); margin: 0 auto; }
+.shop-quicknav-heading { font-size: 0.95rem; font-weight: 700; margin: 0 0 12px; }
+.shop-quicknav-scroll { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+.shop-quicknav-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  background: var(--color-surface);
+  border: 1.5px solid rgba(64,46,33,0.1);
+  border-radius: 999px;
+  padding: 9px 16px;
+  color: var(--color-text);
+  font-size: 0.84rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.shop-quicknav-chip:hover { border-color: var(--color-pink); transform: translateY(-1px); }
+.shop-quicknav-chip svg { color: var(--color-pink); flex-shrink: 0; }
 .category-icon {
   width: 52px;
   height: 52px;
@@ -1258,6 +1281,41 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   margin-top: -8px;
   margin-bottom: 14px;
 }
+
+/* Back in Stock / Notify Me (Quick Add popover + Product Detail) — real per-variant stock only. */
+.quick-add-oos { background: var(--color-cream); border-radius: var(--radius-sm); padding: 14px 16px; margin: 4px 0 16px; }
+.quick-add-oos p strong { color: #C5677A; }
+.quick-add-notify-row { display: flex; gap: 8px; margin-top: 8px; }
+.quick-add-notify-row input { flex: 1; border: 1.5px solid rgba(64,46,33,0.18); border-radius: var(--radius-sm); padding: 9px 12px; font-family: inherit; font-size: 0.85rem; }
+.quick-add-notify-row .btn { white-space: nowrap; }
+
+/* Product Details accordion — native <details>/<summary>, no custom JS toggle state. */
+.pm-accordion { margin-top: 8px; border-top: 1px solid rgba(64,46,33,0.1); }
+.pm-accordion-item { border-bottom: 1px solid rgba(64,46,33,0.1); }
+.pm-accordion-item summary {
+  padding: 14px 2px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pm-accordion-item summary::-webkit-details-marker { display: none; }
+.pm-accordion-item summary::after {
+  content: '';
+  width: 9px; height: 9px;
+  border-right: 2px solid var(--color-text-soft);
+  border-bottom: 2px solid var(--color-text-soft);
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.pm-accordion-item[open] summary::after { transform: rotate(-135deg); }
+.pm-accordion-body { padding: 0 2px 16px; font-size: 0.85rem; color: var(--color-text-soft); line-height: 1.6; }
+.pm-accordion-body p { margin: 0 0 8px; }
+.pm-accordion-body p:last-child { margin-bottom: 0; }
 
 .pm-qty-row { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
 .qty-stepper { display: flex; align-items: center; border: 1.5px solid rgba(64,46,33,0.18); border-radius: 999px; overflow: hidden; }

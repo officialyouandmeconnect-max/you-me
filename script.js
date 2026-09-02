@@ -40,6 +40,7 @@
   // Wear, New Arrivals, Search) reads from this same array once loadProducts() resolves —
   // products/images added from the Admin Panel appear here automatically, no HTML edits needed.
   var PRODUCTS = [];
+  var SIZE_GUIDE_ENTRIES = [];
 
   function loadProducts() {
     return supabaseClient
@@ -55,6 +56,48 @@
       .catch(function (err) {
         console.error('Could not load products from Supabase:', err);
       });
+  }
+
+  // Real Admin-entered measurements only (supabase/migrations/0019) — never a client-side
+  // formula. A failed/empty load just leaves SIZE_GUIDE_ENTRIES empty, which sizeGuideTableHtml()
+  // already renders as an honest "not available yet" state, not an error.
+  function loadSizeGuide() {
+    return supabaseClient.from('size_guide_entries').select('*').order('age_group').order('sort_order')
+      .then(function (res) { SIZE_GUIDE_ENTRIES = res.error ? [] : (res.data || []); })
+      .catch(function () { SIZE_GUIDE_ENTRIES = []; });
+  }
+
+  // Shared by the Product Modal's own Size Guide (scoped to that product's real age_group) and
+  // the footer's general Size Guide (every age_group that has real data). Only ever renders a
+  // measurement column that has at least one real non-null value in the matched rows — a column
+  // with nothing real behind it simply doesn't appear, rather than showing blanks or a guess.
+  function sizeGuideTableHtml(ageGroupFilter) {
+    var rows = ageGroupFilter
+      ? SIZE_GUIDE_ENTRIES.filter(function (e) { return e.age_group === ageGroupFilter; })
+      : SIZE_GUIDE_ENTRIES.slice();
+    if (!rows.length) {
+      return '<p class="account-payment-note">' +
+        (ageGroupFilter ? 'Size guide measurements for this age group aren’t available yet.' : 'Size guide measurements aren’t available yet.') +
+        '</p>';
+    }
+    var COLS = [
+      { key: 'height_cm', label: 'Height (cm)' },
+      { key: 'weight_kg', label: 'Weight (kg)' },
+      { key: 'chest_in', label: 'Chest (in)' },
+      { key: 'waist_in', label: 'Waist (in)' },
+      { key: 'garment_length_in', label: 'Garment Length (in)' }
+    ].filter(function (c) { return rows.some(function (r) { return r[c.key] != null; }); });
+
+    var showAgeCol = !ageGroupFilter;
+    return '<table class="pm-size-guide-table"><thead><tr>' +
+      (showAgeCol ? '<th>Age</th>' : '') + '<th>Size</th>' +
+      COLS.map(function (c) { return '<th>' + c.label + '</th>'; }).join('') +
+      '</tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr>' + (showAgeCol ? '<td>' + escapeHtml(r.age_group) + '</td>' : '') + '<td>' + escapeHtml(r.size) + '</td>' +
+          COLS.map(function (c) { return '<td>' + (r[c.key] != null ? r[c.key] : '&mdash;') + '</td>'; }).join('') +
+          '</tr>';
+      }).join('') + '</tbody></table>';
   }
 
   // A product image is either one of the site's pastel placeholder classes (legacy/no-photo
@@ -351,7 +394,7 @@
       btn.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
       btn.setAttribute('aria-pressed', String(!shown));
     });
-    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose', 'shopFilterSheetClose', 'shopSortSheetClose', 'locationSheetClose'].forEach(function (id) {
+    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose', 'shopFilterSheetClose', 'shopSortSheetClose', 'locationSheetClose', 'quickAddSheetClose'].forEach(function (id) {
       var btn = document.getElementById(id);
       if (btn) btn.addEventListener('click', closeTopPanel);
     });
@@ -421,14 +464,19 @@
         return;
       }
 
-      var openTarget = event.target.closest('[data-open-product]');
-      if (openTarget) { ProductModal.open(openTarget.dataset.openProduct); return; }
-
+      // BUG FIX: the Quick Add button sits nested INSIDE .product-img, which itself carries
+      // data-open-product — event.target.closest('[data-open-product]') matches that ancestor
+      // for a click anywhere inside it, Quick Add button included, so the more specific
+      // data-add-to-cart check has to run first or it can never actually fire (same reason
+      // data-wishlist is already checked before data-open-product above).
       var addBtn = event.target.closest('[data-add-to-cart]');
-      if (addBtn && !addBtn.disabled) { ProductModal.open(addBtn.dataset.addToCart, 'cart'); return; }
+      if (addBtn && !addBtn.disabled) { QuickAdd.open(addBtn.dataset.addToCart); return; }
 
       var buyBtn = event.target.closest('[data-buy-now]');
       if (buyBtn && !buyBtn.disabled) { ProductModal.open(buyBtn.dataset.buyNow, 'buynow'); return; }
+
+      var openTarget = event.target.closest('[data-open-product]');
+      if (openTarget) { ProductModal.open(openTarget.dataset.openProduct); return; }
     });
   }
 
@@ -500,7 +548,7 @@
       if (route === 'all') {
         showView('gallery');
         setActiveNav('all');
-        Gallery.renderAll();
+        Gallery.renderAll({ gender: parsed.params.gender || null, ageGroup: parsed.params.age || null });
         window.scrollTo(0, 0);
         return;
       }
@@ -786,11 +834,19 @@
       render();
     }
 
-    function renderAll() {
+    // `preset` optionally pre-applies a real Gender/Age filter — used by the homepage's Shop by
+    // Age / Baby Boys-Girls-Unisex quick-nav chips (deep link: #all?gender=girls or
+    // #all?age=<real ageGroup string, exactly as stored/typed in Admin>). Never applies a value
+    // that doesn't already exist on at least one real product — applyFilters() below just finds
+    // nothing if it did, so this can't silently show an unfiltered "All Products" claiming to be
+    // a specific age/gender.
+    function renderAll(preset) {
       mode = 'all';
       pool = PRODUCTS.slice();
       quickChipKey = 'category';
       resetFilters();
+      if (preset && preset.gender) filters.gender = preset.gender;
+      if (preset && preset.ageGroup) filters.ageGroup = preset.ageGroup;
       setTitle('All Products');
       subtitleEl().textContent = 'Everything from You & Me, in one place.';
       render();
@@ -836,7 +892,14 @@
       if (filterApplyBtn) filterApplyBtn.addEventListener('click', function () { closePanel(document.getElementById('shopFilterSheet')); });
     }
 
-    return { renderKids: renderKids, renderAll: renderAll, renderNewArrivals: renderNewArrivals, init: init };
+    // Real, site-wide facets (not scoped to whatever mode/pool is currently active) — the ONLY
+    // source the homepage's Shop by Age / Baby Boys-Girls-Unisex quick-nav reads from. A value
+    // that no real product currently has just never appears as a chip; nothing here is a fixed,
+    // hardcoded taxonomy.
+    function getRealAgeGroups() { return distinctValues(PRODUCTS, 'ageGroup'); }
+    function getRealGenders() { return distinctValues(PRODUCTS, 'gender'); }
+
+    return { renderKids: renderKids, renderAll: renderAll, renderNewArrivals: renderNewArrivals, init: init, getRealAgeGroups: getRealAgeGroups, getRealGenders: getRealGenders };
   })();
 
   /* ---------- 11. Coming Soon view (Family Wear / Couple Sets) ---------- */
@@ -929,12 +992,12 @@
           '<span class="swatch" style="background:' + c.hex + '"></span></button>';
       }).join('');
 
-      var sizeGuideHtml = state.sizeGuideOpen ? (
-        '<table class="pm-size-guide-table"><thead><tr><th>Size</th><th>Age / Fit</th><th>Chest (in)</th></tr></thead><tbody>' +
-        p.sizes.map(function (s, i) {
-          return '<tr><td>' + escapeHtml(s) + '</td><td>' + (i === 0 ? 'Smallest' : i === p.sizes.length - 1 ? 'Largest' : 'Mid-range') + '</td><td>' + (14 + i * 2) + '&ndash;' + (16 + i * 2) + '</td></tr>';
-        }).join('') + '</tbody></table>'
-      ) : '';
+      // BUG FIX: this used to GENERATE fake chest measurements from a formula (14 + i*2) and
+      // fake "Smallest/Mid-range/Largest" labels for every product, regardless of its real
+      // sizes — a direct fabrication. Now reads only real, Admin-entered rows for this product's
+      // own age_group (supabase/migrations/0019); shows an honest "not available yet" message
+      // if none exist rather than inventing anything.
+      var sizeGuideHtml = state.sizeGuideOpen ? sizeGuideTableHtml(p.ageGroup) : '';
 
       body().innerHTML =
         '<div class="pm-gallery-main">' +
@@ -949,8 +1012,6 @@
           (discount > 0 ? '<span class="product-discount">' + discount + '% OFF</span>' : '') +
         '</div>' +
         '<div class="pm-stock ' + stock.cls + '">' + stock.label + '</div>' +
-        '<p class="pm-desc">' + escapeHtml(p.description) + '</p>' +
-        '<p class="pm-fabric"><strong>Fabric:</strong> ' + escapeHtml(p.fabric) + '</p>' +
         '<div class="pm-option-block">' +
           '<div class="pm-option-label"><span>Size</span><button type="button" class="pm-size-guide-link" id="pmSizeGuideToggle">' + (state.sizeGuideOpen ? 'Hide size guide' : 'Size guide') + '</button></div>' +
           '<div class="pm-size-options">' + sizeBtns + '</div>' + sizeGuideHtml +
@@ -973,13 +1034,38 @@
           '<button type="button" class="btn btn-primary" id="pmBuyNow"' + (p.stock <= 0 ? ' disabled' : '') + '>Buy Now</button>' +
         '</div>' +
         '<p class="pm-stock-note">Stock and price are confirmed automatically when you check out.</p>' +
+        (p.stock <= 0
+          ? '<div class="quick-add-oos"><p><strong>Out of Stock</strong></p>' +
+              '<div class="quick-add-notify-row"><input type="email" id="pmNotifyEmail" placeholder="Your email" value="' + escapeHtml((SessionService.getUser() && SessionService.getUser().email) || '') + '">' +
+              '<button type="button" class="btn btn-outline btn-sm" id="pmNotifyBtn">Notify Me</button></div>' +
+              '<p class="account-payment-note" id="pmNotifyFeedback"></p></div>'
+          : '') +
         '<div class="pm-sticky-actions">' +
           '<button type="button" class="btn btn-outline" id="pmAddToCartSticky"' + (p.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
           '<button type="button" class="btn btn-primary" id="pmBuyNowSticky"' + (p.stock <= 0 ? ' disabled' : '') + '>Buy Now</button>' +
         '</div>' +
-        '<div class="pm-delivery-block">' + deliveryBlockHtml() + '</div>' +
+        productDetailAccordionHtml(p) +
         discoveryRowHtml('You May Also Like', PRODUCTS.filter(function (o) { return o.id !== p.id && o.category === p.category; }).slice(0, 8)) +
         discoveryRowHtml('Recently Viewed', RecentlyViewedService.get(p.id, 8));
+    }
+
+    // Real product fields only — native <details>/<summary> (no extra JS state needed for
+    // expand/collapse). Fit / Care Instructions / Country of Origin / Collection are NOT shown:
+    // no such columns exist on products yet (confirmed against the real schema), and inventing
+    // that copy would violate the same "no fake product descriptions" rule as everything else
+    // on this site. Delivery availability moves in here too — same real DeliveryLocation data
+    // as before, just now behind its own accordion section instead of always-expanded.
+    function productDetailAccordionHtml(p) {
+      return '<div class="pm-accordion">' +
+        '<details class="pm-accordion-item" open><summary>Product Details</summary>' +
+          '<div class="pm-accordion-body">' +
+            (p.description ? '<p>' + escapeHtml(p.description) + '</p>' : '') +
+            '<p><strong>SKU:</strong> ' + escapeHtml(p.sku) + '</p>' +
+          '</div>' +
+        '</details>' +
+        (p.fabric ? '<details class="pm-accordion-item"><summary>Fabric</summary><div class="pm-accordion-body"><p>' + escapeHtml(p.fabric) + '</p></div></details>' : '') +
+        '<details class="pm-accordion-item"><summary>Delivery</summary><div class="pm-accordion-body">' + deliveryBlockHtml() + '</div></details>' +
+      '</div>';
     }
 
     // Deterministic-only discovery — same category ("You May Also Like") or the guest's own real
@@ -1005,12 +1091,10 @@
           : loc.serviceable
             ? '<p class="location-result location-result-ok">✓ Delivery available' + (loc.etaDays != null ? ' — usually ' + loc.etaDays + ' day' + (loc.etaDays === 1 ? '' : 's') : '') + '</p>'
             : '<p class="location-result location-result-bad">Currently unavailable at this pincode.</p>';
-        return '<h4>Delivery</h4>' +
-          '<div class="pm-delivery-row"><span>Delivering to ' + escapeHtml(loc.pincode) + '</span><button type="button" class="link-btn" id="pmDeliveryChange">Change</button></div>' +
+        return '<div class="pm-delivery-row"><span>Delivering to ' + escapeHtml(loc.pincode) + '</span><button type="button" class="link-btn" id="pmDeliveryChange">Change</button></div>' +
           statusHtml;
       }
-      return '<h4>Delivery</h4>' +
-        '<div class="location-pin-row">' +
+      return '<div class="location-pin-row">' +
           '<input type="text" inputmode="numeric" maxlength="6" placeholder="Enter PIN code" id="pmDeliveryPinInput">' +
           '<button type="button" class="btn btn-outline btn-sm" id="pmDeliveryCheckBtn">Check</button>' +
         '</div>' +
@@ -1061,6 +1145,17 @@
         return;
       }
 
+      if (event.target.id === 'pmNotifyBtn') {
+        var emailInput = document.getElementById('pmNotifyEmail');
+        var feedback = document.getElementById('pmNotifyFeedback');
+        var email = emailInput.value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { feedback.textContent = 'Enter a valid email address.'; return; }
+        NotifyMeService.subscribe(state.product.id, null, email)
+          .then(function () { feedback.textContent = "We'll email you when this is back in stock."; })
+          .catch(function () { feedback.textContent = "Couldn't save that right now — please try again."; });
+        return;
+      }
+
       if (event.target.id === 'pmSizeGuideToggle') { state.sizeGuideOpen = !state.sizeGuideOpen; render(); return; }
       if (event.target.id === 'pmAddToCart' || event.target.id === 'pmAddToCartSticky') { doAddToCart(false); return; }
       if (event.target.id === 'pmBuyNow' || event.target.id === 'pmBuyNowSticky') { doAddToCart(true); return; }
@@ -1086,6 +1181,123 @@
       // Keeps the modal's own Delivery block in sync if the customer changes their location via
       // the header control while a product is open — same shared state, never a second source of truth.
       DeliveryLocation.onChange(function () { if (state.product && !panel().hidden) render(); });
+    }
+
+    return { open: open, close: close, init: init };
+  })();
+
+  // Back in Stock subscriptions (supabase/migrations/0019) — writes a real row only, never
+  // sends an email itself (no email-sending provider is configured anywhere in this project —
+  // see the migration's own comment). variantId may be null (product-level subscription, e.g.
+  // no size/color selected yet, or the product has none).
+  var NotifyMeService = (function () {
+    function subscribe(productId, variantId, email) {
+      return supabaseClient.from('stock_notifications').upsert({
+        product_id: productId, variant_id: variantId || null, email: email,
+        user_id: (SessionService.getUser() && SessionService.getUser().id) || null,
+        status: 'pending'
+      }, { onConflict: 'email,product_id,variant_id', ignoreDuplicates: true });
+    }
+    return { subscribe: subscribe };
+  })();
+
+  // Compact variant selector for "Quick Add" from any product listing (spec: never silently
+  // pick a size). If a product genuinely has at most one real size and at most one real color,
+  // Quick Add skips this entirely and adds directly — there's nothing to choose. Otherwise this
+  // opens the shared bottom-sheet, checks the REAL product_variants stock for the exact
+  // size+color the customer picked, and only then either adds to cart or offers Notify Me —
+  // never both size and color guessed, never an unavailable combo silently added.
+  var QuickAdd = (function () {
+    var state = { product: null, size: null, color: null };
+
+    function panel() { return document.getElementById('quickAddSheet'); }
+    function body() { return document.getElementById('quickAddSheetBody'); }
+
+    // The real variant matching the current size+color pick, if the product has variant rows
+    // at all — a product with no rows in product_variants (older data) falls back to the
+    // product-level stock total instead of claiming "no such combination exists".
+    function matchingVariant() {
+      var p = state.product;
+      if (!p.variants.length) return null;
+      return p.variants.filter(function (v) {
+        return (!state.size || v.size === state.size) && (!state.color || v.color === state.color);
+      })[0] || null;
+    }
+
+    function open(productId) {
+      var product = findProduct(productId);
+      if (!product) return;
+      // Only one real combination possible — add it directly, no sheet needed.
+      if (product.sizes.length <= 1 && product.colors.length <= 1) {
+        var onlyVariant = product.variants[0];
+        if (onlyVariant && onlyVariant.stock <= 0) { showToast('That item is currently out of stock.'); return; }
+        CartService.addItem(product.id, product.sizes[0] || null, (product.colors[0] && product.colors[0].name) || null, 1);
+        showToast('Added to Cart ♡');
+        return;
+      }
+      state.product = product;
+      state.size = product.sizes.length === 1 ? product.sizes[0] : null;
+      state.color = product.colors.length === 1 ? product.colors[0].name : null;
+      render();
+      openPanel(panel());
+    }
+    function close() { closePanel(panel()); }
+
+    function render() {
+      var p = state.product;
+      var variant = matchingVariant();
+      var ready = (p.sizes.length <= 1 || state.size) && (p.colors.length <= 1 || state.color);
+      var outOfStock = ready && variant && variant.stock <= 0;
+
+      body().innerHTML =
+        '<h3 class="pm-name" style="margin-bottom:4px;">' + escapeHtml(p.name) + '</h3>' +
+        '<div class="pm-price-row" style="margin-bottom:16px;"><span class="pm-price">' + formatPrice(p.price) + '</span></div>' +
+        (p.sizes.length > 1 ? '<div class="pm-option-block"><div class="pm-option-label"><span>Size</span></div><div class="pm-size-options">' +
+          p.sizes.map(function (s) { return '<button type="button" class="pm-size-btn' + (state.size === s ? ' selected' : '') + '" data-qa-size="' + escapeHtml(s) + '">' + escapeHtml(s) + '</button>'; }).join('') +
+        '</div></div>' : '') +
+        (p.colors.length > 1 ? '<div class="pm-option-block"><div class="pm-option-label"><span>Colour</span></div><div class="pm-color-options">' +
+          p.colors.map(function (c) { return '<button type="button" class="pm-color-btn' + (state.color === c.name ? ' selected' : '') + '" data-qa-color="' + escapeHtml(c.name) + '" aria-label="' + escapeHtml(c.name) + '"><span class="swatch" style="background:' + c.hex + '"></span></button>'; }).join('') +
+        '</div></div>' : '') +
+        '<p class="pm-selection-error" id="quickAddError"></p>' +
+        (outOfStock
+          ? '<div class="quick-add-oos"><p><strong>Out of Stock</strong></p>' +
+              '<div class="quick-add-notify-row"><input type="email" id="quickAddNotifyEmail" placeholder="Your email" value="' + escapeHtml((SessionService.getUser() && SessionService.getUser().email) || '') + '">' +
+              '<button type="button" class="btn btn-outline btn-sm" id="quickAddNotifyBtn">Notify Me</button></div>' +
+              '<p class="account-payment-note" id="quickAddNotifyFeedback"></p></div>'
+          : '<button type="button" class="btn btn-primary btn-block" id="quickAddConfirmBtn"' + (!ready ? ' disabled' : '') + '>Add to Cart</button>');
+    }
+
+    function onClick(event) {
+      var sizeBtn = event.target.closest('[data-qa-size]');
+      if (sizeBtn) { state.size = sizeBtn.dataset.qaSize; render(); return; }
+      var colorBtn = event.target.closest('[data-qa-color]');
+      if (colorBtn) { state.color = colorBtn.dataset.qaColor; render(); return; }
+
+      if (event.target.id === 'quickAddConfirmBtn') {
+        var p = state.product;
+        var ready = (p.sizes.length <= 1 || state.size) && (p.colors.length <= 1 || state.color);
+        if (!ready) { document.getElementById('quickAddError').textContent = 'Please select ' + (p.sizes.length > 1 && !state.size ? 'a size' : 'a colour') + '.'; return; }
+        CartService.addItem(p.id, state.size || (p.sizes[0] || null), state.color || (p.colors[0] && p.colors[0].name) || null, 1);
+        showToast('Added to Cart ♡');
+        close();
+        return;
+      }
+
+      if (event.target.id === 'quickAddNotifyBtn') {
+        var emailInput = document.getElementById('quickAddNotifyEmail');
+        var feedback = document.getElementById('quickAddNotifyFeedback');
+        var email = emailInput.value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { feedback.textContent = 'Enter a valid email address.'; return; }
+        var variant = matchingVariant();
+        NotifyMeService.subscribe(state.product.id, variant ? variant.id : null, email)
+          .then(function () { feedback.textContent = "We'll email you when this is back in stock."; })
+          .catch(function () { feedback.textContent = "Couldn't save that right now — please try again."; });
+      }
+    }
+
+    function init() {
+      var b = body();
+      if (b) b.addEventListener('click', onClick);
     }
 
     return { open: open, close: close, init: init };
@@ -3912,16 +4124,12 @@
         html: '<p>If something isn&rsquo;t quite right, we accept exchanges within 7 days of delivery for unused items with tags intact.</p>' +
           '<p>To start a return or exchange, message us on WhatsApp with your Order ID and we&rsquo;ll take it from there.</p>'
       },
-      sizeGuide: {
-        title: 'Size Guide',
-        html: '<p>Sizing varies slightly by style &mdash; each product&rsquo;s own size guide (in the product details) is the most accurate for that item. As a general guide:</p>' +
-          '<table class="pm-size-guide-table"><thead><tr><th>Age</th><th>Approx. Height (cm)</th><th>Chest (in)</th></tr></thead><tbody>' +
-          '<tr><td>0&ndash;12M</td><td>50&ndash;75</td><td>14&ndash;18</td></tr>' +
-          '<tr><td>1&ndash;3Y</td><td>75&ndash;95</td><td>18&ndash;20</td></tr>' +
-          '<tr><td>3&ndash;5Y</td><td>95&ndash;110</td><td>20&ndash;22</td></tr>' +
-          '<tr><td>5&ndash;7Y</td><td>110&ndash;125</td><td>22&ndash;24</td></tr>' +
-          '</tbody></table>'
-      },
+      // BUG FIX: this used to be a hardcoded generic Age/Height/Chest table with invented
+      // numbers (no real source). `html` is now computed at open() time from real,
+      // Admin-entered supabase size_guide_entries rows (see sizeGuideTableHtml()) — every real
+      // age group that has data, nothing fabricated, honest empty state if Admin hasn't entered
+      // any yet.
+      sizeGuide: { title: 'Size Guide', dynamic: true },
       faq: {
         title: 'Frequently Asked Questions',
         html: '<h3>How do I place an order?</h3><p>Add items to your cart, go to checkout, fill in your delivery details, and complete payment securely &mdash; your order is placed as soon as payment succeeds.</p>' +
@@ -3955,7 +4163,9 @@
       var entry = CONTENT[key];
       if (!entry) return;
       document.getElementById('infoModalTitle').textContent = entry.title;
-      document.getElementById('infoModalBody').innerHTML = entry.html;
+      document.getElementById('infoModalBody').innerHTML = entry.dynamic
+        ? '<p>Sizing varies slightly by style &mdash; each product&rsquo;s own Size Guide (in its product details) is the most accurate for that item.</p>' + sizeGuideTableHtml(null)
+        : entry.html;
       openPanel(panel());
     }
 
@@ -4181,12 +4391,63 @@
     renderOfferSection(data.content, data.products);
   }
 
+  /* ---------- 20.6 Homepage quick-nav (Shop by Age / Gender) + New Arrivals ---------- */
+  var AGE_GROUP_ICON = '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 3c4 0 8 2 8 6 0 7-4 11-8 12-4-1-8-5-8-12 0-4 4-6 8-6Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+  var GENDER_ICON = {
+    boys: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M8 4 4 7l2 3 2-1.5V20h8V8.5L18 10l2-3-4-3-2 2h-4L8 4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    girls: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 20s-7-4.4-9.3-9C1.2 7.7 3 4.5 6.4 4.5c2 0 3.4 1.1 5.6 3.5 2.2-2.4 3.6-3.5 5.6-3.5 3.4 0 5.2 3.2 3.7 6.5C19 15.6 12 20 12 20Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    unisex: '<svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>'
+  };
+  var GENDER_QUICKNAV_LABELS = { boys: 'Baby Boys', girls: 'Baby Girls', unisex: 'Unisex' };
+
+  // Real ageGroup strings only — exactly as Admin has typed them onto real products (see
+  // audit note in Gallery.getRealAgeGroups). Never a fixed Newborn/0-3M/... taxonomy; a value
+  // with zero real products behind it simply never becomes a chip.
+  function renderShopByAge() {
+    var section = document.getElementById('shopByAgeSection');
+    var wrap = document.getElementById('shopByAgeChips');
+    if (!section || !wrap) return;
+    var ages = Gallery.getRealAgeGroups();
+    if (!ages.length) { section.hidden = true; return; }
+    section.hidden = false;
+    wrap.innerHTML = ages.map(function (age) {
+      return '<a class="shop-quicknav-chip" href="#all?age=' + encodeURIComponent(age) + '">' + AGE_GROUP_ICON +
+        '<span>' + escapeHtml(age) + '</span></a>';
+    }).join('');
+  }
+
+  function renderShopByGender() {
+    var section = document.getElementById('shopByGenderSection');
+    var wrap = document.getElementById('shopByGenderChips');
+    if (!section || !wrap) return;
+    var genders = Gallery.getRealGenders();
+    if (!genders.length) { section.hidden = true; return; }
+    section.hidden = false;
+    wrap.innerHTML = genders.map(function (g) {
+      return '<a class="shop-quicknav-chip" href="#all?gender=' + encodeURIComponent(g) + '">' + (GENDER_ICON[g] || GENDER_ICON.unisex) +
+        '<span>' + escapeHtml(GENDER_QUICKNAV_LABELS[g] || g) + '</span></a>';
+    }).join('');
+  }
+
+  // Real new_arrival-flagged products (Admin-set, see admin.js product form) — a distinct
+  // homepage section from Featured Products, per the requested homepage order. Hidden entirely
+  // if Admin hasn't flagged any product as a new arrival yet, never backfilled with recent items.
+  function renderHomepageNewArrivals() {
+    var section = document.getElementById('homeNewArrivals');
+    var grid = document.getElementById('homeNewArrivalsGrid');
+    if (!section || !grid) return;
+    var items = PRODUCTS.filter(function (p) { return p.newArrival; }).slice(0, 8);
+    grid.innerHTML = items.map(renderProductCard).join('');
+    section.hidden = items.length === 0;
+  }
+
   /* ---------- 21. Init ---------- */
   document.addEventListener('DOMContentLoaded', function () {
     // Chrome that doesn't depend on product data can wire up immediately.
     initGlobalGridEvents();
     initPanelChrome();
     ProductModal.init();
+    QuickAdd.init();
     CartDrawer.init();
     WishlistDrawer.init();
     SearchOverlay.init();
@@ -4209,8 +4470,12 @@
 
     // Everything that reads PRODUCTS (featured grid, and the router — Kids Wear / View All /
     // New Arrivals / Search all filter the same live array) waits for the store API first.
+    loadSizeGuide();
     loadProducts().then(function () {
       renderProductGrid(grid, PRODUCTS.filter(function (p) { return p.featured; }));
+      renderShopByAge();
+      renderShopByGender();
+      renderHomepageNewArrivals();
 
       // "More Styles You'll Love" — real, non-featured stock so this doesn't just repeat the
       // Featured Products grid above it. Renders nothing (section stays empty, no fake filler)
