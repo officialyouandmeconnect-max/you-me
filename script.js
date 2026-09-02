@@ -2943,40 +2943,19 @@
     }
 
     /* ---- Order detail ---- */
-    var TRACKING_STEPS = [
-      { key: 'placed', label: 'Order Placed' },
-      { key: 'paid', label: 'Payment Confirmed' },
-      { key: 'confirmed', label: 'Confirmed' },
-      { key: 'packing', label: 'Packed' },
-      { key: 'shipped', label: 'Shipped' },
-      { key: 'out_for_delivery', label: 'Out for Delivery' },
-      { key: 'delivered', label: 'Delivered' }
-    ];
     // Matches ORDER_STATUS_RANK in delhivery-shipping/index.ts and admin.js exactly — one
     // real rank per internal stage, not several statuses sharing a slot, so each stage can get
-    // its own real order_status_history timestamp instead of stages bleeding together.
+    // its own real order_status_history timestamp instead of stages bleeding together. Still
+    // used for the simplified customer timeline's Shipped/OFD/Delivered fallback on orders with
+    // no courier shipment (manual shipping / not yet shipped).
     var ORDER_STATUS_RANK = { new: 0, confirmed: 1, packing: 2, packed: 3, ready_to_ship: 4, shipped: 5, out_for_delivery: 6, delivered: 7 };
-
-    function trackingStepsDone(o) {
-      var rank = ORDER_STATUS_RANK[o.order_status] != null ? ORDER_STATUS_RANK[o.order_status] : 0;
-      return {
-        placed: true,
-        paid: o.payment_status === 'paid',
-        confirmed: rank >= 1,
-        packing: rank >= 2,
-        shipped: rank >= 5,
-        out_for_delivery: rank >= 6,
-        delivered: rank >= 7
-      };
-    }
 
     // Real timestamp for one timeline stage — never order.updated_at, never fabricated. Internal
     // stages come from order_status_history (a real row per change, inserted by Admin's own
     // Update button or the Delhivery auto-sync — see supabase/migrations/0001_init.sql and
     // delhivery-shipping/index.ts's syncOrderStatusFromShipment). Courier stages come from
     // shipment_events (real Delhivery scans). If a stage is done but genuinely has no recorded
-    // time (an old order predating this), the caller shows "Time unavailable" rather than
-    // guessing — see trackingTimelineHtml below.
+    // time, the caller shows "Time unavailable" rather than guessing — see simpleTrackingHtml.
     function findHistoryTime(history, status) {
       var rows = (history || []).filter(function (h) { return h.status === status; });
       if (!rows.length) return null;
@@ -2986,82 +2965,8 @@
     function findEventTime(events, normalizedStatuses) {
       var rows = (events || []).filter(function (e) { return normalizedStatuses.indexOf(e.normalized_status) !== -1; });
       if (!rows.length) return null;
-      rows.sort(function (a, b) { return new Date(a.event_time || 0) - new Date(b.event_time || 0); });
+      rows.sort(function (a, b) { return new Date(a.event_time || a.created_at || 0) - new Date(b.event_time || b.created_at || 0); });
       return rows[0].event_time;
-    }
-    function stageTime(key, o, shipment, isCourier) {
-      if (key === 'placed') return o.created_at;
-      if (key === 'paid') return o.payment_status === 'paid' ? o.paid_at : null;
-      if (isCourier && key === 'ready_for_pickup') return findEventTime(shipment && shipment.shipment_events, ['shipment_created', 'pickup_scheduled']);
-      if (isCourier && ['picked_up', 'in_transit', 'out_for_delivery', 'delivered'].indexOf(key) !== -1) return findEventTime(shipment && shipment.shipment_events, [key]);
-      return findHistoryTime(o.order_status_history, key);
-    }
-
-    // Once a real courier shipment exists (Amazon Shipping or Delhivery — any provider whose
-    // shipments table row has a normalized_status), that provider's own normalized_status is
-    // the source of truth for courier movement (Ready for Pickup → Picked Up → In Transit →
-    // Out for Delivery → Delivered) — never inferred from order_status, and never from just
-    // "a shipment/AWB exists". A shipment being *created* is not the same as it being *shipped*
-    // — see the bug-fix note on courierTrackingStepsDone below. Every provider shares the same
-    // normalized_status vocabulary (see supabase/migrations/0003_shipping_providers.sql), so one
-    // shared 9-step timeline (order-placement steps + courier steps) works for all of them.
-    var COURIER_TRACKING_STEPS = {
-      amazon_shipping: [
-        { key: 'placed', label: 'Order Placed' },
-        { key: 'paid', label: 'Payment Confirmed' },
-        { key: 'confirmed', label: 'Confirmed' },
-        { key: 'packed', label: 'Packed' },
-        { key: 'ready_to_ship', label: 'Ready to Ship' },
-        { key: 'ready_for_pickup', label: 'Ready for Pickup' },
-        { key: 'picked_up', label: 'Picked Up' },
-        { key: 'in_transit', label: 'In Transit' },
-        { key: 'out_for_delivery', label: 'Out for Delivery' },
-        { key: 'delivered', label: 'Delivered' }
-      ],
-      delhivery: [
-        { key: 'placed', label: 'Order Placed' },
-        { key: 'paid', label: 'Payment Confirmed' },
-        { key: 'confirmed', label: 'Confirmed' },
-        { key: 'packed', label: 'Packed' },
-        { key: 'ready_to_ship', label: 'Ready to Ship' },
-        { key: 'ready_for_pickup', label: 'Preparing for Pickup' },
-        { key: 'picked_up', label: 'Picked Up' },
-        { key: 'in_transit', label: 'In Transit' },
-        { key: 'out_for_delivery', label: 'Out for Delivery' },
-        { key: 'delivered', label: 'Delivered' }
-      ]
-    };
-    // shipment_created and pickup_scheduled share rank 0 ("Ready for Pickup" — Delhivery has the
-    // AWB but hasn't actually collected the parcel yet); only picked_up and later count as real
-    // courier movement.
-    var COURIER_STATUS_RANK = { shipment_created: 0, pickup_scheduled: 0, picked_up: 1, in_transit: 2, out_for_delivery: 3, delivered: 4 };
-    // BUG FIX: this used to return `handed: rank >= 1` collapsed under a single "confirmed:
-    // true, packed: true" pair, which (combined with a since-fixed server bug that wrongly
-    // advanced order_status to 'shipped' the moment an AWB was created) let "Shipped ✓" show up
-    // before Delhivery had actually picked up the parcel. Every step below is now computed
-    // explicitly — never a blind `index <= currentIndex` sweep — combining You & Me's own
-    // internal prep status (order.order_status, Admin-owned) with Delhivery's real courier
-    // status (shipment.normalized_status) as two genuinely separate signals.
-    function courierTrackingStepsDone(o, shipment) {
-      var internalRank = ORDER_STATUS_RANK[o.order_status] != null ? ORDER_STATUS_RANK[o.order_status] : 0;
-      var courierRank = COURIER_STATUS_RANK[shipment.normalized_status] != null ? COURIER_STATUS_RANK[shipment.normalized_status] : 0;
-      // A shipment record existing at all means Admin already moved this order through prep
-      // (Delhivery shipments are only ever created from "Ready to Ship" — see
-      // supabase/README-delhivery.md) — so confirmed/packed read as done even if this
-      // particular order's order_status history happens to be missing those intermediate rows.
-      var courierStarted = true;
-      return {
-        placed: true,
-        paid: o.payment_status === 'paid',
-        confirmed: internalRank >= 1 || courierStarted,
-        packed: internalRank >= 3 || courierStarted,
-        ready_to_ship: internalRank >= 4 || courierStarted,
-        ready_for_pickup: courierRank >= 0,
-        picked_up: courierRank >= 1,
-        in_transit: courierRank >= 2,
-        out_for_delivery: courierRank >= 3,
-        delivered: courierRank >= 4
-      };
     }
 
     /* ---- Invoice ---- */
@@ -3226,24 +3131,22 @@
           // fix. `(o.shipments || [])[0]` on an object is always undefined, which silently made
           // `shipment` undefined even when a real, fully-synced Delhivery shipment existed —
           // exactly why the Shipping card kept showing "Preparing your order" and Packed showed
-          // "Time unavailable" (courierTrackingStepsDone/stageTime both silently fell back to the
-          // no-shipment path). Handle both shapes so this can't regress if PostgREST's embed
-          // heuristic ever changes.
+          // "Time unavailable" — everything silently fell back to the no-shipment path. Handle
+          // both shapes so this can't regress if PostgREST's embed heuristic ever changes.
           var shipment = Array.isArray(o.shipments) ? (o.shipments[0] || null) : (o.shipments || null);
-          // Any provider with its own real tracking (Amazon Shipping, Delhivery, …) — Manual
-          // Shipping and "no shipment yet" both fall back to the generic order-status timeline.
-          var courierSteps = shipment && COURIER_TRACKING_STEPS[shipment.provider];
-          var isCourier = !!courierSteps;
+          // Any provider with its own real courier tracking (Amazon Shipping, Delhivery,
+          // Shiprocket) — Manual Shipping and "no shipment yet" both fall back to the simplified
+          // timeline's internal order_status-based fallback.
+          var isCourier = !!(shipment && COURIER_PROVIDER_LABELS[shipment.provider]);
           var eventsPromise = shipment
             ? supabaseClient.from('shipment_events').select('*').eq('shipment_id', shipment.id).then(function (r) { return r.data || []; }).catch(function () { return []; })
             : Promise.resolve([]);
           return eventsPromise
             .then(function (events) { if (shipment) shipment.shipment_events = events; return getExistingInvoice(o.id); })
-            .then(function (invoice) { return { o: o, shipment: shipment, isCourier: isCourier, courierSteps: courierSteps, invoice: invoice }; });
+            .then(function (invoice) { return { o: o, shipment: shipment, isCourier: isCourier, invoice: invoice }; });
         })
         .then(function (ctx) {
-          var o = ctx.o, shipment = ctx.shipment, isCourier = ctx.isCourier, courierSteps = ctx.courierSteps, invoice = ctx.invoice;
-          var done = o.order_status === 'cancelled' ? null : (isCourier ? courierTrackingStepsDone(o, shipment) : trackingStepsDone(o));
+          var o = ctx.o, shipment = ctx.shipment, isCourier = ctx.isCourier, invoice = ctx.invoice;
           var detailIncomplete = paymentIncompleteState(o);
 
           content().innerHTML =
@@ -3283,20 +3186,9 @@
             '</div>' +
             (o.order_status === 'cancelled'
               ? '<div class="panel-card"><h4>Order Status</h4><p><span class="badge badge-cancelled">Cancelled</span></p></div>'
-              : '<div class="panel-card"><h4>Order Status</h4>' +
-                  (isCourier && ['delivery_failed', 'returned', 'cancelled'].indexOf(shipment.normalized_status) !== -1
-                    ? '<p><span class="badge badge-' + escapeHtml(shipment.normalized_status) + '">' + statusLabel(shipment.normalized_status) + '</span></p>'
-                    : trackingTimelineHtml(done, isCourier ? courierSteps : TRACKING_STEPS, o, shipment, isCourier)) +
-                '</div>') +
-            '<div class="panel-card"><h4>Shipping</h4>' + shippingSectionHtml(shipment) +
-            '</div>' +
-            (shipment && (shipment.shipment_events || []).length
-              ? '<div class="panel-card"><h4>Transit History</h4>' +
-                  '<p class="account-payment-note">Every real courier scan for this shipment, most recent first.</p>' +
-                  '<button type="button" class="link-btn" id="transitHistoryToggle">Show Transit History (' + shipment.shipment_events.length + ')</button>' +
-                  '<div class="transit-history-list" id="transitHistoryList" hidden>' + transitHistoryHtml(shipment.shipment_events) + '</div>' +
-                '</div>'
-              : '') +
+              : (isCourier && ['delivery_failed', 'returned', 'cancelled'].indexOf(shipment.normalized_status) !== -1
+                  ? '<div class="panel-card"><h4>Order Status</h4><p><span class="badge badge-' + escapeHtml(shipment.normalized_status) + '">' + statusLabel(shipment.normalized_status) + '</span></p></div>'
+                  : '<div class="panel-card">' + simpleTrackingHtml(o, shipment, isCourier) + '</div>')) +
             '<div class="panel-card"><h4>Invoice</h4>' +
               (invoice
                 ? '<p>Invoice #' + escapeHtml(invoice.invoice_number) + '</p><button type="button" class="btn btn-sm btn-outline" id="downloadInvoiceBtn">Download Invoice</button>'
@@ -3311,7 +3203,7 @@
           var back = document.getElementById('orderDetailBack');
           if (back) back.addEventListener('click', function () { render('orders'); });
 
-          bindTrackingTimelineToggle();
+          bindSimpleTracking(o, shipment);
 
           var removeBtn = document.getElementById('removeOrderDetailBtn');
           if (removeBtn) removeBtn.addEventListener('click', function () {
@@ -3320,15 +3212,6 @@
 
           var payAgainDetailBtn = document.getElementById('payAgainDetailBtn');
           if (payAgainDetailBtn) payAgainDetailBtn.addEventListener('click', function () { payAgain(o.id, payAgainDetailBtn); });
-
-          var transitToggle = document.getElementById('transitHistoryToggle');
-          if (transitToggle) transitToggle.addEventListener('click', function () {
-            var list = document.getElementById('transitHistoryList');
-            var nowHidden = !list.hidden;
-            list.hidden = nowHidden;
-            var count = (shipment.shipment_events || []).length;
-            transitToggle.textContent = (nowHidden ? 'Show' : 'Hide') + ' Transit History (' + count + ')';
-          });
 
           var downloadBtn = document.getElementById('downloadInvoiceBtn');
           if (downloadBtn) downloadBtn.addEventListener('click', function () {
@@ -3353,165 +3236,161 @@
         });
     }
 
-    // Short, honest internal-event descriptions — real facts about what You & Me itself did,
-    // never a guess about courier movement (those steps expand to the real transit history
-    // instead — see COURIER_MOVEMENT_KEYS below). Covers both TRACKING_STEPS' and
-    // COURIER_TRACKING_STEPS' key spellings ("packing" vs "packed") since the same map serves
-    // both timelines.
-    var MILESTONE_DESCRIPTIONS = {
-      placed: 'Your order was received by You & Me.',
-      paid: 'Your payment has been verified.',
-      confirmed: 'You & Me confirmed your order.',
-      packing: 'You & Me packed your order.',
-      packed: 'You & Me packed your order.',
-      ready_to_ship: 'Your order is ready to be handed to the courier.'
-    };
-    // Steps where "what happened" is real courier movement, not a You & Me-side fact — expanding
-    // any of these shows the shared, real transit history (shipment_events) instead of a canned
-    // sentence, exactly the same list regardless of which step under it the customer opened.
-    var COURIER_MOVEMENT_KEYS = ['ready_for_pickup', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'shipped'];
-
-    // Milestones are individually expandable (accordion — one open at a time, spec #4/#11).
-    // Only a DONE step is ever clickable; nothing to show for a stage that hasn't happened yet.
-    function trackingTimelineHtml(done, steps, o, shipment, isCourier) {
-      var events = (shipment && shipment.shipment_events) || [];
-      return '<div class="tracking-timeline" id="trackingTimelineRoot">' + (steps || TRACKING_STEPS).map(function (step, idx) {
-        var isDone = !!done[step.key];
-        var time = isDone && o ? stageTime(step.key, o, shipment, isCourier) : null;
-        var timeHtml = isDone && o ? '<span class="tracking-step-time">' + (time ? formatDateTime(time) : 'Time unavailable') + '</span>' : '';
-        var isCourierMovement = COURIER_MOVEMENT_KEYS.indexOf(step.key) !== -1;
-        var panelId = 'trackingStepPanel' + idx;
-        var panelHtml = '';
-        if (isDone) {
-          if (isCourierMovement) {
-            panelHtml = events.length ? transitHistoryHtml(events) : '<p class="account-payment-note">No courier scans available yet.</p>';
-          } else if (MILESTONE_DESCRIPTIONS[step.key]) {
-            panelHtml = '<p class="account-payment-note">' + escapeHtml(MILESTONE_DESCRIPTIONS[step.key]) + '</p>';
-          }
-        }
-        var headerTag = isDone && panelHtml ? 'button type="button" class="tracking-step-header" data-tracking-toggle="' + panelId + '"' : 'div class="tracking-step-header"';
-        var headerCloseTag = isDone && panelHtml ? 'button' : 'div';
-        return '<div class="tracking-step' + (isDone ? ' done' : '') + '">' +
-          '<span class="tracking-dot">' + (isDone ? '&#10003;' : '') + '</span>' +
-          '<span class="tracking-step-body">' +
-            '<' + headerTag + '>' +
-              '<span class="tracking-step-label">' + step.label + '</span>' + timeHtml +
-              (isDone && panelHtml ? '<svg class="tracking-step-chevron" viewBox="0 0 24 24" width="16" height="16"><polyline points="6 9 12 15 18 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '') +
-            '</' + headerCloseTag + '>' +
-            (panelHtml ? '<div class="tracking-step-panel" id="' + panelId + '" hidden>' + panelHtml + '</div>' : '') +
-          '</span>' +
-        '</div>';
-      }).join('') + '</div>';
-    }
-
-    // Wires the accordion's expand/collapse — call once after trackingTimelineHtml's markup is
-    // in the DOM. Single-open-at-a-time (spec #11): opening one panel closes any other.
-    function bindTrackingTimelineToggle() {
-      var root = document.getElementById('trackingTimelineRoot');
-      if (!root) return;
-      root.querySelectorAll('[data-tracking-toggle]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var panel = document.getElementById(btn.dataset.trackingToggle);
-          if (!panel) return;
-          var willOpen = panel.hidden;
-          root.querySelectorAll('.tracking-step-panel').forEach(function (p) { p.hidden = true; });
-          root.querySelectorAll('.tracking-step-chevron').forEach(function (c) { c.classList.remove('open'); });
-          if (willOpen) { panel.hidden = false; btn.querySelector('.tracking-step-chevron').classList.add('open'); }
-        });
-      });
-    }
-
-    var COURIER_PROVIDER_LABELS = { amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery' };
-    var PREPARING_MESSAGE = '<p>Preparing your order &hearts;</p><p class="account-payment-note">Tracking information will appear here once your order has been shipped.</p>';
+    var COURIER_PROVIDER_LABELS = { amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery', shiprocket: 'Shiprocket' };
+    var PREPARING_MESSAGE = '<h4>Order Status</h4><p>Preparing your order &hearts;</p><p class="account-payment-note">Tracking information will appear here once your order has been shipped.</p>';
     // Customer-facing wording for each normalized_status — deliberately different from the
     // generic statusLabel() auto-titlecase used for order_status elsewhere, since courier states
-    // read better in the courier's own vocabulary (e.g. "Ready for Pickup", not "Pickup
-    // Scheduled"). Falls back to statusLabel() for anything not explicitly listed.
+    // read better in the courier's own vocabulary. Falls back to statusLabel() for anything not
+    // explicitly listed.
     var COURIER_STATUS_LABELS = {
       shipment_created: 'Preparing for Pickup', pickup_scheduled: 'Ready for Pickup', picked_up: 'Picked Up',
       in_transit: 'In Transit', out_for_delivery: 'Out for Delivery', delivered: 'Delivered',
       delivery_failed: 'Delivery Attempt Failed', returned: 'Return to Origin', cancelled: 'Cancelled'
     };
     function courierStatusLabel(normalized) { return COURIER_STATUS_LABELS[normalized] || statusLabel(normalized); }
-    // States where a real AWB exists but the courier hasn't actually collected the parcel yet —
-    // must never be described as "Shipped".
-    var PRE_PICKUP_STATUSES = ['shipment_created', 'pickup_scheduled'];
+    // Real courier movement hasn't actually started until picked_up or later — an AWB/waybill
+    // existing (shipment_created) or a pickup merely being requested (pickup_scheduled) must
+    // never be shown to the customer as "Shipped".
+    var COURIER_MOVEMENT_RANK = { shipment_created: 0, pickup_scheduled: 0, picked_up: 1, in_transit: 2, out_for_delivery: 3, delivered: 4 };
 
     // Cosmetic-only cleanup of a raw courier facility code (e.g. "Kozhikode_Central_H") —
     // underscores become spaces, nothing else. Deliberately does NOT try to expand suffix
     // letters like "_H"/"_D" into words such as "Hub"/"Delivery Center": Delhivery doesn't
     // document what every suffix means, and guessing would risk claiming a facility is a "Hub"
-    // when it might not be — the spec's own rule is "do not change the actual meaning". The raw
-    // value is always what's stored in shipment_events; this only affects display.
+    // when it might not be. The raw value is always what's stored in shipment_events; this only
+    // affects display.
     function friendlyLocation(raw) {
       if (!raw) return null;
       return String(raw).replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
     }
 
-    // Full real transit history — oldest first (spec: easiest for a customer to follow "where it
-    // started → where it is now"), with the single most recent real event highlighted so it's
-    // still obvious at a glance where the package currently stands. Never synthesizes a row —
-    // only what shipment_events actually holds, one row per real courier scan.
+    // BUG FIX (root cause of "Latest Update: Shipment created with Delhivery" showing while the
+    // shipment was already IN TRANSIT): this used to sort by `event_time || 0` alone — a real
+    // scan whose event_time failed to parse fell all the way back to the Unix epoch and sorted
+    // as the OLDEST possible row, while the shipment-creation system event (always given a real,
+    // recent event_time at creation) then looked like the newest. Falls back to created_at first,
+    // exactly like transitHistoryHtml's own sort already did — the two were inconsistent, this
+    // makes them the same rule.
+    function latestRealEvent(events) {
+      var sorted = (events || []).slice().sort(function (a, b) { return new Date(a.event_time || a.created_at || 0) - new Date(b.event_time || b.created_at || 0); });
+      return sorted.length ? sorted[sorted.length - 1] : null;
+    }
+
+    // Full real transit history as a vertical node/line journey graph (spec: "Design the
+    // expanded tracking history as a vertical line... circle/node + connecting line + event
+    // title + timestamp + location"). Oldest first (easiest to follow "where it started → where
+    // it is now"), latest real event highlighted. Never synthesizes a row — one node per real
+    // shipment_events row, nothing invented.
     function transitHistoryHtml(events) {
       var sorted = (events || []).slice().sort(function (a, b) { return new Date(a.event_time || a.created_at || 0) - new Date(b.event_time || b.created_at || 0); });
-      return sorted.map(function (e, i) {
+      if (!sorted.length) return '<p class="account-payment-note">No courier scans available yet.</p>';
+      return '<div class="journey-timeline">' + sorted.map(function (e, i) {
         var label = e.description || courierStatusLabel(e.normalized_status) || e.provider_status || 'Update';
         var loc = friendlyLocation(e.event_location);
         var isLatest = i === sorted.length - 1;
-        return '<div class="transit-event-row' + (isLatest ? ' transit-event-latest' : '') + '">' +
-          '<span class="transit-event-time">' + (e.event_time ? formatDateTime(e.event_time) : 'Time unavailable') + '</span>' +
-          '<strong class="transit-event-label">' + escapeHtml(label) + (isLatest ? ' <span class="transit-event-latest-tag">Latest</span>' : '') + '</strong>' +
-          (loc ? '<span class="transit-event-location">' + escapeHtml(loc) + '</span>' : '') +
+        return '<div class="journey-node' + (isLatest ? ' journey-node-latest' : '') + '">' +
+          '<span class="journey-dot"></span>' +
+          '<div class="journey-node-body">' +
+            '<strong class="journey-node-title">' + escapeHtml(label) + (isLatest ? ' <span class="transit-event-latest-tag">Latest</span>' : '') + '</strong>' +
+            '<span class="journey-node-time">' + (e.event_time ? formatDateTime(e.event_time) : 'Time unavailable') + '</span>' +
+            (loc ? '<span class="journey-node-loc">' + escapeHtml(loc) + '</span>' : '') +
+          '</div>' +
         '</div>';
-      }).join('');
+      }).join('') + '</div>';
     }
 
-    function shippingSectionHtml(shipment) {
-      if (!shipment) return PREPARING_MESSAGE;
+    // ---------- Simplified 4-stage customer tracking (Ordered / Shipped / Out for Delivery /
+    // Delivered) — replaces the old 7-10-step internal timeline and the separate technical
+    // "Shipping" card. Internal prep stages (Confirmed/Packed/Ready to Ship) still exist and are
+    // still tracked in order_status_history/Admin — they just aren't primary customer-facing
+    // milestones any more; Packed gets one small line between Ordered and Shipped instead. ----------
+    function simpleTrackingHtml(o, shipment, isCourier) {
+      var events = (shipment && shipment.shipment_events) || [];
+      var courierRank = isCourier ? (COURIER_MOVEMENT_RANK[shipment.normalized_status] != null ? COURIER_MOVEMENT_RANK[shipment.normalized_status] : 0) : null;
+      var orderRank = ORDER_STATUS_RANK[o.order_status] != null ? ORDER_STATUS_RANK[o.order_status] : 0;
 
-      if (COURIER_PROVIDER_LABELS[shipment.provider]) {
-        if (!shipment.provider_shipment_id) {
-          // A shipment attempt exists but the courier hasn't confirmed one yet (e.g. still
-          // being created, or the last attempt failed) — never show a technical API error here.
-          return PREPARING_MESSAGE;
-        }
-        var isPrePickup = PRE_PICKUP_STATUSES.indexOf(shipment.normalized_status) !== -1;
-        // "Latest Update" is the most recent real scan/status-change event the courier reported
-        // (shipment_events, synced server-side) — never fabricated client-side.
-        var events = shipment.shipment_events || [];
-        var latestEvent = events.length
-          ? events.slice().sort(function (a, b) { return new Date(b.event_time || 0) - new Date(a.event_time || 0); })[0]
-          : null;
-        // BUG FIX: this used to say "Shipped with <Provider>" unconditionally the moment an AWB
-        // existed — wrong, an AWB existing just means the shipment was created, not that the
-        // courier has actually collected the parcel. Never say "shipped" or "tracking
-        // unavailable" here when a real AWB already exists — the pre-pickup state gets its own
-        // honest heading + explanatory message instead.
-        return (isPrePickup
-            ? '<p>Shipping Partner: <strong>' + COURIER_PROVIDER_LABELS[shipment.provider] + '</strong></p>'
-            : '<p>Shipped with <strong>' + COURIER_PROVIDER_LABELS[shipment.provider] + '</strong></p>') +
-          '<p>AWB: <strong>' + (shipment.tracking_id ? escapeHtml(shipment.tracking_id) : 'Unavailable') + '</strong></p>' +
-          '<p>Current Status: <strong><span class="badge badge-' + escapeHtml(shipment.normalized_status) + '">' + courierStatusLabel(shipment.normalized_status) + '</span></strong></p>' +
-          (shipment.pickup_status ? '<p>Pickup Status: <strong>' + escapeHtml(statusLabel(shipment.pickup_status)) + '</strong></p>' : '') +
-          // Real Delhivery ETA only — never a guessed "2 days"/"tomorrow". Says so plainly when
-          // the provider hasn't supplied one yet, instead of just omitting the line.
-          '<p>Estimated Delivery: <strong>' + (shipment.estimated_delivery ? formatDate(shipment.estimated_delivery) : 'Not available yet') + '</strong></p>' +
-          (shipment.last_tracking_sync_at ? '<p>Last Updated: <strong>' + formatDateTime(shipment.last_tracking_sync_at) + '</strong></p>' : '') +
-          (isPrePickup
-            ? '<p class="account-payment-note">Your shipment has been created with ' + COURIER_PROVIDER_LABELS[shipment.provider] + '. Pickup will be scheduled soon.</p>'
-            : (latestEvent && latestEvent.description ? '<p>Latest Update: <strong>' + escapeHtml(latestEvent.description) + '</strong></p>' +
-                (latestEvent.event_location ? '<p>Last Scanned At: <strong>' + escapeHtml(friendlyLocation(latestEvent.event_location)) + '</strong></p>' : '')
-              : '')) +
-          (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track with ' + COURIER_PROVIDER_LABELS[shipment.provider] + '</a>' : '');
+      var shippedDone = isCourier ? courierRank >= 1 : orderRank >= 5;
+      var ofdDone = isCourier ? (shipment.normalized_status === 'out_for_delivery' || shipment.normalized_status === 'delivered') : orderRank >= 6;
+      var deliveredDone = isCourier ? shipment.normalized_status === 'delivered' : orderRank >= 7;
+
+      var shippedTime = isCourier ? findEventTime(events, ['picked_up']) : findHistoryTime(o.order_status_history, 'shipped');
+      var ofdTime = isCourier ? findEventTime(events, ['out_for_delivery']) : findHistoryTime(o.order_status_history, 'out_for_delivery');
+      var deliveredTime = isCourier ? findEventTime(events, ['delivered']) : findHistoryTime(o.order_status_history, 'delivered');
+
+      var latestEvent = isCourier ? latestRealEvent(events) : null;
+      // ORDER_STATUS_RANK uses 'packing' as the Admin-facing stage name, but a real
+      // order_status_history row can be logged under either spelling depending on when it was
+      // written — check both, never guess a time.
+      var packedTime = findHistoryTime(o.order_status_history, 'packed') || findHistoryTime(o.order_status_history, 'packing');
+
+      // ---- ETA, prominent, top of card — real provider value only, hidden entirely otherwise ----
+      var etaHtml = '';
+      if (shipment && shipment.estimated_delivery && !deliveredDone) {
+        var etaDate = new Date(shipment.estimated_delivery);
+        var isToday = !isNaN(etaDate) && etaDate.toDateString() === new Date().toDateString();
+        etaHtml = '<div class="tracking-eta"><small>Expected by</small><strong>' + (isToday ? 'Arriving today' : formatDate(shipment.estimated_delivery)) + '</strong></div>';
       }
 
-      // Manual Shipping
-      return shipment.tracking_id
-        ? '<p>Courier Partner: <strong>' + escapeHtml(shipment.courier || '—') + '</strong></p>' +
-          '<p>Tracking ID: <strong>' + escapeHtml(shipment.tracking_id) + '</strong></p>' +
-          (shipment.estimated_delivery ? '<p>Estimated Delivery: <strong>' + formatDate(shipment.estimated_delivery) + '</strong></p>' : '') +
-          (shipment.tracking_url ? '<a class="btn btn-sm btn-outline" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">Track Package</a>' : '')
-        : PREPARING_MESSAGE;
+      function node(label, done, timeVal, bodyHtml) {
+        return '<div class="simple-node' + (done ? ' done' : '') + '">' +
+          '<span class="simple-node-dot">' + (done ? '&#10003;' : '') + '</span>' +
+          '<div class="simple-node-body">' +
+            '<span class="simple-node-label">' + label + '</span>' +
+            (done ? '<span class="simple-node-time">' + (timeVal ? formatDateTime(timeVal) : 'Time unavailable') + '</span>' : '') +
+            (done && bodyHtml ? bodyHtml : '') +
+          '</div>' +
+        '</div>';
+      }
+
+      var shippedBody = '';
+      if (shippedDone) {
+        if (isCourier && latestEvent) {
+          var loc = friendlyLocation(latestEvent.event_location);
+          shippedBody = '<p class="simple-node-update">' + escapeHtml(latestEvent.description || courierStatusLabel(latestEvent.normalized_status)) + (loc ? '<br>' + escapeHtml(loc) : '') + '</p>' +
+            (events.length ? '<button type="button" class="link-btn" id="seeAllUpdatesBtn">See All Updates</button>' : '');
+        } else if (!isCourier && shipment && shipment.courier) {
+          shippedBody = '<p class="simple-node-update">Courier: ' + escapeHtml(shipment.courier) + '</p>';
+        }
+      }
+      var ofdBody = ofdDone && isCourier && latestEvent && latestEvent.normalized_status === 'out_for_delivery'
+        ? '<p class="simple-node-update">' + escapeHtml(latestEvent.description || 'Package is out for delivery.') + '</p>' : '';
+      var deliveredBody = deliveredDone && isCourier && latestEvent && latestEvent.normalized_status === 'delivered' && latestEvent.event_location
+        ? '<p class="simple-node-update">' + escapeHtml(friendlyLocation(latestEvent.event_location)) + '</p>' : '';
+
+      var courierNoteHtml = isCourier && COURIER_PROVIDER_LABELS[shipment.provider]
+        ? '<p class="tracking-courier-note">Delivery partner: ' + COURIER_PROVIDER_LABELS[shipment.provider] + '</p>' : '';
+
+      return '<h4>Order Status</h4>' + etaHtml +
+        '<div class="simple-tracking" id="simpleTrackingRoot">' +
+          node('Ordered', true, o.created_at, '') +
+          (packedTime ? '<div class="simple-subnote">You & Me packed your order<br><span class="simple-node-time">' + formatDateTime(packedTime) + '</span></div>' : '') +
+          node('Shipped', shippedDone, shippedTime, shippedBody) +
+          node('Out for Delivery', ofdDone, ofdTime, ofdBody) +
+          node('Delivered', deliveredDone, deliveredTime, deliveredBody) +
+        '</div>' +
+        courierNoteHtml +
+        (shipment && shipment.tracking_id ? '<p class="tracking-id-line">Tracking ID: <strong>' + escapeHtml(shipment.tracking_id) + '</strong></p>' : '') +
+        '<div class="journey-sheet" id="journeySheet" hidden>' +
+          '<h5>Current Update</h5>' +
+          (latestEvent
+            ? '<p class="journey-current"><strong>' + escapeHtml(latestEvent.description || courierStatusLabel(latestEvent.normalized_status)) + '</strong>' +
+                (latestEvent.event_location ? '<br>' + escapeHtml(friendlyLocation(latestEvent.event_location)) : '') +
+                (latestEvent.event_time ? '<br><span class="journey-node-time">' + formatDateTime(latestEvent.event_time) + '</span>' : '') + '</p>'
+            : '') +
+          transitHistoryHtml(events) +
+          (shipment && shipment.tracking_url ? '<a class="journey-external-link" href="' + escapeHtml(shipment.tracking_url) + '" target="_blank" rel="noopener">View on courier website</a>' : '') +
+        '</div>';
+    }
+
+    function bindSimpleTracking() {
+      var btn = document.getElementById('seeAllUpdatesBtn');
+      var sheet = document.getElementById('journeySheet');
+      if (btn && sheet) btn.addEventListener('click', function () {
+        var willOpen = sheet.hidden;
+        sheet.hidden = !willOpen;
+        btn.textContent = willOpen ? 'Hide Updates' : 'See All Updates';
+        if (willOpen) sheet.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
     }
 
     /* ---- Addresses ---- */

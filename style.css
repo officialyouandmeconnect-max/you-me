@@ -1859,34 +1859,51 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 .success-payment-status { font-size: 0.88rem; }
 .account-payment-note { font-size: 0.76rem; color: var(--color-text-soft); }
 
-.tracking-timeline { display: flex; flex-direction: column; gap: 4px; }
-.tracking-step { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; font-size: 0.84rem; color: var(--color-text-soft); }
-.tracking-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid rgba(64,46,33,0.16); display: flex; align-items: center; justify-content: center; font-size: 0.7rem; flex-shrink: 0; margin-top: 1px; }
-.tracking-step.done { color: var(--color-text); font-weight: 600; }
-.tracking-step.done .tracking-dot { background: var(--color-sage); border-color: var(--color-sage); color: #fff; }
-.tracking-step-body { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-.tracking-step-time { font-size: 0.74rem; font-weight: 400; color: var(--color-text-soft); }
+/* ---------- Simplified 4-stage customer tracking (Ordered / Shipped / Out for Delivery /
+   Delivered) — see simpleTrackingHtml() ---------- */
+.tracking-eta { text-align: center; padding: 10px 12px; margin-bottom: 16px; background: var(--color-cream); border-radius: var(--radius-sm); }
+.tracking-eta small { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-soft); }
+.tracking-eta strong { font-size: 1.05rem; color: var(--color-pink); }
 
-/* A DONE step with real detail becomes a <button> header (see trackingTimelineHtml) — reset it
-   back to plain inline text/layout so it reads identically to the non-clickable <div> version,
-   just with a cursor and a chevron to signal it opens. */
-.tracking-step-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: none; border: none; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; width: 100%; }
-button.tracking-step-header { cursor: pointer; }
-.tracking-step-chevron { flex-shrink: 0; color: var(--color-text-soft); transition: transform 0.2s ease; margin-left: auto; }
-.tracking-step-chevron.open { transform: rotate(180deg); }
-.tracking-step-panel { margin-top: 8px; padding: 10px 12px; background: var(--color-cream); border-radius: var(--radius-sm); max-height: 320px; overflow-y: auto; }
-.tracking-step-panel .transit-event-row { margin-bottom: 12px; }
-.tracking-step-panel .transit-event-row:last-child { margin-bottom: 0; }
+.simple-tracking { display: flex; flex-direction: column; }
+.simple-node { display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; font-size: 0.88rem; color: var(--color-text-soft); position: relative; }
+.simple-node:not(:last-child)::before { content: ''; position: absolute; left: 11px; top: 32px; bottom: -4px; width: 2px; background: rgba(64,46,33,0.12); }
+.simple-node.done:not(:last-child)::before { background: var(--color-sage); }
+.simple-node-dot { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(64,46,33,0.16); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; flex-shrink: 0; background: var(--color-bg); position: relative; z-index: 1; }
+.simple-node.done .simple-node-dot { background: var(--color-sage); border-color: var(--color-sage); color: #fff; }
+.simple-node-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; padding-top: 2px; }
+.simple-node.done { color: var(--color-text); }
+.simple-node-label { font-weight: 700; font-size: 0.92rem; }
+.simple-node-time { font-size: 0.74rem; color: var(--color-text-soft); }
+.simple-node-update { font-size: 0.82rem; color: var(--color-text); margin: 2px 0 0; line-height: 1.4; }
 
-/* ---------- Transit History (full real courier scan list) ---------- */
-.transit-history-list { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(64,46,33,0.08); max-height: 360px; overflow-y: auto; }
-.transit-event-row { display: flex; flex-direction: column; gap: 2px; padding-left: 14px; border-left: 2px solid rgba(64,46,33,0.12); }
-.transit-event-time { font-size: 0.72rem; color: var(--color-text-soft); }
-.transit-event-label { font-size: 0.86rem; color: var(--color-text); }
-.transit-event-location { font-size: 0.78rem; color: var(--color-text-soft); }
-.transit-event-latest { border-left-color: var(--color-pink); }
-.transit-event-latest .transit-event-label { color: var(--color-pink); font-weight: 700; }
-.transit-event-latest-tag { display: inline-block; margin-left: 6px; font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #fff; background: var(--color-pink); border-radius: 999px; padding: 1px 7px; vertical-align: middle; }
+/* Packed — deliberately not its own node/circle (spec: keep the primary progress to just the
+   four stages), just a small indented line between Ordered and Shipped. */
+.simple-subnote { margin: -2px 0 2px 36px; font-size: 0.76rem; color: var(--color-text-soft); line-height: 1.4; }
+
+.tracking-courier-note { font-size: 0.76rem; color: var(--color-text-soft); margin: 10px 0 2px; }
+.tracking-id-line { font-size: 0.78rem; color: var(--color-text-soft); margin: 2px 0 0; }
+.tracking-id-line strong { color: var(--color-text); }
+
+/* "See All Updates" — expands in place (spec allows an expanded section as one of three valid
+   presentations), not a new global modal. */
+.journey-sheet { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(64,46,33,0.08); }
+.journey-sheet h5 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-pink); margin: 0 0 8px; }
+.journey-current { background: var(--color-cream); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 0.86rem; margin: 0 0 16px; line-height: 1.5; }
+.journey-external-link { display: inline-block; margin-top: 14px; font-size: 0.76rem; color: var(--color-text-soft); text-decoration: underline; }
+
+.journey-timeline { display: flex; flex-direction: column; }
+.journey-node { display: flex; align-items: flex-start; gap: 12px; position: relative; padding: 0 0 20px; }
+.journey-node:last-child { padding-bottom: 0; }
+.journey-node:not(:last-child)::before { content: ''; position: absolute; left: 5px; top: 14px; bottom: 0; width: 2px; background: rgba(64,46,33,0.14); }
+.journey-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--color-sage); flex-shrink: 0; margin-top: 3px; position: relative; z-index: 1; }
+.journey-node-latest .journey-dot { background: var(--color-pink); width: 14px; height: 14px; margin-top: 2px; box-shadow: 0 0 0 3px rgba(230,138,152,0.22); }
+.journey-node-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.journey-node-title { font-size: 0.86rem; color: var(--color-text); }
+.journey-node-latest .journey-node-title { color: var(--color-pink); }
+.journey-node-time { font-size: 0.72rem; color: var(--color-text-soft); }
+.journey-node-loc { font-size: 0.78rem; color: var(--color-text-soft); }
+.transit-event-latest-tag { display: inline-block; margin-left: 4px; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #fff; background: var(--color-pink); border-radius: 999px; padding: 1px 7px; vertical-align: middle; }
 
 /* ---- Addresses ---- */
 .address-card { background: var(--color-surface); border-radius: var(--radius-md); box-shadow: var(--shadow-soft); padding: 18px; margin-bottom: 12px; }
