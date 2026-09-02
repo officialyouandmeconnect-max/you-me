@@ -2735,12 +2735,26 @@
           (rows.length !== active.length ? ' (' + (rows.length - active.length) + ' unsubscribed)' : '');
 
         if (!rows.length) { wrap.innerHTML = '<p class="empty-state">No subscribers yet.</p>'; return; }
-        wrap.innerHTML = '<table class="data-table"><thead><tr><th>Email</th><th>Source</th><th>Subscribed</th><th>Status</th></tr></thead><tbody>' +
+        wrap.innerHTML = '<table class="data-table"><thead><tr><th>Email</th><th>Source</th><th>Subscribed</th><th>Status</th><th></th></tr></thead><tbody>' +
           rows.map(function (r) {
             return '<tr><td>' + esc(r.email) + '</td><td>' + esc(r.source || '—') + '</td>' +
               '<td>' + esc(new Date(r.subscribed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })) + '</td>' +
-              '<td>' + (r.unsubscribed_at ? '<span class="badge badge-cancelled">Unsubscribed</span>' : '<span class="badge badge-paid">Active</span>') + '</td></tr>';
+              '<td>' + (r.unsubscribed_at ? '<span class="badge badge-cancelled">Unsubscribed</span>' : '<span class="badge badge-paid">Active</span>') + '</td>' +
+              '<td>' + (r.unsubscribed_at ? '' : '<button type="button" class="btn-ghost btn-sm" data-unsub-newsletter="' + r.id + '">Unsubscribe</button>') + '</td></tr>';
           }).join('') + '</tbody></table>';
+
+        // Manual unsubscribe — for a customer who asks to be removed via WhatsApp/phone rather
+        // than clicking the email link (see unsubscribe-newsletter Edge Function for that path).
+        wrap.querySelectorAll('[data-unsub-newsletter]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            if (!window.confirm('Unsubscribe this email from the newsletter?')) return;
+            supabaseClient.from('newsletter_subscribers').update({ unsubscribed_at: new Date().toISOString() })
+              .eq('id', btn.dataset.unsubNewsletter).then(function (res) {
+                if (res.error) { window.alert(res.error.message); return; }
+                renderNewsletterList();
+              });
+          });
+        });
 
         if (exportBtn) {
           exportBtn.disabled = false;

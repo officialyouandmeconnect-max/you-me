@@ -4416,11 +4416,19 @@
         .then(function (res) {
           // A unique-violation on the case-insensitive email index just means this address is
           // already subscribed — that's a success from the customer's point of view too, not an
-          // error worth surfacing (and never confirms/denies prior subscription either way).
-          if (res.error && res.error.code !== '23505') throw res.error;
+          // error worth surfacing (and never confirms/denies prior subscription either way). No
+          // welcome email on a duplicate either — they already got one the first time.
+          var isDuplicate = res.error && res.error.code === '23505';
+          if (res.error && !isDuplicate) throw res.error;
           feedback.textContent = 'Thanks for subscribing! Welcome to the You & Me family.';
           feedback.style.color = '';
           form.reset();
+          // Fire-and-forget — the subscription itself is already saved regardless of whether
+          // this email actually sends (Gmail SMTP being down/unconfigured never blocks or
+          // reverses a real signup, and the customer never sees this fail even if it does).
+          if (!isDuplicate) {
+            supabaseClient.functions.invoke('send-newsletter-welcome', { body: { email: email } }).catch(function () {});
+          }
         })
         .catch(function () {
           feedback.textContent = 'Could not subscribe right now — please try again.';
