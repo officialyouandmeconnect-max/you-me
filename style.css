@@ -433,7 +433,10 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 /* ---------- 5. Category strip ---------- */
 .category-strip {
   max-width: var(--max-width);
-  margin: -34px auto 0;
+  /* Was -34px (floats the card up into the hero directly above it) — that only worked when
+     this sat immediately after Hero. Shop by Age / Shop by Gender now sit between them, so the
+     negative margin pulled this card up over THEM instead, overlapping their content. */
+  margin: 8px auto 0;
   padding: 0 24px;
   position: relative;
   z-index: 5;
