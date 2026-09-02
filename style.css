@@ -625,6 +625,16 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
 }
 .product-quick-view:hover { transform: scale(1.08); color: var(--color-pink); }
 
+/* Enlarged invisible tap target on touch devices — the visible 30/34px circles stay exactly the
+   same size (unchanged design), but a real finger has a much easier time actually landing on
+   them; below the ~44px minimum recommended touch target, a slightly-off tap can miss the
+   button and land on the product image behind it instead. */
+@media (max-width: 720px) {
+  .wishlist-btn::before, .product-quick-view::before, .product-quick-add::before {
+    content: ''; position: absolute; inset: -8px; border-radius: inherit;
+  }
+}
+
 /* Real-data-only badges — see productBadgeHtml() in script.js. */
 .product-badge {
   position: absolute;
