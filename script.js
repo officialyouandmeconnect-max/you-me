@@ -4908,6 +4908,23 @@
 
   /* ---------- 21. Init ---------- */
   document.addEventListener('DOMContentLoaded', function () {
+    // Landed here from the unsubscribe-newsletter Edge Function's redirect (see that function —
+    // it can't answer the click directly with its own styled page, since Supabase's Edge
+    // Function gateway forces content-type: text/plain on every response regardless of what the
+    // function sets, so it redirects here instead and lets the real site show the result).
+    // Cleaned from the URL immediately so a refresh/share of this link doesn't re-show the toast.
+    var unsubParam = new URLSearchParams(window.location.search).get('unsubscribed');
+    if (unsubParam) {
+      var unsubMessages = {
+        ok: "You're unsubscribed — you won't receive any more emails from You & Me.",
+        not_found: "This unsubscribe link doesn't match any subscription — it may already have been used.",
+        error: "We couldn't process your unsubscribe request right now. Please try again shortly."
+      };
+      window.setTimeout(function () { showToast(unsubMessages[unsubParam] || unsubMessages.error); }, 400);
+      var cleanUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState(null, '', cleanUrl);
+    }
+
     // Chrome that doesn't depend on product data can wire up immediately.
     initGlobalGridEvents();
     initPanelChrome();
