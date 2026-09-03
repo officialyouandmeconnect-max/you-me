@@ -3275,12 +3275,25 @@
     function watchOrderRealtime(orderId, shipmentId, onChange) {
       teardownRealtime();
       var channel = supabaseClient.channel('order-detail-' + orderId)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'shipments', filter: 'order_id=eq.' + orderId }, onChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: 'id=eq.' + orderId }, onChange);
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'shipments', filter: 'order_id=eq.' + orderId }, function (payload) {
+          console.log('[realtime] shipments change', { eventType: payload.eventType, orderId: orderId });
+          onChange();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: 'id=eq.' + orderId }, function (payload) {
+          console.log('[realtime] orders change', { eventType: payload.eventType, orderId: orderId });
+          onChange();
+        });
       if (shipmentId) {
-        channel.on('postgres_changes', { event: '*', schema: 'public', table: 'shipment_events', filter: 'shipment_id=eq.' + shipmentId }, onChange);
+        channel.on('postgres_changes', { event: '*', schema: 'public', table: 'shipment_events', filter: 'shipment_id=eq.' + shipmentId }, function (payload) {
+          console.log('[realtime] shipment_events change', { eventType: payload.eventType, shipmentId: shipmentId });
+          onChange();
+        });
       }
-      channel.subscribe();
+      // Debug visibility per spec — SUBSCRIBED / CHANNEL_ERROR / TIMED_OUT / CLOSED, nothing
+      // customer/order-identifying beyond the order id already in this channel's own name.
+      channel.subscribe(function (status) {
+        console.log('[realtime] channel status', { orderId: orderId, status: status });
+      });
       orderDetailChannel = channel;
     }
 
