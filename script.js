@@ -142,6 +142,14 @@
     return isNaN(d) ? iso : d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
   }
 
+  // Last 4 digits visible, everything before it masked — same convention as the courier's own
+  // "Primary: ••••••6135" display this mirrors.
+  function maskPhone(phone) {
+    var digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length < 4) return digits;
+    return '••••••' + digits.slice(-4);
+  }
+
   function findProduct(id) {
     // Product ids come back from the API as numbers, but every data-* attribute in the DOM
     // (dataset.buyNow, dataset.openProduct, …) is always a string — compare loosely so a
@@ -394,7 +402,7 @@
       btn.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
       btn.setAttribute('aria-pressed', String(!shown));
     });
-    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose', 'shopFilterSheetClose', 'shopSortSheetClose', 'locationSheetClose', 'quickAddSheetClose', 'quickViewSheetClose'].forEach(function (id) {
+    ['productModalClose', 'cartDrawerClose', 'checkoutModalClose', 'successModalClose', 'searchOverlayClose', 'wishlistDrawerClose', 'accountPanelClose', 'infoModalClose', 'addressPickerClose', 'confirmModalClose', 'shopFilterSheetClose', 'shopSortSheetClose', 'locationSheetClose', 'quickAddSheetClose', 'quickViewSheetClose', 'secondaryPhoneSheetClose'].forEach(function (id) {
       var btn = document.getElementById(id);
       if (btn) btn.addEventListener('click', closeTopPanel);
     });
@@ -2873,6 +2881,63 @@
     return { open: open, close: close };
   })();
 
+  // ---------- Add Secondary Delivery Number (order/shipment-scoped) ----------
+  // Real server-side sync attempt via delhivery-secondary-phone Edge Function — see that
+  // function's header for exactly which Delhivery API/fields this uses and which shipment
+  // stages it's actually allowed for. Never claims the courier was updated unless the server
+  // response says so; masks the number back to the customer the same way the primary phone is
+  // already masked elsewhere on this page (never re-displayed in full after saving).
+  var SecondaryPhoneModal = (function () {
+    function panel() { return document.getElementById('secondaryPhoneSheet'); }
+    function body() { return document.getElementById('secondaryPhoneSheetBody'); }
+    var currentOrderId = null;
+    var onSaved = null;
+
+    function open(orderId, afterSave) {
+      currentOrderId = orderId;
+      onSaved = afterSave || null;
+      body().innerHTML =
+        '<div class="form-field"><label for="secondaryPhoneInput">Secondary Mobile Number</label>' +
+          '<input type="tel" id="secondaryPhoneInput" inputmode="numeric" maxlength="10" placeholder="10-digit mobile"></div>' +
+        '<p class="pm-selection-error" id="secondaryPhoneError"></p>' +
+        '<div class="confirm-sheet-actions">' +
+          '<button type="button" class="btn btn-primary" id="secondaryPhoneSubmit">Add Number</button>' +
+          '<button type="button" class="btn btn-outline" id="secondaryPhoneCancel">Cancel</button>' +
+        '</div>';
+      document.getElementById('secondaryPhoneCancel').addEventListener('click', close);
+      document.getElementById('secondaryPhoneSubmit').addEventListener('click', submit);
+      openPanel(panel());
+      window.setTimeout(function () { var el = document.getElementById('secondaryPhoneInput'); if (el) el.focus(); }, 200);
+    }
+    function close() { closePanel(panel()); }
+
+    function submit() {
+      var input = document.getElementById('secondaryPhoneInput');
+      var errorEl = document.getElementById('secondaryPhoneError');
+      var phone = (input.value || '').trim();
+      errorEl.textContent = '';
+      if (!/^[6-9]\d{9}$/.test(phone)) { errorEl.textContent = 'Enter a valid 10-digit Indian mobile number.'; return; }
+
+      var btn = document.getElementById('secondaryPhoneSubmit');
+      btn.disabled = true;
+      var originalText = btn.textContent;
+      btn.textContent = 'Adding…';
+      callEdgeFunction('delhivery-secondary-phone', { order_id: currentOrderId, phone: phone })
+        .then(function (res) {
+          close();
+          showToast(res.synced ? 'Secondary number added. Delivery partner updated. ♡' : (res.message || 'Secondary number saved.'));
+          if (onSaved) onSaved();
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.textContent = originalText;
+          errorEl.textContent = err.message || 'Could not add this number right now — please try again.';
+        });
+    }
+
+    return { open: open, close: close };
+  })();
+
   /* ---------- 18d. Delivery Location (header "Deliver to" + serviceability check) ----------
      One normalized customer-facing result, no matter how many courier providers exist behind
      it (today: Delhivery + Shiprocket; a future DTDC would just be one more entry the
@@ -3191,8 +3256,33 @@
   var AccountDashboard = (function () {
     var currentTab = 'overview';
     var ordersCache = null; // reloaded once per dashboard visit, invalidated on tab re-entry
+    var orderDetailChannel = null; // the one live Realtime subscription for whichever order detail page is currently open
 
     function content() { return document.getElementById('accountDashContent'); }
+
+    // Order-detail Realtime (spec: no manual refresh needed to see a courier status change).
+    // RLS on shipments/shipment_events already scopes every row to `orders.created_by =
+    // auth.uid()` (see 0002_customer_accounts.sql / 0003_shipping_providers.sql) — Realtime
+    // enforces the exact same policies on every change event, so this can never receive another
+    // customer's shipment data even though it isn't filtered by shipment_id at the subscribe
+    // call (Realtime's postgres_changes filter only supports simple equality on an already-known
+    // value, and shipment_id is the row we're watching for — RLS is the real boundary here, not
+    // the filter). One channel at a time — a stale one is always torn down before a new order
+    // detail page opens, and when the whole Account Dashboard is left.
+    function teardownRealtime() {
+      if (orderDetailChannel) { supabaseClient.removeChannel(orderDetailChannel); orderDetailChannel = null; }
+    }
+    function watchOrderRealtime(orderId, shipmentId, onChange) {
+      teardownRealtime();
+      var channel = supabaseClient.channel('order-detail-' + orderId)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'shipments', filter: 'order_id=eq.' + orderId }, onChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: 'id=eq.' + orderId }, onChange);
+      if (shipmentId) {
+        channel.on('postgres_changes', { event: '*', schema: 'public', table: 'shipment_events', filter: 'shipment_id=eq.' + shipmentId }, onChange);
+      }
+      channel.subscribe();
+      orderDetailChannel = channel;
+    }
 
     function setActiveNav(tab) {
       document.querySelectorAll('.account-nav-item[data-tab]').forEach(function (a) {
@@ -3201,6 +3291,7 @@
     }
 
     function render(tab) {
+      teardownRealtime(); // leaving order detail (if that's where we were) — stop watching it
       currentTab = tab || currentTab || 'overview';
       setActiveNav(currentTab);
       var c = content();
@@ -3644,8 +3735,10 @@
       setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
     }
 
-    function renderOrderDetail(id) {
-      content().innerHTML = '<p class="account-dash-loading">Loading order…</p>';
+    // `silent`: true on a Realtime-triggered re-render — skips the loading flash so a courier
+    // status change updates in place instead of visibly resetting the page.
+    function renderOrderDetail(id, silent) {
+      if (!silent) content().innerHTML = '<p class="account-dash-loading">Loading order…</p>';
       // shipment_events is fetched separately (not nested in this select) so that an older
       // database schema without it yet (migration 0003 not applied) degrades to "no tracking
       // events" instead of breaking the entire order page — see the .catch below.
@@ -3693,6 +3786,7 @@
               '<p>' + escapeHtml(o.customer_name) + '<br>' + escapeHtml(o.house) + ', ' + escapeHtml(o.street) + (o.landmark ? ' (near ' + escapeHtml(o.landmark) + ')' : '') +
               '<br>' + escapeHtml(o.city) + ', ' + escapeHtml(o.state) + ' — ' + escapeHtml(o.pincode) + '<br>Phone: ' + escapeHtml(o.phone) + '</p>' +
             '</div>' +
+            deliveryContactCardHtml(o, shipment) +
             '<div class="panel-card"><h4>Order Summary</h4>' +
               '<div class="cart-totals-row"><span>Subtotal</span><span>' + formatPrice(o.subtotal) + '</span></div>' +
               '<div class="cart-totals-row"><span>Delivery</span><span>' + (o.delivery_charge === 0 ? 'Free' : formatPrice(o.delivery_charge)) + '</span></div>' +
@@ -3733,6 +3827,18 @@
           if (back) back.addEventListener('click', function () { render('orders'); });
 
           bindSimpleTracking(o, shipment);
+          bindDeliveryContact(o.id);
+
+          // Realtime (spec #11/#14/#20): live while this order can still change — skipped once
+          // the order/shipment has reached a real terminal state, since nothing left to watch
+          // for. delivery_failed is NOT terminal — a courier can still re-attempt delivery.
+          var TERMINAL_SHIPMENT_STATES = ['delivered', 'returned', 'cancelled'];
+          var isTerminal = o.order_status === 'cancelled' || (shipment && TERMINAL_SHIPMENT_STATES.indexOf(shipment.normalized_status) !== -1);
+          if (!isTerminal) {
+            watchOrderRealtime(o.id, shipment ? shipment.id : null, function () { renderOrderDetail(id, true); });
+          } else {
+            teardownRealtime();
+          }
 
           var removeBtn = document.getElementById('removeOrderDetailBtn');
           if (removeBtn) removeBtn.addEventListener('click', function () {
@@ -3874,10 +3980,16 @@
 
       // Three real states (spec #2) — done (past, soft green), current (the most recently
       // reached stage, brand pink), future (not yet reached, muted). No checkmark icon.
+      //
+      // BUG FIX: currentKey used to be "whichever milestone was most recently reached" with no
+      // exception for the terminal state — once delivered, THAT was "most recently reached", so
+      // Delivered kept the pink .current treatment forever instead of turning green like every
+      // other completed milestone. A delivered shipment has nothing left "in progress"; only an
+      // active, non-terminal shipment has a real "current" stage at all.
       var doneFlags = { ordered: true, shipped: shippedDone, out_for_delivery: ofdDone, delivered: deliveredDone };
       var order = ['ordered', 'shipped', 'out_for_delivery', 'delivered'];
       var currentKey = null;
-      order.forEach(function (k) { if (doneFlags[k]) currentKey = k; });
+      if (!deliveredDone) order.forEach(function (k) { if (doneFlags[k]) currentKey = k; });
 
       function node(key, label, timeVal, bodyHtml) {
         var isDone = doneFlags[key];
@@ -3927,6 +4039,30 @@
         var willOpen = inline.hidden;
         inline.hidden = !willOpen;
         btn.textContent = willOpen ? 'Hide updates' : 'See all updates';
+      });
+    }
+
+    // ---- Delivery Contact (secondary number) — only for a live Delhivery shipment that hasn't
+    // reached a final state; see delhivery-secondary-phone Edge Function for the real
+    // sync/stage-eligibility rules. Never shown for any other courier (nothing to sync it to) or
+    // once delivered/returned/cancelled (nothing left to add a contact for). ----------
+    var TERMINAL_SHIPMENT_STATES_CUSTOMER = ['delivered', 'returned', 'cancelled'];
+    function deliveryContactCardHtml(o, shipment) {
+      if (!shipment || shipment.provider !== 'delhivery') return '';
+      if (TERMINAL_SHIPMENT_STATES_CUSTOMER.indexOf(shipment.normalized_status) !== -1) return '';
+      return '<div class="panel-card" id="deliveryContactCard"><h4>Delivery Contact</h4>' +
+        '<p class="account-payment-note">Primary: ' + escapeHtml(maskPhone(o.phone)) + '</p>' +
+        (shipment.secondary_delivery_phone
+          ? '<p class="account-payment-note">Secondary: ' + escapeHtml(maskPhone(shipment.secondary_delivery_phone)) +
+              (shipment.secondary_phone_provider_sync_status === 'synced' ? ' <span class="badge badge-paid">Delivery partner updated</span>'
+                : shipment.secondary_phone_provider_sync_status ? ' <span class="badge badge-cancelled">Not updated with delivery partner</span>' : '') + '</p>'
+          : '<button type="button" class="btn btn-outline btn-sm" id="addSecondaryNumberBtn">+ Add Secondary Number</button>') +
+      '</div>';
+    }
+    function bindDeliveryContact(orderId) {
+      var btn = document.getElementById('addSecondaryNumberBtn');
+      if (btn) btn.addEventListener('click', function () {
+        SecondaryPhoneModal.open(orderId, function () { renderOrderDetail(orderId, true); });
       });
     }
 
@@ -4235,7 +4371,7 @@
       else render('overview');
     }
 
-    return { init: init, render: render, enter: enter };
+    return { init: init, render: render, enter: enter, teardownRealtime: teardownRealtime };
   })();
 
   function showAccountDashboardView() {
@@ -4245,6 +4381,7 @@
     window.scrollTo(0, 0);
   }
   function hideAccountDashboardView() {
+    AccountDashboard.teardownRealtime(); // leaving the whole dashboard — never leave a live order-detail channel open
     var dash = document.getElementById('viewAccountDashboard');
     if (dash) dash.hidden = true;
     // Falls back to Home specifically (never leaves gallery/comingSoon in whatever stale hidden

@@ -696,6 +696,17 @@
   <div class="confirm-sheet-body" id="confirmModalBody"><!-- injected --></div>
 </div>
 
+<!-- Add Secondary Delivery Number — order/shipment-scoped, see delhivery-secondary-phone Edge
+     Function. Same .panel/.confirm-sheet bottom-sheet(mobile)/centered-modal(desktop) infra as
+     Confirm Modal above. -->
+<div class="panel confirm-sheet" id="secondaryPhoneSheet" role="dialog" aria-modal="true" aria-labelledby="secondaryPhoneSheetTitle" hidden>
+  <div class="address-picker-header">
+    <h2 id="secondaryPhoneSheetTitle">Add Secondary Number</h2>
+    <button class="panel-close" id="secondaryPhoneSheetClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="confirm-sheet-body" id="secondaryPhoneSheetBody"><!-- injected --></div>
+</div>
+
 <!-- Payment Result (Cashfree redirects the customer back here after checkout) -->
 <div class="panel success-modal payment-result-modal" id="paymentResultModal" role="dialog" aria-modal="true" aria-labelledby="paymentResultTitle" hidden>
   <button class="panel-close" id="paymentResultClose" aria-label="Close">&times;</button>
@@ -758,6 +769,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260903m"></script>
+<script src="script.js?v=20260903n"></script>
 </body>
 </html>
