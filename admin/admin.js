@@ -410,6 +410,23 @@
       createShiprocket: function (orderId, paymentType, pkg, courierId) {
         return callEdgeFunction('shiprocket-shipping', { action: 'create', orderId: orderId, paymentType: paymentType, package: pkg, courierId: courierId });
       },
+      // Same pattern again — every one of these goes through the fship-shipping Edge Function,
+      // never a direct table write, never fabricated data. checkFshipServiceability is included
+      // for symmetry with the other providers but currently always resolves to
+      // { checked: false } — Fship has no confirmed pincode-serviceability endpoint yet (see
+      // supabase/functions/_shared/fship.ts header) — never fabricated as available/unavailable.
+      checkFshipServiceability: function () {
+        return callEdgeFunction('fship-shipping', { action: 'check-serviceability' });
+      },
+      createFship: function (orderId, paymentType, pkg, serviceType, handOverMode) {
+        return callEdgeFunction('fship-shipping', { action: 'create', orderId: orderId, paymentType: paymentType, package: pkg, serviceType: serviceType, handOverMode: handOverMode });
+      },
+      syncFship: function (shipmentId) {
+        return callEdgeFunction('fship-shipping', { action: 'sync', shipmentId: shipmentId });
+      },
+      cancelFship: function (shipmentId) {
+        return callEdgeFunction('fship-shipping', { action: 'cancel', shipmentId: shipmentId });
+      },
       generateLabelShiprocket: function (shipmentId) {
         return callEdgeFunction('shiprocket-shipping', { action: 'generate-label', shipmentId: shipmentId });
       },
@@ -1368,7 +1385,7 @@
         (invoice.payment_reference ? '<br>Reference: ' + esc(invoice.payment_reference) : '') +
       '</div>' +
       (shipment && shipment.provider ? '<h2 class="section">Shipping</h2>' +
-        '<div style="font-size:0.9rem;">Shipping Partner: ' + esc(shipment.provider === 'delhivery' ? 'Delhivery' : shipment.provider === 'shiprocket' ? 'Shiprocket' : shipment.provider === 'amazon_shipping' ? 'Amazon Shipping' : shipment.provider) +
+        '<div style="font-size:0.9rem;">Shipping Partner: ' + esc(shipment.provider === 'delhivery' ? 'Delhivery' : shipment.provider === 'shiprocket' ? 'Shiprocket' : shipment.provider === 'fship' ? 'Fship' : shipment.provider === 'amazon_shipping' ? 'Amazon Shipping' : shipment.provider) +
         (shipment.tracking_id ? '<br>Tracking / AWB: ' + esc(shipment.tracking_id) : '') +
         '</div>' : '') +
       '<div class="inv-footer">This is a system-generated invoice for a You &amp; Me order.</div>' +
@@ -1393,7 +1410,7 @@
     shiprocketServiceability = null;
     shiprocketServiceabilityError = null;
     shiprocketSelectedCourierId = null;
-    dropdownAvailability = { delhivery: null, shiprocket: null };
+    dropdownAvailability = { delhivery: null, shiprocket: null, fship: null };
     AdminAPI.orders.get(id).then(function (o) {
       Promise.all([
         AdminAPI.shipments.get(o.id).catch(function () { return null; }),
@@ -1403,13 +1420,13 @@
         o.shipment = shipment || o.shipment;
         // Any provider with its own real automatic tracking (Delhivery, Shiprocket — not Custom
         // Delivery, which stays fully admin-managed) takes over order_status from here.
-        var COURIER_TRACKED_PROVIDERS = ['delhivery', 'shiprocket'];
+        var COURIER_TRACKED_PROVIDERS = ['delhivery', 'shiprocket', 'fship'];
         var isDelhiveryConfirmed = !!(o.shipment && COURIER_TRACKED_PROVIDERS.indexOf(o.shipment.provider) !== -1 && o.shipment.provider_shipment_id);
         var orderStatusOptions = isDelhiveryConfirmed ? INTERNAL_ORDER_STATUSES : ORDER_STATUSES;
         // True once the courier's own sync has already advanced order_status past the
         // admin-owned prep stages — at that point there's nothing left here for Admin to set.
         var courierLocked = isDelhiveryConfirmed && INTERNAL_ORDER_STATUSES.indexOf(o.orderStatus) === -1;
-        var courierProviderLabel = o.shipment && o.shipment.provider === 'shiprocket' ? 'Shiprocket' : 'Delhivery';
+        var courierProviderLabel = o.shipment && o.shipment.provider === 'shiprocket' ? 'Shiprocket' : o.shipment && o.shipment.provider === 'fship' ? 'Fship' : 'Delhivery';
         content().innerHTML =
           '<div class="section-heading-row"><h3 style="font-size:1.1rem;">Order ' + esc(o.orderNumber) + '</h3>' +
             '<a href="' + BASE_PATH + '/admin/orders" class="btn-ghost btn-sm">← Back to Orders</a></div>' +
@@ -1523,7 +1540,7 @@
   // configured providers instead of one at a time on click.
   function autoCheckProviderAvailability(o) {
     if (o.shipment && o.shipment.provider_shipment_id) return; // already shipped with a real provider — nothing to recommend
-    dropdownAvailability = { delhivery: 'checking', shiprocket: 'checking' };
+    dropdownAvailability = { delhivery: 'checking', shiprocket: 'checking', fship: 'checking' };
     AdminAPI.shipments.checkDelhiveryServiceability(o.address.pincode)
       .then(function (res) { dropdownAvailability.delhivery = !!res.serviceable; })
       .catch(function () { dropdownAvailability.delhivery = undefined; }) // couldn't check — not the same as unavailable, so never labeled/disabled
@@ -1531,6 +1548,16 @@
     AdminAPI.shipments.checkShiprocketServiceability(o.address.pincode, 0.5, o.paymentStatus !== 'paid')
       .then(function (res) { dropdownAvailability.shiprocket = !!res.serviceable; })
       .catch(function () { dropdownAvailability.shiprocket = undefined; })
+      .then(function () { refreshShippingCard(o); });
+    // Fship's checkFshipServiceability always resolves { checked: false } for now (see
+    // supabase/functions/_shared/fship.ts header — no confirmed serviceability endpoint yet), so
+    // this always lands on `undefined` here too: never labeled "Available"/"Not Available", never
+    // disabled in the dropdown, never recommended over a real provider result. Wired up now so
+    // the moment Fship confirms a real endpoint and check-delivery/fship-shipping are updated to
+    // use it, this starts working with no further Admin UI change needed.
+    AdminAPI.shipments.checkFshipServiceability()
+      .then(function (res) { dropdownAvailability.fship = res && res.checked ? !!res.serviceable : undefined; })
+      .catch(function () { dropdownAvailability.fship = undefined; })
       .then(function () { refreshShippingCard(o); });
   }
 
@@ -1552,7 +1579,7 @@
   // and recommend one instead of leaving Admin to click "Check Serviceability" per provider one
   // at a time and discover a rejection only after selecting it.
   // null = not checked yet, 'checking' = in flight, true/false = real result, undefined = provider not configured (never shown as unavailable — just not labeled).
-  var dropdownAvailability = { delhivery: null, shiprocket: null };
+  var dropdownAvailability = { delhivery: null, shiprocket: null, fship: null };
   // Same wording as the customer-facing COURIER_STATUS_LABELS in script.js — Admin and the
   // customer should describe the exact same Delhivery-reported state identically.
   var NORMALIZED_STATUS_LABELS = {
@@ -1560,7 +1587,7 @@
     in_transit: 'In Transit', out_for_delivery: 'Out for Delivery', delivered: 'Delivered',
     delivery_failed: 'Delivery Attempt Failed', returned: 'Return to Origin', cancelled: 'Cancelled'
   };
-  var PROVIDER_LABELS = { manual: 'Custom Delivery', amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery', shiprocket: 'Shiprocket' };
+  var PROVIDER_LABELS = { manual: 'Custom Delivery', amazon_shipping: 'Amazon Shipping', delhivery: 'Delhivery', shiprocket: 'Shiprocket', fship: 'Fship' };
 
   // Most recent real scan's own location field — "last known location" (not GPS, a courier scan
   // point). `events` is already sorted newest-first by the caller. Never falls back to anything
@@ -1595,11 +1622,14 @@
     var section = provider === 'amazon_shipping' ? renderAmazonSection(o, s)
       : provider === 'delhivery' ? renderDelhiverySection(o, s)
       : provider === 'shiprocket' ? renderShiprocketSection(o, s)
+      : provider === 'fship' ? renderFshipSection(o, s)
       : renderManualSection(s);
 
     // Recommended-provider hint — only while still choosing (no confirmed shipment yet), both
     // checks have actually finished, and the customer's own delivery PIN really does distinguish
-    // them (one real yes, the other a real no) rather than both agreeing or still unknown.
+    // them (one real yes, the other a real no) rather than both agreeing or still unknown. Fship
+    // never contributes here — dropdownAvailability.fship is always undefined until Fship
+    // confirms a real serviceability endpoint (see autoCheckProviderAvailability above).
     var recommendedHtml = '';
     if (!(s && s.provider_shipment_id)) {
       var dAvail = dropdownAvailability.delhivery, sAvail = dropdownAvailability.shiprocket;
@@ -1615,6 +1645,7 @@
           '<option value="manual"' + (provider === 'manual' ? ' selected' : '') + '>Custom Delivery</option>' +
           '<option value="delhivery"' + (provider === 'delhivery' ? ' selected' : '') + (providerOptionDisabled('delhivery', s) ? ' disabled' : '') + '>' + esc(providerOptionLabel('Delhivery', 'delhivery', s)) + '</option>' +
           '<option value="shiprocket"' + (provider === 'shiprocket' ? ' selected' : '') + (providerOptionDisabled('shiprocket', s) ? ' disabled' : '') + '>' + esc(providerOptionLabel('Shiprocket', 'shiprocket', s)) + '</option>' +
+          '<option value="fship"' + (provider === 'fship' ? ' selected' : '') + (providerOptionDisabled('fship', s) ? ' disabled' : '') + '>' + esc(providerOptionLabel('Fship', 'fship', s)) + '</option>' +
           (s && s.provider === 'amazon_shipping' ? '<option value="amazon_shipping" selected>Amazon Shipping</option>' : '') +
         '</select></div>' +
       recommendedHtml +
@@ -1860,6 +1891,70 @@
       '<button type="button" class="btn-primary btn-sm" id="srCreateBtn">Create Shiprocket Shipment</button>';
   }
 
+  function renderFshipSection(o, s) {
+    var isFship = s && s.provider === 'fship';
+    var errorBox = function (message) {
+      return '<div class="shipping-error-box"><strong>Fship Shipment Could Not Be Created</strong>' +
+        '<p>Reason: ' + esc(message) + '</p><button type="button" class="btn-secondary btn-sm" id="fsRetryBtn">Try Again</button></div>';
+    };
+
+    if (isFship && s.provider_shipment_id) {
+      var events = (s.shipment_events || []).slice().sort(function (a, b) { return new Date(b.event_time || b.created_at) - new Date(a.event_time || a.created_at); });
+      var terminal = ['delivered', 'cancelled', 'returned'].indexOf(s.normalized_status) !== -1;
+      return '<div class="amazon-shipping-card">' +
+          '<div class="amazon-shipping-head"><strong>FSHIP STATUS</strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></div>' +
+          '<p class="amazon-shipping-hint" style="margin-top:-4px;">Synced automatically from Fship — never manually set.</p>' +
+          '<div class="amazon-shipping-grid">' +
+            '<div><span>Waybill / AWB</span><strong>' + (s.tracking_id ? esc(s.tracking_id) : 'Unavailable') + '</strong></div>' +
+            '<div><span>Current Status</span><strong><span class="badge badge-' + esc(s.normalized_status) + '">' + esc(NORMALIZED_STATUS_LABELS[s.normalized_status] || s.normalized_status) + '</span></strong></div>' +
+            '<div><span>Raw Provider Status</span><strong>' + (s.status ? esc(s.status) : '—') + '</strong></div>' +
+          '</div>' +
+          (s.last_tracking_sync_at ? '<p class="amazon-sync-note">Last synced ' + fmtDate(s.last_tracking_sync_at) + ' · Last known location: ' + (lastKnownLocation(events) ? esc(lastKnownLocation(events)) : 'Unavailable') + '</p>' : '') +
+          '<div class="amazon-shipping-actions">' +
+            '<button type="button" class="btn-secondary btn-sm" id="fsRefreshBtn">Refresh Tracking</button>' +
+            (terminal ? '' : '<button type="button" class="btn-danger btn-sm" id="fsCancelBtn">Cancel Shipment</button>') +
+          '</div>' +
+          (s.last_error ? '<p class="shipping-error-inline">Last sync error: ' + esc(s.last_error) + '</p>' : '') +
+          '<div class="tracking-events"><h4>Tracking History</h4>' +
+          (events.length ? events.map(function (e) {
+            return '<div class="tracking-event-row"><strong>' + esc(NORMALIZED_STATUS_LABELS[e.normalized_status] || e.normalized_status || e.provider_status || '—') + '</strong>' +
+              '<span>' + (e.event_time ? fmtDate(e.event_time) : '') + (e.event_location ? ' · ' + esc(e.event_location) : '') + '</span>' +
+              (e.description ? '<p>' + esc(e.description) + '</p>' : '') + '</div>';
+          }).join('') : '<p class="amazon-shipping-hint">No courier scans available yet.</p>') +
+          '</div>' +
+        '</div>';
+    }
+
+    // Fship has no confirmed rate-calculator or courier-list endpoint yet (see
+    // supabase/functions/_shared/fship.ts header) — unlike Shiprocket, there is no
+    // "check first, pick a courier" step here; this creates the shipment directly with Fship's
+    // own courier allocation, same as Delhivery's flow.
+    return '<p class="amazon-shipping-hint">Fship rate/courier-list lookup is not yet available (no confirmed API endpoint) — this creates the shipment directly; Fship allocates the courier.</p>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Service Type</label><select id="fsServiceType">' +
+          '<option value="Surface">Surface</option><option value="Air">Air</option>' +
+        '</select></div>' +
+        '<div class="form-field"><label>Hand-over Mode</label><select id="fsHandOverMode">' +
+          '<option value="Pickup">Pickup</option><option value="Drop">Drop</option>' +
+        '</select></div>' +
+      '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Package Weight (kg)</label><input type="number" step="0.01" id="fsWeight" value="0.5"></div>' +
+        '<div class="form-field"><label>Length (cm)</label><input type="number" id="fsLength" value="10"></div>' +
+      '</div>' +
+      '<div class="form-row">' +
+        '<div class="form-field"><label>Width (cm)</label><input type="number" id="fsWidth" value="10"></div>' +
+        '<div class="form-field"><label>Height (cm)</label><input type="number" id="fsHeight" value="10"></div>' +
+      '</div>' +
+      '<div class="form-field"><label>Payment Type</label><select id="fsPaymentType">' +
+        '<option value="prepaid"' + (o.paymentStatus === 'paid' ? ' selected' : '') + '>Prepaid</option>' +
+        '<option value="cod"' + (o.paymentStatus !== 'paid' ? ' selected' : '') + '>COD</option>' +
+      '</select></div>' +
+      '<p class="amazon-shipping-hint">Customer name, phone, address, and order value are loaded automatically from this order. Requires a complete pickup address in Admin → Settings.</p>' +
+      (shippingCreateError ? errorBox(shippingCreateError) : '') +
+      '<button type="button" class="btn-primary btn-sm" id="fsCreateBtn">Create Fship Shipment</button>';
+  }
+
   function refreshShippingCard(o) {
     var el = document.getElementById('shippingCardWrap');
     if (el) el.outerHTML = renderShippingCard(o);
@@ -2051,6 +2146,43 @@
     if (srCancelBtn) srCancelBtn.addEventListener('click', function () {
       if (!window.confirm('Cancel this Shiprocket shipment? This cannot be undone.')) return;
       AdminAPI.shipments.cancelShiprocket(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not cancel shipment: ' + err.message); });
+    });
+
+    // ---- Fship ----
+    var fsCreateBtn = document.getElementById('fsCreateBtn');
+    if (fsCreateBtn) fsCreateBtn.addEventListener('click', function () {
+      var pkg = {
+        weightKg: Number(document.getElementById('fsWeight').value),
+        lengthCm: Number(document.getElementById('fsLength').value),
+        widthCm: Number(document.getElementById('fsWidth').value),
+        heightCm: Number(document.getElementById('fsHeight').value)
+      };
+      if (!pkg.weightKg || !pkg.lengthCm || !pkg.widthCm || !pkg.heightCm) {
+        shippingCreateError = 'Package weight and all three dimensions are required.';
+        refreshShippingCard(o); return;
+      }
+      var serviceType = document.getElementById('fsServiceType').value;
+      var handOverMode = document.getElementById('fsHandOverMode').value;
+      fsCreateBtn.disabled = true; fsCreateBtn.textContent = 'Creating…';
+      AdminAPI.shipments.createFship(o.id, document.getElementById('fsPaymentType').value, pkg, serviceType, handOverMode)
+        .then(function () { shippingCreateError = null; shippingProviderChoice = null; renderOrderDetail(o.id); })
+        .catch(function (err) { shippingCreateError = err.message; refreshShippingCard(o); });
+    });
+    var fsRetryBtn = document.getElementById('fsRetryBtn');
+    if (fsRetryBtn) fsRetryBtn.addEventListener('click', function () { shippingCreateError = null; refreshShippingCard(o); });
+    var fsRefreshBtn = document.getElementById('fsRefreshBtn');
+    if (fsRefreshBtn) fsRefreshBtn.addEventListener('click', function () {
+      fsRefreshBtn.disabled = true; fsRefreshBtn.textContent = 'Refreshing…';
+      AdminAPI.shipments.syncFship(o.shipment.id)
+        .then(function () { renderOrderDetail(o.id); })
+        .catch(function (err) { window.alert('Could not refresh tracking: ' + err.message); fsRefreshBtn.disabled = false; fsRefreshBtn.textContent = 'Refresh Tracking'; });
+    });
+    var fsCancelBtn = document.getElementById('fsCancelBtn');
+    if (fsCancelBtn) fsCancelBtn.addEventListener('click', function () {
+      if (!window.confirm('Cancel this Fship shipment? This cannot be undone.')) return;
+      AdminAPI.shipments.cancelFship(o.shipment.id)
         .then(function () { renderOrderDetail(o.id); })
         .catch(function (err) { window.alert('Could not cancel shipment: ' + err.message); });
     });
