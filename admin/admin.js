@@ -366,13 +366,22 @@
       // this; every one of their fields comes from the amazon-shipping Edge Function instead
       // (see AdminAPI.shipments.createAmazon / syncAmazon / cancelAmazon below).
       saveManual: function (orderId, payload) {
+        // .select().single() so the caller gets the real row back (its id, specifically) — needed
+        // to generate the Custom Delivery label id right after a save (see ensureCustomDeliveryId
+        // below), without a second round trip to look the shipment back up.
         return supabaseClient.from('shipments').upsert({
           order_id: orderId, provider: 'manual',
           courier: payload.courier || null, tracking_id: payload.trackingId || null, tracking_url: payload.trackingUrl || null,
           status: payload.courier ? 'Manual — ' + payload.courier : null, normalized_status: 'shipment_created',
           shipping_cost: payload.shippingCost, pickup_date: payload.pickupDate, estimated_delivery: payload.estimatedDelivery,
           updated_at: new Date().toISOString()
-        }, { onConflict: 'order_id' }).then(throwIfError);
+        }, { onConflict: 'order_id' }).select().single().then(function (res) { throwIfError(res); return res.data; });
+      },
+      // Generates (or, if already set, just returns) the Custom Delivery shipping-label id —
+      // real, stable, DB-generated, never re-rolled on refresh. See
+      // supabase/migrations/0027_custom_delivery_label.sql.
+      ensureCustomDeliveryId: function (shipmentId) {
+        return supabaseClient.rpc('ensure_custom_delivery_id', { p_shipment_id: shipmentId }).then(function (res) { throwIfError(res); return res.data; });
       },
       // These three all go through the amazon-shipping Edge Function — never a direct table
       // write from the browser, and never anything that could fabricate Amazon data locally.
@@ -1401,6 +1410,171 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
   }
 
+  // ---------- Custom Delivery shipping label ----------
+  // Custom Delivery ("manual" provider) ONLY — never touches Delhivery/Shiprocket/Fship label
+  // generation. Reference layout: an actual Delhivery label this store already generated
+  // (same structure — logo left / provider name right, primary barcode, Ship To + payment box,
+  // Seller + Date box, product table, second barcode, Return Address) — with "CUSTOM DELIVERY" in
+  // place of any courier name/logo, and the courier AWB barcode replaced by the real
+  // custom_delivery_id (never a fabricated AWB).
+  //
+  // One canonical builder for Preview/Print/Download PDF (spec: "all three must render from the
+  // SAME canonical label component") — see openCustomDeliveryLabel() below, which just varies
+  // whether window.print() auto-fires, exactly like the existing Invoice View/Download precedent.
+  function customDeliveryLogoHtml() {
+    var logoImg = document.querySelector('.sidebar-logo-img');
+    var src = logoImg && logoImg.src;
+    // Real official asset only — never redrawn/recolored. If it somehow isn't loaded yet, fall
+    // back to plain text rather than fabricating a logo.
+    return src ? '<img class="cl-logo" src="' + src + '" alt="You & Me">' : '<strong style="font-size:1.1rem;">YOU &amp; ME</strong>';
+  }
+
+  function buildCustomDeliveryLabelHtml(o, s, autoPrint) {
+    var addrLine2 = [o.address.house, o.address.street].filter(Boolean).join(', ') + (o.address.landmark ? ' (near ' + o.address.landmark + ')' : '');
+    var addrLine3 = [o.address.city, o.address.state].filter(Boolean).join(', ');
+
+    var seller = shipSettingsCache || {}; // populated by ensureShipSettingsLoaded() before this is ever called
+    var sellerAddr = [seller.pickup_line1, seller.pickup_line2].filter(Boolean).join(', ');
+    var sellerCityLine = [seller.pickup_city, seller.pickup_state, seller.pickup_pincode].filter(Boolean).join(', ');
+    // No GST registration exists for this store (same real fact the Invoice already encodes —
+    // supabase/migrations/0006_invoices.sql: tax_amount is always 0) — never invent a GSTIN, so
+    // this line is simply omitted rather than shown with a fabricated/placeholder value.
+
+    // Real payment-mode mapping, not an invented COD flag: payment_status === 'paid' means the
+    // order is genuinely already paid (Cashfree) — Prepaid. Anything else means real money is
+    // still owed, to be collected at delivery for this manually-fulfilled order — Custom
+    // Delivery's own real equivalent of "COD" (there is no separate stored COD flag in this
+    // schema; this derives from the same real payment_status every other Admin screen already
+    // shows, not a fabricated field).
+    var isPaid = o.paymentStatus === 'paid';
+
+    var itemRows = o.items.map(function (it) {
+      return '<tr><td>' + esc(it.name) + (it.size || it.color ? ' <span class="cl-item-meta">(' + [it.size, it.color].filter(Boolean).map(esc).join(', ') + ')</span>' : '') + '</td>' +
+        '<td class="num">' + it.quantity + '</td>' +
+        '<td class="num">' + fmtPrice(it.unitPrice) + '</td>' +
+        '<td class="num">' + fmtPrice(it.totalPrice) + '</td></tr>';
+    }).join('');
+
+    var now = new Date();
+    var labelDate = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
+    var labelTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+
+    var titleSafe = 'You-and-Me-Custom-Delivery-Label-' + o.orderNumber.replace(/\s+/g, '-');
+
+    return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(titleSafe) + '</title>' +
+      // JsBarcode — the only external library this label needs, loaded the same way
+      // supabase-js already is in this project (a pinned CDN <script>, see admin/index.html).
+      '<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>' +
+      '<style>' +
+      '*{box-sizing:border-box;}' +
+      'body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;padding:24px;background:#f2f2f2;display:flex;justify-content:center;}' +
+      '.cl-label{width:4in;min-height:6in;background:#fff;border:1.5px solid #000;}' +
+      '.cl-head{display:flex;border-bottom:1.5px solid #000;}' +
+      '.cl-head > div{flex:1;padding:10px;display:flex;align-items:center;justify-content:center;}' +
+      '.cl-head > div:first-child{border-right:1.5px solid #000;}' +
+      '.cl-logo{max-height:44px;max-width:200px;object-fit:contain;}' +
+      '.cl-provider{font-size:1.15rem;font-weight:800;letter-spacing:0.03em;}' +
+      '.cl-barcode-block{text-align:center;border-bottom:1.5px solid #000;padding:8px 0 6px;}' +
+      '.cl-barcode-block svg{max-width:90%;}' +
+      '.cl-barcode-id{font-size:0.8rem;font-weight:700;letter-spacing:0.04em;margin-top:2px;}' +
+      '.cl-row{display:flex;border-bottom:1.5px solid #000;}' +
+      '.cl-row > .cl-main{flex:2;padding:8px 10px;border-right:1.5px solid #000;font-size:0.82rem;line-height:1.45;}' +
+      '.cl-row > .cl-side{flex:1;padding:8px 10px;font-size:0.82rem;line-height:1.45;text-align:center;display:flex;flex-direction:column;justify-content:center;}' +
+      '.cl-side .cl-amount{font-size:1.05rem;font-weight:800;margin-top:4px;}' +
+      '.cl-label-title{font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:#333;margin-bottom:2px;}' +
+      '.cl-name{font-weight:700;font-size:0.92rem;}' +
+      'table{width:100%;border-collapse:collapse;font-size:0.78rem;}' +
+      'table th{text-align:left;padding:5px 8px;border-bottom:1.5px solid #000;font-size:0.72rem;text-transform:uppercase;}' +
+      'table td{padding:5px 8px;border-bottom:1px solid #999;}' +
+      'table th.num,table td.num{text-align:right;}' +
+      '.cl-item-meta{color:#555;font-size:0.72rem;}' +
+      '.cl-return{padding:8px 10px;font-size:0.72rem;line-height:1.4;}' +
+      '.cl-return strong{display:block;margin-bottom:2px;}' +
+      '@media print{' +
+        'body{background:#fff;padding:0;}' +
+        '.cl-label{border:1.5px solid #000;}' +
+        '@page{size:4in 6in;margin:0;}' +
+      '}' +
+      '</style></head><body>' +
+      '<div class="cl-label">' +
+        '<div class="cl-head"><div>' + customDeliveryLogoHtml() + '</div><div class="cl-provider">CUSTOM DELIVERY</div></div>' +
+        '<div class="cl-barcode-block"><svg id="clBarcode1"></svg><div class="cl-barcode-id">' + esc(s.custom_delivery_id || '') + '</div></div>' +
+        '<div class="cl-row">' +
+          '<div class="cl-main">' +
+            '<div class="cl-label-title">Ship To</div>' +
+            '<div class="cl-name">' + esc(o.customer.name) + '</div>' +
+            esc(addrLine2) + '<br>' + esc(addrLine3) + '<br>' +
+            '<strong>PIN: ' + esc(o.address.pincode) + '</strong><br>' +
+            esc(o.customer.phone) +
+          '</div>' +
+          '<div class="cl-side">' +
+            '<div style="font-weight:700;">CUSTOM DELIVERY</div>' +
+            '<div>' + (isPaid ? 'PREPAID' : 'COD') + '</div>' +
+            '<div class="cl-amount">' + (isPaid ? fmtPrice(o.totals.total) : ('COLLECT ' + fmtPrice(o.totals.total))) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="cl-row">' +
+          '<div class="cl-main">' +
+            '<div class="cl-label-title">Seller</div>' +
+            '<strong>YOU &amp; ME</strong><br>' +
+            (sellerAddr ? esc(sellerAddr) + '<br>' : '') +
+            (sellerCityLine ? esc(sellerCityLine) : '') +
+          '</div>' +
+          '<div class="cl-side">' +
+            '<div class="cl-label-title">Label Date</div>' +
+            '<div>' + esc(labelDate) + '</div>' +
+            '<div>' + esc(labelTime) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<table><thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Total</th></tr></thead>' +
+        '<tbody>' + itemRows + '</tbody>' +
+        '<tfoot><tr><td colspan="3" style="text-align:right;font-weight:700;">Subtotal</td><td class="num" style="font-weight:700;">' + fmtPrice(o.totals.subtotal) + '</td></tr>' +
+        (o.totals.discount > 0 ? '<tr><td colspan="3" style="text-align:right;">Discount</td><td class="num">&minus;' + fmtPrice(o.totals.discount) + '</td></tr>' : '') +
+        '<tr><td colspan="3" style="text-align:right;">Shipping</td><td class="num">' + (o.totals.delivery === 0 ? 'Free' : fmtPrice(o.totals.delivery)) + '</td></tr>' +
+        '<tr><td colspan="3" style="text-align:right;font-weight:800;">Grand Total</td><td class="num" style="font-weight:800;">' + fmtPrice(o.totals.total) + '</td></tr></tfoot>' +
+        '</table>' +
+        '<div class="cl-barcode-block"><svg id="clBarcode2"></svg><div class="cl-barcode-id">' + esc(o.orderNumber) + '</div></div>' +
+        '<div class="cl-return"><strong>Return Address:</strong>' + (sellerAddr ? esc(sellerAddr + (sellerCityLine ? ', ' + sellerCityLine : '')) : 'Not configured — set a pickup address in Admin → Settings.') + '</div>' +
+      '</div>' +
+      '<script>' +
+      'window.addEventListener("load", function () {' +
+        'try {' +
+          'JsBarcode("#clBarcode1", ' + JSON.stringify(s.custom_delivery_id || '') + ', { format: "CODE128", displayValue: false, height: 42, margin: 0 });' +
+          'JsBarcode("#clBarcode2", ' + JSON.stringify(o.orderNumber) + ', { format: "CODE128", displayValue: false, height: 42, margin: 0 });' +
+        '} catch (e) { /* barcode lib failed to load (offline?) — the readable id text below each is still there either way */ }' +
+        (autoPrint ? 'setTimeout(function () { window.print(); }, 200);' : '') +
+      '});' +
+      '<\/script>' +
+      '</body></html>';
+  }
+
+  // Loaded once per order-detail view, cached — the Seller/Return Address block on the label
+  // needs the real store_settings row (not just the customer-facing address fields already on
+  // `o`). Reuses the exact same table Amazon/Delhivery/Fship pickup addresses already come from.
+  var shipSettingsCache = null;
+  function ensureShipSettingsLoaded() {
+    if (shipSettingsCache) return Promise.resolve(shipSettingsCache);
+    return supabaseClient.from('store_settings').select('*').eq('id', true).single()
+      .then(function (res) { shipSettingsCache = res.data || {}; return shipSettingsCache; })
+      .catch(function () { shipSettingsCache = {}; return shipSettingsCache; });
+  }
+
+  // Preview passes autoPrint=false, Print and Download PDF both pass autoPrint=true (Download is
+  // the browser's own "Save as PDF" destination inside that same print dialog — identical to how
+  // Invoice's View/Download buttons already both call openInvoiceDocument() unchanged). All three
+  // render from this one buildCustomDeliveryLabelHtml() call — never a second, diverging version.
+  function openCustomDeliveryLabel(o, s, autoPrint) {
+    if (!s || s.provider !== 'manual' || !s.custom_delivery_id) return;
+    ensureShipSettingsLoaded().then(function () {
+      var html = buildCustomDeliveryLabelHtml(o, s, autoPrint);
+      var blob = new Blob([html], { type: 'text/html' });
+      var url = URL.createObjectURL(blob);
+      var win = window.open(url, '_blank');
+      if (!win) window.location.href = url;
+      setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+    });
+  }
+
   function renderOrderDetail(id) {
     content().innerHTML = '<p class="empty-state">Loading order…</p>';
     shippingProviderChoice = null;
@@ -1623,7 +1797,7 @@
       : provider === 'delhivery' ? renderDelhiverySection(o, s)
       : provider === 'shiprocket' ? renderShiprocketSection(o, s)
       : provider === 'fship' ? renderFshipSection(o, s)
-      : renderManualSection(s);
+      : renderManualSection(o, s);
 
     // Recommended-provider hint — only while still choosing (no confirmed shipment yet), both
     // checks have actually finished, and the customer's own delivery PIN really does distinguish
@@ -1656,8 +1830,24 @@
     '</div>';
   }
 
-  function renderManualSection(s) {
+  function renderManualSection(o, s) {
     var isManual = s && s.provider === 'manual';
+    // The Custom Delivery shipping label (real barcode, real order snapshot — see
+    // buildCustomDeliveryLabelHtml) only makes sense once Custom Delivery has actually been
+    // selected AND saved at least once (spec: "only appear after Custom Delivery has been
+    // selected/saved") — that's exactly when custom_delivery_id exists (see
+    // AdminAPI.shipments.ensureCustomDeliveryId, called right after every manual save).
+    var labelBlock = isManual && s.custom_delivery_id
+      ? '<div class="amazon-shipping-card" style="margin-top:12px;">' +
+          '<div class="amazon-shipping-head"><strong>CUSTOM DELIVERY LABEL</strong></div>' +
+          '<p class="amazon-shipping-hint" style="margin-top:-4px;">Custom Delivery ID: <strong>' + esc(s.custom_delivery_id) + '</strong></p>' +
+          '<div class="amazon-shipping-actions">' +
+            '<button type="button" class="btn-secondary btn-sm" id="clLabelPreviewBtn">Preview Label</button>' +
+            '<button type="button" class="btn-primary btn-sm" id="clLabelPrintBtn">Print Shipping Label</button>' +
+            '<button type="button" class="btn-secondary btn-sm" id="clLabelDownloadBtn">Download PDF</button>' +
+          '</div>' +
+        '</div>'
+      : '';
     return '<div class="form-row">' +
         '<div class="form-field"><label>Courier</label><input type="text" id="shipCourier" value="' + esc(isManual ? s.courier : '') + '" placeholder="e.g. India Post, local courier…"></div>' +
         '<div class="form-field"><label>Tracking ID</label><input type="text" id="shipTrackingId" value="' + esc(isManual ? s.tracking_id : '') + '"></div>' +
@@ -1670,10 +1860,10 @@
       '<div class="form-field"><label>Pickup Date</label><input type="date" id="shipPickup" value="' + esc(isManual ? s.pickup_date : '') + '"></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
         '<button type="button" class="btn-primary btn-sm" id="shipSaveBtn">' + (isManual ? 'Update Shipment' : 'Create Shipment') + '</button>' +
-        '<button type="button" class="btn-secondary btn-sm" id="shipPrintBtn"' + (isManual ? '' : ' disabled') + '>Print Label</button>' +
         '<button type="button" class="btn-secondary btn-sm" id="shipCopyBtn"' + (isManual && s.tracking_id ? '' : ' disabled') + '>Copy Tracking ID</button>' +
         (isManual && s.tracking_url ? '<a href="' + esc(s.tracking_url) + '" target="_blank" class="btn-secondary btn-sm">Track Shipment</a>' : '<button type="button" class="btn-secondary btn-sm" disabled>Track Shipment</button>') +
-      '</div>';
+      '</div>' +
+      labelBlock;
   }
 
   function renderAmazonSection(o, s) {
@@ -1974,9 +2164,10 @@
       refreshShippingCard(o);
     });
 
-    // ---- Manual Shipping ----
+    // ---- Manual Shipping (Custom Delivery) ----
     var saveBtn = document.getElementById('shipSaveBtn');
     if (saveBtn) saveBtn.addEventListener('click', function () {
+      saveBtn.disabled = true;
       AdminAPI.shipments.saveManual(o.id, {
         courier: document.getElementById('shipCourier').value.trim(),
         trackingId: document.getElementById('shipTrackingId').value.trim(),
@@ -1984,19 +2175,23 @@
         shippingCost: document.getElementById('shipCost').value ? Number(document.getElementById('shipCost').value) : null,
         pickupDate: document.getElementById('shipPickup').value || null,
         estimatedDelivery: document.getElementById('shipEta').value || null
-      }).then(function () { shippingProviderChoice = null; renderOrderDetail(o.id); });
+      })
+        // Real, DB-generated Custom Delivery ID — generated once here (idempotent: a shipment
+        // that already has one just gets it back unchanged), never on label open/refresh.
+        .then(function (saved) { return AdminAPI.shipments.ensureCustomDeliveryId(saved.id); })
+        .then(function () { shippingProviderChoice = null; renderOrderDetail(o.id); })
+        .catch(function (err) { saveBtn.disabled = false; window.alert('Could not save: ' + err.message); });
     });
-    var printBtn = document.getElementById('shipPrintBtn');
-    if (printBtn) printBtn.addEventListener('click', function () {
-      var w = window.open('', '_blank');
-      w.document.write('<html><head><title>Shipping Label ' + esc(o.orderNumber) + '</title></head><body style="font-family:sans-serif;padding:30px;">' +
-        '<h2>You & Me — Shipping Label</h2><p><strong>Order:</strong> ' + esc(o.orderNumber) + '</p>' +
-        '<p><strong>To:</strong><br>' + esc(o.customer.name) + '<br>' + esc(o.customer.phone) + '<br>' +
-        esc(o.address.house) + ', ' + esc(o.address.street) + '<br>' + esc(o.address.city) + ', ' + esc(o.address.state) + ' — ' + esc(o.address.pincode) + '</p>' +
-        '<p><strong>Courier:</strong> ' + esc(document.getElementById('shipCourier').value) + '<br><strong>Tracking ID:</strong> ' + esc(document.getElementById('shipTrackingId').value) + '</p>' +
-        '</body></html>');
-      w.document.close(); w.print();
-    });
+    var clPreviewBtn = document.getElementById('clLabelPreviewBtn');
+    if (clPreviewBtn) clPreviewBtn.addEventListener('click', function () { openCustomDeliveryLabel(o, o.shipment, false); });
+    var clPrintBtn = document.getElementById('clLabelPrintBtn');
+    if (clPrintBtn) clPrintBtn.addEventListener('click', function () { openCustomDeliveryLabel(o, o.shipment, true); });
+    var clDownloadBtn = document.getElementById('clLabelDownloadBtn');
+    // Same canonical document + same print flow as Print — the "Download PDF" is the browser's
+    // own "Save as PDF" option inside that print dialog, exactly like Invoice's View/Download
+    // (both already call the identical openInvoiceDocument() above) — never a second, divergent
+    // label implementation.
+    if (clDownloadBtn) clDownloadBtn.addEventListener('click', function () { openCustomDeliveryLabel(o, o.shipment, true); });
     var copyBtn = document.getElementById('shipCopyBtn');
     if (copyBtn) copyBtn.addEventListener('click', function () {
       navigator.clipboard.writeText(document.getElementById('shipTrackingId').value).then(function () { copyBtn.textContent = 'Copied ✓'; window.setTimeout(function () { copyBtn.textContent = 'Copy Tracking ID'; }, 1200); });
