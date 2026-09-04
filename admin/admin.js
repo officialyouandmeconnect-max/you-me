@@ -1472,7 +1472,7 @@
       '.cl-head{display:flex;border-bottom:1.5px solid #000;}' +
       '.cl-head > div{flex:1;padding:10px;display:flex;align-items:center;justify-content:center;}' +
       '.cl-head > div:first-child{border-right:1.5px solid #000;}' +
-      '.cl-logo{max-height:44px;max-width:200px;object-fit:contain;}' +
+      '.cl-logo{max-height:60px;max-width:210px;object-fit:contain;}' +
       '.cl-provider{font-size:1.15rem;font-weight:800;letter-spacing:0.03em;}' +
       '.cl-barcode-block{text-align:center;border-bottom:1.5px solid #000;padding:8px 0 6px;}' +
       '.cl-barcode-block svg{max-width:90%;}' +
