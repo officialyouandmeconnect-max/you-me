@@ -1393,6 +1393,7 @@
     shiprocketServiceability = null;
     shiprocketServiceabilityError = null;
     shiprocketSelectedCourierId = null;
+    dropdownAvailability = { delhivery: null, shiprocket: null };
     AdminAPI.orders.get(id).then(function (o) {
       Promise.all([
         AdminAPI.shipments.get(o.id).catch(function () { return null; }),
@@ -1508,8 +1509,29 @@
           });
         });
         bindShippingForm(o);
+        autoCheckProviderAvailability(o);
       });
     });
+  }
+
+  // Runs once per order load (spec #6 "when Admin opens the order, run/reuse serviceability
+  // result") — never for an order that already has a confirmed shipment (nothing to recommend
+  // once a courier has actually accepted the order; re-checking then could only ever
+  // spuriously suggest replacing a working shipment). Real order data throughout: the order's
+  // own delivery pincode, and cod derived from its real payment status — same values the
+  // per-provider "Check Serviceability" buttons already use, just run automatically for both
+  // configured providers instead of one at a time on click.
+  function autoCheckProviderAvailability(o) {
+    if (o.shipment && o.shipment.provider_shipment_id) return; // already shipped with a real provider — nothing to recommend
+    dropdownAvailability = { delhivery: 'checking', shiprocket: 'checking' };
+    AdminAPI.shipments.checkDelhiveryServiceability(o.address.pincode)
+      .then(function (res) { dropdownAvailability.delhivery = !!res.serviceable; })
+      .catch(function () { dropdownAvailability.delhivery = undefined; }) // couldn't check — not the same as unavailable, so never labeled/disabled
+      .then(function () { refreshShippingCard(o); });
+    AdminAPI.shipments.checkShiprocketServiceability(o.address.pincode, 0.5, o.paymentStatus !== 'paid')
+      .then(function (res) { dropdownAvailability.shiprocket = !!res.serviceable; })
+      .catch(function () { dropdownAvailability.shiprocket = undefined; })
+      .then(function () { refreshShippingCard(o); });
   }
 
   // Transient UI-only state for the order-detail Shipping card — reset every time a fresh
@@ -1522,6 +1544,15 @@
   var shiprocketServiceability = null; // null | { serviceable, couriers: [...] }
   var shiprocketServiceabilityError = null;
   var shiprocketSelectedCourierId = null;
+  // Auto-run availability for the Shipping Provider dropdown itself (spec #5/#6) — separate from
+  // delhiveryServiceability/shiprocketServiceability above, which hold the FULL check result
+  // (couriers list etc.) shown once a provider is actually selected. This is just "can this
+  // provider even take the order", checked for ALL configured providers up front, every time an
+  // order without a confirmed shipment yet loads, so the dropdown can label/disable accordingly
+  // and recommend one instead of leaving Admin to click "Check Serviceability" per provider one
+  // at a time and discover a rejection only after selecting it.
+  // null = not checked yet, 'checking' = in flight, true/false = real result, undefined = provider not configured (never shown as unavailable — just not labeled).
+  var dropdownAvailability = { delhivery: null, shiprocket: null };
   // Same wording as the customer-facing COURIER_STATUS_LABELS in script.js — Admin and the
   // customer should describe the exact same Delhivery-reported state identically.
   var NORMALIZED_STATUS_LABELS = {
@@ -1539,6 +1570,25 @@
     return null;
   }
 
+  // Spec #5/#6 — dropdown option label/disable state from the auto-run dropdownAvailability
+  // check. Custom Delivery is always fully manual/Admin-managed, so it's never labeled or
+  // disabled by any provider API result. An option is only ever DISABLED on a confirmed `false`
+  // (never on null/'checking'/undefined — those mean "unknown", not "unavailable", and Admin
+  // must never be blocked from a real choice just because a check hasn't finished or a provider
+  // isn't configured) and never for the provider this order is already shipped with.
+  function providerOptionLabel(baseLabel, key, s) {
+    var avail = dropdownAvailability[key];
+    if (s && s.provider === key) return baseLabel; // already the real shipment — no availability caveat needed
+    if (avail === 'checking') return baseLabel + ' — Checking…';
+    if (avail === true) return baseLabel + ' — Available';
+    if (avail === false) return baseLabel + ' — Not Available';
+    return baseLabel; // null/undefined: not checked yet, or provider not configured
+  }
+  function providerOptionDisabled(key, s) {
+    if (s && s.provider === key) return false;
+    return dropdownAvailability[key] === false;
+  }
+
   function renderShippingCard(o) {
     var s = o.shipment;
     var provider = shippingProviderChoice || (s && s.provider) || 'manual';
@@ -1546,14 +1596,28 @@
       : provider === 'delhivery' ? renderDelhiverySection(o, s)
       : provider === 'shiprocket' ? renderShiprocketSection(o, s)
       : renderManualSection(s);
+
+    // Recommended-provider hint — only while still choosing (no confirmed shipment yet), both
+    // checks have actually finished, and the customer's own delivery PIN really does distinguish
+    // them (one real yes, the other a real no) rather than both agreeing or still unknown.
+    var recommendedHtml = '';
+    if (!(s && s.provider_shipment_id)) {
+      var dAvail = dropdownAvailability.delhivery, sAvail = dropdownAvailability.shiprocket;
+      var recommended = dAvail === true && sAvail === false ? 'Delhivery' : sAvail === true && dAvail === false ? 'Shiprocket' : null;
+      if (recommended && provider !== recommended.toLowerCase()) {
+        recommendedHtml = '<p class="amazon-shipping-hint">Recommended: ' + esc(recommended) + ' — the other configured provider does not currently service PIN ' + esc(o.address.pincode) + '.</p>';
+      }
+    }
+
     return '<div class="panel-card" id="shippingCardWrap"><h3>Shipping</h3>' +
       '<div class="form-field"><label for="shipProviderSelect">Shipping Provider</label>' +
         '<select id="shipProviderSelect">' +
           '<option value="manual"' + (provider === 'manual' ? ' selected' : '') + '>Custom Delivery</option>' +
-          '<option value="delhivery"' + (provider === 'delhivery' ? ' selected' : '') + '>Delhivery</option>' +
-          '<option value="shiprocket"' + (provider === 'shiprocket' ? ' selected' : '') + '>Shiprocket</option>' +
+          '<option value="delhivery"' + (provider === 'delhivery' ? ' selected' : '') + (providerOptionDisabled('delhivery', s) ? ' disabled' : '') + '>' + esc(providerOptionLabel('Delhivery', 'delhivery', s)) + '</option>' +
+          '<option value="shiprocket"' + (provider === 'shiprocket' ? ' selected' : '') + (providerOptionDisabled('shiprocket', s) ? ' disabled' : '') + '>' + esc(providerOptionLabel('Shiprocket', 'shiprocket', s)) + '</option>' +
           (s && s.provider === 'amazon_shipping' ? '<option value="amazon_shipping" selected>Amazon Shipping</option>' : '') +
         '</select></div>' +
+      recommendedHtml +
       (s && s.provider && s.provider !== provider
         ? '<p class="shipping-provider-warning">This order already has a ' + (PROVIDER_LABELS[s.provider] || s.provider) + ' shipment. Creating a new one here replaces it.</p>'
         : '') +
