@@ -2504,6 +2504,19 @@
             .then(function (res) {
               if (res.error) throw new Error(res.error.message || 'Could not place your order. Please try again.');
               pendingOrderId = res.data.id;
+              // Debug/audit snapshot only (migration 0025) — never a live authorization gate,
+              // and never allowed to affect the real order in any way: a separate, isolated RPC
+              // (not a new create_order() param — that function is on the critical
+              // pricing/stock/payment path and has already been redefined 5 times), fire-and-
+              // forget, failure here is silently ignored.
+              supabaseClient.rpc('record_shipping_serviceability_snapshot', {
+                p_order_id: res.data.id,
+                p_snapshot: {
+                  pincode: address.pincode,
+                  checked_at: new Date().toISOString(),
+                  available_providers: (lastPinCheckResult && lastPinCheckResult.availableProviders) || []
+                }
+              }).catch(function () {});
               return res.data;
             });
 
