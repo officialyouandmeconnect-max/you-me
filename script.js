@@ -104,13 +104,13 @@
   // products — see .placeholder-img / .img-* in style.css) or a real uploaded URL from Admin.
   function isPlaceholderImage(url) { return typeof url === 'string' && url.indexOf('placeholder:') === 0; }
   function placeholderClass(url) { return url.slice('placeholder:'.length); }
-  function productImageHtml(url) {
+  function productImageHtml(url, alt) {
     if (!url) return '<div class="placeholder-img img-beige img-fill-parent"></div>';
     if (isPlaceholderImage(url)) return '<div class="placeholder-img ' + placeholderClass(url) + ' img-fill-parent"></div>';
     // loading="lazy" — this one function renders every real product image site-wide (cards,
     // cart, order history, modal gallery), so this single change is the real, low-risk win; a
     // browser still fetches an already-in-viewport image immediately regardless of the attribute.
-    return '<img class="img-fill-parent" src="' + escapeHtml(url) + '" alt="" loading="lazy">';
+    return '<img class="img-fill-parent" src="' + escapeHtml(url) + '" alt="' + escapeHtml(alt || '') + '" loading="lazy">'; // product name as alt on cards: helps image search + screen readers
   }
 
   var SUBCATEGORY_LABELS = {
@@ -441,7 +441,7 @@
     return (
       '<article class="product-card" data-id="' + product.id + '">' +
         '<div class="product-img" data-open-product="' + product.id + '">' +
-          productImageHtml(product.images[0]) +
+          productImageHtml(product.images[0], product.name) +
           productBadgeHtml(product) +
           '<button class="wishlist-btn' + (wishActive ? ' active' : '') + '" type="button" aria-label="Toggle wishlist for ' + escapeHtml(product.name) + '" data-wishlist="' + product.id + '">' +
             heartIconSVG(wishActive) +

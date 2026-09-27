@@ -2754,3 +2754,56 @@ h1, h2, h3 { font-weight: 500; letter-spacing: -0.01em; }
   body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
   .toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
 }
+
+/* =========================================================
+   16. FAQ + polish (Sep 2026)
+   ========================================================= */
+/* Home product rows: 3-up on desktop so 6 items fill two full rows (4-up left an orphan row of 2) */
+@media (min-width: 1081px) {
+  #homeNewArrivalsGrid, #productGrid { grid-template-columns: repeat(3, 1fr); gap: 32px 24px; }
+}
+/* Outline buttons (Load More, Back to Kids Wear) follow the ink style */
+.btn-outline { border-color: var(--color-ink); color: var(--color-ink); }
+.btn-outline:hover { background: var(--color-ink); color: #fff; }
+
+.faq-section { padding-top: 40px; }
+.faq-inner {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: 48px;
+  align-items: start;
+}
+.faq-intro h2 { font-size: 2.1rem; margin-bottom: 12px; }
+.faq-intro p { color: var(--color-text-soft); margin: 0; max-width: 380px; }
+.faq-intro a { color: var(--color-ink); border-bottom: 1px solid currentColor; }
+.faq-intro a:hover { color: var(--color-pink); }
+.faq-list { border-top: 1px solid var(--color-line); }
+.faq-item { border-bottom: 1px solid var(--color-line); }
+.faq-item summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 2px;
+  font-weight: 600;
+  font-size: 1rem;
+}
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after {
+  content: '+';
+  font-size: 1.4rem;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--color-pink);
+  transition: transform 0.2s ease;
+}
+.faq-item[open] summary::after { transform: rotate(45deg); }
+.faq-item p { margin: 0 0 18px; color: var(--color-text-soft); font-size: 0.95rem; max-width: 620px; }
+.about-copy p + p { margin-top: -12px; }
+
+@media (max-width: 860px) {
+  .faq-inner { grid-template-columns: 1fr; gap: 20px; }
+  .faq-intro h2 { font-size: 1.6rem; }
+}
