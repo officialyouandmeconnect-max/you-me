@@ -608,3 +608,219 @@ h1, h2, h3, h4 { font-weight: 600; }
 .shipping-error-box strong, .shipping-error-inline { color: var(--ink); }
 .admin-scrim { background: rgba(58, 51, 48, 0.4); }
 .login-screen { background: var(--brand-cream); }
+
+/* =========================================================
+   UNB CONTROLS — branded replacements for browser-default form controls.
+   Same rules ship in style.css (storefront) and admin/admin.css (admin) so both feel like
+   one platform. Native behaviour/keyboard/accessibility is kept; only the look changes.
+   ========================================================= */
+input[type="checkbox"]:not(.switch input),
+input[type="radio"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex-shrink: 0;
+  display: inline-grid;
+  place-content: center;
+  background: #fff;
+  border: 1.5px solid rgba(58, 51, 48, 0.28);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  vertical-align: middle;
+}
+input[type="checkbox"]:not(.switch input) { border-radius: 6px; }
+input[type="radio"] { border-radius: 50%; }
+input[type="checkbox"]:not(.switch input)::before {
+  content: '';
+  width: 11px;
+  height: 11px;
+  transform: scale(0);
+  transition: transform 0.15s ease;
+  background: #3A3330;
+  clip-path: polygon(14% 44%, 0 65%, 40% 100%, 100% 22%, 84% 6%, 38% 68%);
+}
+input[type="radio"]::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  transform: scale(0);
+  transition: transform 0.15s ease;
+  background: #3A3330;
+}
+input[type="checkbox"]:not(.switch input):checked,
+input[type="radio"]:checked { background: #F7A7A7; border-color: #F7A7A7; }
+input[type="checkbox"]:not(.switch input):checked::before,
+input[type="radio"]:checked::before { transform: scale(1); }
+input[type="checkbox"]:not(.switch input):hover,
+input[type="radio"]:hover { border-color: #F7A7A7; }
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, #F7A7A7 35%, #fff); }
+input[type="checkbox"]:disabled, input[type="radio"]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6' fill='none' stroke='%233A3330' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 14px center !important;
+  background-size: 16px !important;
+  padding-right: 42px !important;
+  cursor: pointer;
+  color: #3A3330;
+  font-family: inherit;
+}
+select::-ms-expand { display: none; }
+
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+input[type="date"], input[type="datetime-local"] { font-family: inherit; color: #3A3330; min-height: 44px; }
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 1;
+  width: 18px;
+  height: 18px;
+  background: center / 18px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3.5' y='5' width='17' height='15.5' rx='3' fill='none' stroke='%233A3330' stroke-width='1.6'/%3E%3Cpath d='M3.5 10h17M8 3v4M16 3v4' fill='none' stroke='%233A3330' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+input[type="color"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 44px !important;
+  height: 44px !important;
+  padding: 3px !important;
+  border-radius: 50% !important;
+  border: 1.5px solid rgba(58, 51, 48, 0.2) !important;
+  background: #fff;
+  cursor: pointer;
+}
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+input[type="color"]::-moz-color-swatch { border: none; border-radius: 50%; }
+
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
+
+textarea { font-family: inherit; resize: vertical; }
+
+/* Scrollbars: thin, warm, brand-coloured */
+* { scrollbar-width: thin; scrollbar-color: #E7CDA8 transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #E7CDA8; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: #F7A7A7; background-clip: padding-box; }
+
+/* ---- Admin sign-in (dedicated) ---- */
+.admin-login {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 16px;
+  background:
+    radial-gradient(60% 50% at 15% 10%, color-mix(in srgb, var(--brand-blue) 35%, transparent), transparent 70%),
+    radial-gradient(55% 45% at 90% 90%, color-mix(in srgb, var(--brand-coral) 30%, transparent), transparent 70%),
+    var(--brand-cream);
+}
+.admin-login-card {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 36px 32px 28px;
+  box-shadow: 0 20px 50px rgba(58, 51, 48, 0.08);
+  text-align: center;
+}
+.admin-login-logo { height: 56px; width: auto; margin: 0 auto 14px; display: block; }
+.admin-login-kicker { margin: 0; font-size: 0.7rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--ink-soft); }
+.admin-login-title { font-size: 1.45rem; font-weight: 400; margin: 8px 0 22px; }
+.admin-login-note { background: var(--blue-soft); border-radius: 12px; padding: 10px 14px; font-size: 0.84rem; margin: 0 0 16px; text-align: left; }
+.admin-login-card form { text-align: left; }
+.admin-login-card .form-field input { width: 100%; }
+.admin-password-wrap { position: relative; display: flex; }
+.admin-password-wrap input { padding-right: 64px !important; }
+.admin-password-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; font-size: 0.76rem; font-weight: 500; color: var(--ink);
+  padding: 6px 10px; border-radius: 999px;
+}
+.admin-password-toggle:hover { background: var(--surface-sunk); }
+.login-error { color: var(--ink); font-size: 0.82rem; min-height: 1.2em; margin: 0 0 12px; }
+.login-error:not(:empty)::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--brand-coral); margin-right: 8px; vertical-align: middle; }
+.admin-login-card .btn-primary { padding: 13px 20px; font-size: 0.9rem; }
+.admin-login-link {
+  display: block; margin: 14px auto 0; background: none; border: none; color: var(--ink);
+  font-size: 0.84rem; text-decoration: underline; text-decoration-color: var(--brand-coral); text-underline-offset: 3px;
+}
+.admin-login-foot { font-size: 0.8rem; color: var(--ink-soft); margin: 0; }
+.admin-login-foot a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--brand-coral); text-underline-offset: 3px; }
+
+/* ---- UploadUI card ---- */
+.ym-upload {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+  border: 1.5px dashed color-mix(in srgb, var(--brand-beige) 80%, var(--ink) 8%);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--brand-cream) 70%, #fff);
+  transition: border-color 0.15s ease, background 0.15s ease;
+  min-width: 0;
+}
+.ym-upload.is-drag { border-color: var(--brand-coral); background: var(--coral-soft); }
+.ym-upload[data-state="done"] { border-style: solid; border-color: var(--brand-sage); }
+.ym-upload[data-state="error"] { border-style: solid; border-color: var(--brand-coral); }
+.ym-upload-preview {
+  width: 72px; height: 72px; border-radius: 12px; flex-shrink: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: #fff; border: 1px solid var(--border); color: var(--ink-soft);
+}
+.ym-upload-preview svg { width: 26px; height: 26px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ym-upload-preview img, .ym-upload-preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ym-upload-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ym-upload-body strong { font-size: 0.88rem; font-weight: 500; }
+.ym-upload-status { font-size: 0.78rem; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ym-upload[data-state="uploading"] .ym-upload-status::before { content: ''; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; border: 2px solid var(--brand-coral); border-right-color: transparent; animation: ym-spin 0.8s linear infinite; vertical-align: -1px; }
+.ym-upload[data-state="done"] .ym-upload-status, .ym-upload[data-state="error"] .ym-upload-status { color: var(--ink); }
+@keyframes ym-spin { to { transform: rotate(360deg); } }
+.ym-upload-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.ym-upload-choose { position: relative; cursor: pointer; }
+.ym-upload-choose input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+/* Product image "add" tile */
+.image-slot-add { gap: 6px; border-color: color-mix(in srgb, var(--brand-beige) 80%, var(--ink) 8%); background: color-mix(in srgb, var(--brand-cream) 70%, #fff); text-align: center; padding: 8px; }
+.image-slot-add .icon { font-size: 1.4rem; color: var(--ink-soft); }
+.image-slot-add .icon svg { stroke-width: 1.6; }
+.image-slot-add small { font-size: 0.66rem; color: var(--ink-soft); font-weight: 400; }
+.image-slot-add:hover, .image-slot-add.is-drag { border-color: var(--brand-coral); background: var(--coral-soft); }
+.image-slot .image-slot-actions button { border-radius: 999px; font-weight: 500; }
+
+/* Product form toggles: checkbox rows render as switches */
+.toggle-row input[type="checkbox"][type] {
+  width: 42px; height: 24px; border-radius: 999px; border: none;
+  background: color-mix(in srgb, var(--ink) 16%, #fff); position: relative; display: inline-block;
+}
+.toggle-row input[type="checkbox"][type]::before {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; clip-path: none; transform: none; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.2s ease;
+}
+.toggle-row input[type="checkbox"][type]:checked { background: var(--brand-coral); }
+.toggle-row input[type="checkbox"][type]:checked::before { transform: translateX(18px); }
+.toggle-row label { cursor: pointer; }
+
+/* Selects inside admin forms match inputs */
+.form-field select, .status-select-row select, #paymentStatusSelect, #orderStatusSelect, #shipProviderSelect, #amzPaymentType { min-height: 44px; }
+.form-field input, .form-field select, .form-field textarea { min-height: 44px; }
+.form-field textarea { min-height: 96px; }
+@media (max-width: 600px) {
+  .ym-upload { flex-direction: column; align-items: flex-start; }
+  .admin-login-card { padding: 28px 20px 22px; }
+}

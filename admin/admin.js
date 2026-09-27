@@ -130,9 +130,100 @@
   function sessionExpiredError() {
     // Signing out (rather than just redirecting) clears the invalid session locally too — the
     // next /login is a genuinely clean sign-in, not another attempt with the same dead tokens.
-    supabaseClient.auth.signOut().then(function () { window.location.href = BASE_PATH + '/login'; });
+    supabaseClient.auth.signOut().then(function () { window.location.href = BASE_PATH + '/admin/'; });
     return new Error('Your session has expired — redirecting you to log in again…');
   }
+
+  /* ---------- 0b. UploadUI — the one upload control used across the admin ---------- */
+  // Any <input type="file"> rendered into the admin is wrapped into a branded upload card:
+  // drop zone + preview + Replace / Remove + status line. The original input stays in the DOM
+  // (visually hidden inside the card), so every existing 'change' handler keeps working.
+  // Optional data-url-target="<id of a URL text input>": the card previews that URL, and
+  // Remove clears it — used by the campaign banner fields.
+  var UploadUI = (function () {
+    var ICON = '<svg viewBox=\'0 0 24 24\' aria-hidden=\'true\'><path d=\'M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5\' /><path d=\'M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3\' /></svg>';
+    function isVideoUrl(u) { return /\.(mp4|webm|mov)(\?|$)/i.test(u || ''); }
+    function card(input) { return input.closest('.ym-upload'); }
+    function setPreview(el, src, isVideo) {
+      var box = el.querySelector('.ym-upload-preview');
+      if (!src) { box.innerHTML = ICON; el.classList.remove('has-media'); return; }
+      box.innerHTML = isVideo ? '<video src="' + esc(src) + '" muted playsinline></video>' : '<img src="' + esc(src) + '" alt="">';
+      el.classList.add('has-media');
+    }
+    function setStatus(el, state, text) {
+      el.dataset.state = state;
+      el.querySelector('.ym-upload-status').textContent = text;
+      var chooseText = el.querySelector('.ym-upload-choose-text');
+      if (chooseText) chooseText.textContent = el.classList.contains('has-media') ? 'Replace' : 'Choose file';
+    }
+    function enhance(input) {
+      if (input.dataset.ymUpload || input.closest('.image-slot-add')) return;
+      input.dataset.ymUpload = '1';
+      var multiple = input.multiple;
+      var urlTarget = input.dataset.urlTarget ? document.getElementById(input.dataset.urlTarget) : null;
+      var el = document.createElement('div');
+      el.className = 'ym-upload';
+      el.innerHTML =
+        '<div class="ym-upload-preview">' + ICON + '</div>' +
+        '<div class="ym-upload-body">' +
+          '<strong>' + (multiple ? 'Drop images here' : 'Drop a file here') + '</strong>' +
+          '<span class="ym-upload-status"></span>' +
+          '<div class="ym-upload-actions">' +
+            '<label class="btn-secondary btn-sm ym-upload-choose"><span class="ym-upload-choose-text">Choose file</span></label>' +
+            (urlTarget ? '<button type="button" class="btn-ghost btn-sm ym-upload-remove">Remove</button>' : '') +
+          '</div>' +
+        '</div>';
+      input.parentNode.insertBefore(el, input);
+      el.querySelector('.ym-upload-choose').appendChild(input);
+
+      var hint = (input.getAttribute('accept') || '').indexOf('video') !== -1 ? 'Image, GIF or video' : (multiple ? 'JPG, PNG or WebP — select several at once' : 'JPG, PNG or WebP');
+      if (urlTarget && urlTarget.value) { setPreview(el, urlTarget.value, isVideoUrl(urlTarget.value)); setStatus(el, 'ready', 'Current file in use'); }
+      else setStatus(el, 'empty', hint);
+
+      input.addEventListener('change', function () {
+        var files = Array.prototype.slice.call(input.files || []);
+        if (!files.length) return;
+        var f = files[0];
+        if (!multiple || files.length === 1) setPreview(el, URL.createObjectURL(f), /^video\//.test(f.type));
+        setStatus(el, 'uploading', files.length > 1 ? 'Uploading ' + files.length + ' files…' : 'Uploading ' + f.name + '…');
+      });
+      if (urlTarget) {
+        urlTarget.addEventListener('input', function () {
+          setPreview(el, urlTarget.value.trim(), isVideoUrl(urlTarget.value));
+          setStatus(el, urlTarget.value.trim() ? 'ready' : 'empty', urlTarget.value.trim() ? 'Using pasted URL' : hint);
+        });
+        el.querySelector('.ym-upload-remove').addEventListener('click', function () {
+          urlTarget.value = '';
+          input.value = '';
+          setPreview(el, '');
+          setStatus(el, 'empty', 'Removed — save to apply');
+        });
+      }
+      ['dragenter', 'dragover'].forEach(function (t) { el.addEventListener(t, function (e) { e.preventDefault(); el.classList.add('is-drag'); }); });
+      ['dragleave', 'drop'].forEach(function (t) { el.addEventListener(t, function (e) { e.preventDefault(); el.classList.remove('is-drag'); }); });
+      el.addEventListener('drop', function (e) {
+        if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+        input.files = e.dataTransfer.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+    function done(input, url) {
+      var el = card(input); if (!el) return;
+      setPreview(el, url, isVideoUrl(url));
+      setStatus(el, 'done', 'Uploaded ✓ — save to publish');
+    }
+    function fail(input, message) {
+      var el = card(input); if (!el) return;
+      setStatus(el, 'error', message || 'Upload failed — try again');
+    }
+    function scan(root) { (root || document).querySelectorAll('input[type="file"]').forEach(enhance); }
+    function observe(root) {
+      if (!root) return;
+      scan(root);
+      new MutationObserver(function () { scan(root); }).observe(root, { childList: true, subtree: true });
+    }
+    return { observe: observe, done: done, fail: fail, icon: ICON };
+  })();
 
   /* ---------- 1. AdminAPI (Supabase-backed data layer) ---------- */
   // Every read/write below runs through the same anon-key Supabase client the customer site
@@ -645,12 +736,13 @@
   }
 
   /* ---------- 2. Auth ---------- */
-  // There is no login form on this page — the website's own /login page (you-and-me-site) is
-  // the single place anyone, customer or admin, signs in via Supabase Auth. This script just
-  // re-checks the session + profiles.role on load and bounces anyone who isn't an admin — the
-  // real enforcement is the RLS policies every AdminAPI call above runs through, not this check.
+  // The admin console has its own sign-in screen (#adminLogin) — separate from the storefront,
+  // same Supabase Auth + profiles table underneath. Signing in here only opens the console for
+  // profiles.role = 'admin'; the real enforcement is still the RLS policies every AdminAPI call
+  // runs through, not this check.
   function showApp(user) {
     document.getElementById('checkingSession').hidden = true;
+    document.getElementById('adminLogin').hidden = true;
     document.getElementById('adminApp').hidden = false;
     var name = user.name || user.email || '';
     document.getElementById('topbarUsername').textContent = name;
@@ -658,18 +750,88 @@
     if (avatar) avatar.textContent = (name.trim().charAt(0) || 'A').toUpperCase();
   }
 
-  function initAuth() {
-    AdminAPI.auth.session().then(function (data) {
-      if (data.authenticated && data.user.role === 'admin') {
-        showApp(data.user);
-        Router.start();
-        startNotifications();
-      } else {
-        window.location.href = BASE_PATH + '/login';
-      }
-    }).catch(function () { window.location.href = BASE_PATH + '/login'; });
+  var appStarted = false;
+  function startApp(user) {
+    showApp(user);
+    if (appStarted) return;
+    appStarted = true;
+    Router.start();
+    startNotifications();
+  }
 
-    function doLogout() { AdminAPI.auth.logout().then(function () { window.location.href = BASE_PATH + '/login'; }); }
+  function showLogin(note) {
+    document.getElementById('checkingSession').hidden = true;
+    document.getElementById('adminApp').hidden = true;
+    document.getElementById('adminLogin').hidden = false;
+    var noteEl = document.getElementById('adminLoginNote');
+    noteEl.hidden = !note;
+    noteEl.textContent = note || '';
+    document.getElementById('adminSwitchAccount').hidden = !note;
+    var email = document.getElementById('adminLoginEmail');
+    if (email) window.setTimeout(function () { email.focus(); }, 30);
+  }
+
+  function initLoginForm() {
+    var form = document.getElementById('adminLoginForm');
+    var errorEl = document.getElementById('adminLoginError');
+    var submit = document.getElementById('adminLoginSubmit');
+    var pw = document.getElementById('adminLoginPassword');
+
+    document.getElementById('adminPasswordToggle').addEventListener('click', function (e) {
+      var show = pw.type === 'password';
+      pw.type = show ? 'text' : 'password';
+      e.currentTarget.textContent = show ? 'Hide' : 'Show';
+      e.currentTarget.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    });
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var email = document.getElementById('adminLoginEmail').value.trim();
+      var password = pw.value;
+      errorEl.textContent = '';
+      if (!email || !password) { errorEl.textContent = 'Enter your email and password.'; return; }
+      submit.disabled = true;
+      submit.textContent = 'Signing in…';
+      supabaseClient.auth.signInWithPassword({ email: email, password: password }).then(function (res) {
+        if (res.error) throw new Error('That email and password don’t match an account.');
+        return AdminAPI.auth.session();
+      }).then(function (data) {
+        if (data.authenticated && data.user.role === 'admin') { pw.value = ''; startApp(data.user); return; }
+        // A real customer account, but not staff — sign it straight back out of this console.
+        return supabaseClient.auth.signOut().then(function () { throw new Error('This account doesn’t have admin access.'); });
+      }).catch(function (err) {
+        errorEl.textContent = err.message || 'Sign-in failed. Please try again.';
+      }).then(function () {
+        submit.disabled = false;
+        submit.textContent = 'Sign in';
+      });
+    });
+
+    document.getElementById('adminForgotBtn').addEventListener('click', function () {
+      var email = document.getElementById('adminLoginEmail').value.trim();
+      if (!email) { errorEl.textContent = 'Enter your email above first, then tap “Forgot password?”.'; return; }
+      // Same reset flow as the storefront (its /reset-password view sets the new password).
+      supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + BASE_PATH + '/reset-password' })
+        .then(function () { errorEl.textContent = ''; showLogin('If that email belongs to an account, a reset link is on its way.'); document.getElementById('adminSwitchAccount').hidden = true; })
+        .catch(function () { errorEl.textContent = 'Couldn’t send the reset email. Please try again.'; });
+    });
+
+    document.getElementById('adminSwitchAccount').addEventListener('click', function () {
+      supabaseClient.auth.signOut().then(function () { showLogin(); });
+    });
+  }
+
+  function initAuth() {
+    initLoginForm();
+    AdminAPI.auth.session().then(function (data) {
+      if (data.authenticated && data.user.role === 'admin') startApp(data.user);
+      else if (data.authenticated) showLogin('You’re signed in as ' + (data.user.email || 'a customer') + ', which isn’t an admin account.');
+      else showLogin();
+    }).catch(function () { showLogin(); });
+
+    function doLogout() {
+      AdminAPI.auth.logout().then(function () { window.location.href = BASE_PATH + '/admin/'; });
+    }
     document.getElementById('logoutBtn').addEventListener('click', doLogout);
     var profileLogout = document.getElementById('profileMenuLogout');
     if (profileLogout) profileLogout.addEventListener('click', doLogout);
@@ -751,6 +913,8 @@
   })();
 
   function initShellChrome() {
+    UploadUI.observe(document.getElementById('adminContent'));
+    UploadUI.observe(document.getElementById('adminModalBody'));
     // Sidebar nav is built here (not hardcoded HTML) so BASE_PATH and the icon set stay in one
     // place — see the /you-me comment this used to require in index.html before this rewrite.
     var navEl = document.getElementById('sidebarNav');
@@ -793,6 +957,15 @@
       productListState.q = searchInput.value.trim();
       Router.navigate(BASE_PATH + '/admin/products');
     });
+    // ⌘K / Ctrl+K focuses the search (the shortcut hint shown inside the field).
+    document.addEventListener('keydown', function (e) {
+      if (!searchInput || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k') return;
+      e.preventDefault();
+      searchInput.focus();
+      searchInput.select();
+    });
+    var kbd = document.querySelector('.search-kbd');
+    if (kbd && !/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) kbd.textContent = 'Ctrl K';
 
     // Profile menu: a lightweight dropdown, not a second logout mechanism — closes on an
     // outside click or a real navigation.
@@ -1112,7 +1285,7 @@
               '<button type="button" data-remove-img="' + i + '">Remove</button>' +
             '</div></div>';
         }).join('') +
-          '<label class="image-slot image-slot-add"><span>📷</span><span id="imageUploadLabel">Add Image</span><input type="file" accept="image/*" id="imageFileInput" multiple></label>';
+          '<label class="image-slot image-slot-add" id="imageAddTile"><span class="icon">' + UploadUI.icon + '</span><span id="imageUploadLabel">Add images</span><small>or drop here</small><input type="file" accept="image/*" id="imageFileInput" multiple></label>';
 
         grid.querySelectorAll('[data-set-main]').forEach(function (btn) {
           btn.addEventListener('click', function () {
@@ -1123,6 +1296,15 @@
         });
         grid.querySelectorAll('[data-remove-img]').forEach(function (btn) {
           btn.addEventListener('click', function () { state.images.splice(Number(btn.dataset.removeImg), 1); renderImageGrid(); });
+        });
+        var addTile = document.getElementById('imageAddTile');
+        ['dragenter', 'dragover'].forEach(function (t) { addTile.addEventListener(t, function (ev) { ev.preventDefault(); addTile.classList.add('is-drag'); }); });
+        ['dragleave', 'drop'].forEach(function (t) { addTile.addEventListener(t, function (ev) { ev.preventDefault(); addTile.classList.remove('is-drag'); }); });
+        addTile.addEventListener('drop', function (ev) {
+          if (!ev.dataTransfer || !ev.dataTransfer.files.length) return;
+          var fi = document.getElementById('imageFileInput');
+          fi.files = ev.dataTransfer.files;
+          fi.dispatchEvent(new Event('change', { bubbles: true }));
         });
         document.getElementById('imageFileInput').addEventListener('change', function (e) {
           var files = Array.prototype.slice.call(e.target.files || []);
@@ -2502,7 +2684,7 @@
     AdminAPI.media.list().then(function (media) {
       content().innerHTML =
         '<div class="panel-card">' +
-          '<h3>Upload New Image</h3>' +
+          '<h3>Upload Images</h3>' +
           '<input type="file" id="mediaUploadInput" accept="image/*" multiple>' +
         '</div>' +
         '<div class="panel-card"><h3>All Uploaded Images (' + media.length + ')</h3>' +
@@ -2521,7 +2703,7 @@
         var files = Array.prototype.slice.call(e.target.files || []);
         Promise.all(files.map(function (file) { return AdminAPI.media.upload(file); }))
           .then(function () { ROUTE_RENDERERS.media(); })
-          .catch(function (err) { window.alert(err.message || 'Upload failed'); });
+          .catch(function (err) { UploadUI.fail(e.target, err.message || 'Upload failed'); });
       });
       content().querySelectorAll('[data-copy-url]').forEach(function (btn) {
         btn.addEventListener('click', function () { navigator.clipboard.writeText(btn.dataset.copyUrl); btn.textContent = 'Copied ✓'; window.setTimeout(function () { btn.textContent = 'Copy URL'; }, 1200); });
@@ -2718,11 +2900,11 @@
           '<p style="font-size:0.78rem;color:var(--text-soft);margin-bottom:6px;">Image / GIF / Video — upload straight from here (goes to the same Media Library as product photos) or paste an existing Media Library URL.</p>' +
           '<div class="form-row">' +
             '<div class="form-field"><label>Desktop Media URL</label><input type="text" id="mDesktopUrl" value="' + esc(cm.desktop_url || '') + '" placeholder="https://…"></div>' +
-            '<div class="form-field"><label>Upload Desktop</label><input type="file" id="mDesktopUpload" accept="image/*,video/*"></div>' +
+            '<div class="form-field"><label>Upload Desktop</label><input type="file" data-url-target="mDesktopUrl" id="mDesktopUpload" accept="image/*,video/*"></div>' +
           '</div>' +
           '<div class="form-row">' +
             '<div class="form-field"><label>Mobile Media URL (optional — falls back to Desktop if blank)</label><input type="text" id="mMobileUrl" value="' + esc(cm.mobile_url || '') + '" placeholder="https://…"></div>' +
-            '<div class="form-field"><label>Upload Mobile</label><input type="file" id="mMobileUpload" accept="image/*,video/*"></div>' +
+            '<div class="form-field"><label>Upload Mobile</label><input type="file" data-url-target="mMobileUrl" id="mMobileUpload" accept="image/*,video/*"></div>' +
           '</div>' +
           '<div class="form-row" id="mVideoOptionsRow">' +
             '<div class="form-field" style="flex-direction:row;gap:6px;align-items:center;"><input type="checkbox" id="mAutoplay"' + (cm.video_autoplay !== false ? ' checked' : '') + '><label style="margin:0;">Autoplay</label></div>' +
@@ -2761,11 +2943,11 @@
           '</select></div>' +
           '<div class="form-row">' +
             '<div class="form-field"><label>Left Product/Media URL</label><input type="text" id="hLeftUrl" value="' + esc(cm.hero_left_media_url || '') + '" placeholder="https://…"></div>' +
-            '<div class="form-field"><label>Upload Left</label><input type="file" id="hLeftUpload" accept="image/*"></div>' +
+            '<div class="form-field"><label>Upload Left</label><input type="file" data-url-target="hLeftUrl" id="hLeftUpload" accept="image/*"></div>' +
           '</div>' +
           '<div class="form-row">' +
             '<div class="form-field"><label>Right Product/Media URL</label><input type="text" id="hRightUrl" value="' + esc(cm.hero_right_media_url || '') + '" placeholder="https://…"></div>' +
-            '<div class="form-field"><label>Upload Right</label><input type="file" id="hRightUpload" accept="image/*"></div>' +
+            '<div class="form-field"><label>Upload Right</label><input type="file" data-url-target="hRightUrl" id="hRightUpload" accept="image/*"></div>' +
           '</div>' +
           '<div class="amazon-shipping-actions"><button type="button" class="btn-secondary btn-sm" id="previewHeroBtn">Preview Animated Hero (Desktop / Mobile)</button></div>' +
           '<div id="heroPreviewArea"></div>' +
@@ -2850,7 +3032,8 @@
           AdminAPI.media.upload(file).then(function (res) {
             document.getElementById(targetInputId).value = res.url;
             input.disabled = false;
-          }).catch(function (err) { input.disabled = false; window.alert(err.message || 'Upload failed.'); });
+            UploadUI.done(input, res.url);
+          }).catch(function (err) { input.disabled = false; UploadUI.fail(input, err.message || 'Upload failed.'); });
         });
       }
       wireUpload('mDesktopUpload', 'mDesktopUrl');

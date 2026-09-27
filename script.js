@@ -581,7 +581,7 @@
         showView('home');
         setActiveNav(route);
         window.setTimeout(function () {
-          var el = document.getElementById(route);
+          var el = document.getElementById(route === 'contact' ? 'faq' : route);
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 30);
         return;
@@ -611,18 +611,17 @@
         return;
       }
 
-      if (route === 'family') {
-        showView('comingSoon');
-        setActiveNav('family');
-        ComingSoon.render('family');
-        window.scrollTo(0, 0);
-        return;
-      }
-
-      if (route === 'couples') {
-        showView('comingSoon');
-        setActiveNav('couples');
-        ComingSoon.render('couples');
+      if (route === 'family' || route === 'couples') {
+        var cat = route === 'family' ? 'family' : 'couple';
+        setActiveNav(route);
+        if (categoryHasProducts(cat)) {
+          showView('gallery');
+          if (cat === 'family') Gallery.renderCategory('family', 'Family Wear', 'Matching looks for the whole family.');
+          else Gallery.renderCategory('couple', 'Couple Sets', 'Better together, always.');
+        } else {
+          showView('comingSoon');
+          ComingSoon.render(route);
+        }
         window.scrollTo(0, 0);
         return;
       }
@@ -890,6 +889,18 @@
     // that doesn't already exist on at least one real product — applyFilters() below just finds
     // nothing if it did, so this can't silently show an unfiltered "All Products" claiming to be
     // a specific age/gender.
+    // Family Wear / Couple Sets: a real listing as soon as Admin publishes a product in that
+    // category (Router falls back to the Coming Soon view only while there are none).
+    function renderCategory(category, title, subtitle) {
+      mode = category;
+      pool = PRODUCTS.filter(function (p) { return p.category === category; });
+      quickChipKey = null;
+      resetFilters();
+      setTitle(title);
+      subtitleEl().textContent = subtitle;
+      render();
+    }
+
     function renderAll(preset) {
       mode = 'all';
       pool = PRODUCTS.slice();
@@ -949,7 +960,7 @@
     function getRealAgeGroups() { return distinctValues(PRODUCTS, 'ageGroup'); }
     function getRealGenders() { return distinctValues(PRODUCTS, 'gender'); }
 
-    return { renderKids: renderKids, renderAll: renderAll, renderNewArrivals: renderNewArrivals, init: init, getRealAgeGroups: getRealAgeGroups, getRealGenders: getRealGenders };
+    return { renderKids: renderKids, renderCategory: renderCategory, renderAll: renderAll, renderNewArrivals: renderNewArrivals, init: init, getRealAgeGroups: getRealAgeGroups, getRealGenders: getRealGenders };
   })();
 
   /* ---------- 11. Coming Soon view (Family Wear / Couple Sets) ---------- */
@@ -5004,6 +5015,21 @@
     renderOfferSection(data.content, data.products);
   }
 
+  function categoryHasProducts(category) {
+    return PRODUCTS.some(function (p) { return p.category === category; });
+  }
+  // Homepage category tiles follow the live catalog: "Coming soon" disappears the moment Admin
+  // publishes the first Family / Couple product — no HTML edit needed.
+  function renderCategoryTiles() {
+    document.querySelectorAll('.category-tile[data-category]').forEach(function (tile) {
+      var live = categoryHasProducts(tile.dataset.category);
+      var tag = tile.querySelector('[data-live-tag]');
+      var cta = tile.querySelector('[data-live-cta]');
+      if (tag) tag.hidden = live;
+      if (cta) cta.innerHTML = live ? 'Shop now &#8594;' : 'Get notified &#8594;';
+    });
+  }
+
   /* ---------- 20.6 Homepage quick-nav (Shop by Age / Gender) + New Arrivals ---------- */
   var AGE_GROUP_ICON = '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 3c4 0 8 2 8 6 0 7-4 11-8 12-4-1-8-5-8-12 0-4 4-6 8-6Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
   var GENDER_ICON = {
@@ -5172,6 +5198,7 @@
       if (featuredSection) featuredSection.hidden = featuredItems.length === 0;
       renderShopByAge();
       renderShopByGender();
+      renderCategoryTiles();
       renderHomepageNewArrivals();
 
       // "More Styles You'll Love" — real, non-featured stock so this doesn't just repeat the
