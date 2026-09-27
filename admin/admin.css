@@ -512,3 +512,99 @@ h1, h2, h3, h4 { font-weight: 600; }
   .kpi-card-icon { width: 34px; height: 34px; }
   .kpi-card-value { font-size: 1.6rem; }
 }
+
+/* =========================================================
+   OFFICIAL BRAND GUIDELINE (Sep 2026) — supersedes the brown admin theme above.
+   Only the six brand-sheet colours + cream background + warm charcoal text.
+   ========================================================= */
+:root {
+  --brand-blue: #A7C5DB; --brand-beige: #E7CDA8; --brand-coral: #F7A7A7;
+  --brand-lavender: #DCCBEB; --brand-sage: #CFE6D3; --brand-butter: #FFE7AB;
+  --brand-cream: #FDF6EF; --ink: #3A3330; --ink-soft: #7A6F68;
+
+  --bg: var(--brand-cream);
+  --surface: #FFFFFF;
+  --surface-sunk: color-mix(in srgb, var(--brand-beige) 22%, #fff);
+  --border: rgba(58, 51, 48, 0.10);
+  --text: var(--ink);
+  --text-soft: var(--ink-soft);
+  --text-faint: #A69D96;
+
+  --coral: var(--brand-coral);
+  --coral-dark: var(--ink);
+  --coral-soft: color-mix(in srgb, var(--brand-coral) 22%, #fff);
+  --blue: var(--brand-blue);  --blue-dark: var(--ink);  --blue-soft: color-mix(in srgb, var(--brand-blue) 28%, #fff);
+  --beige: var(--brand-beige); --beige-dark: var(--ink); --beige-soft: color-mix(in srgb, var(--brand-beige) 30%, #fff);
+  --lavender: var(--brand-lavender); --lavender-dark: var(--ink); --lavender-soft: color-mix(in srgb, var(--brand-lavender) 45%, #fff);
+  --sage: var(--brand-sage); --sage-dark: var(--ink); --sage-soft: color-mix(in srgb, var(--brand-sage) 55%, #fff);
+  --amber: var(--ink); --amber-soft: color-mix(in srgb, var(--brand-butter) 60%, #fff);
+  --red: var(--ink); --red-soft: color-mix(in srgb, var(--brand-coral) 35%, #fff);
+
+  --radius-lg: 20px; --radius-md: 16px; --radius-sm: 12px;
+  --font: 'Jost', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Jost', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+/* Buttons: coral fill + charcoal label */
+.btn-primary, .btn-secondary, .btn-danger, .btn-ghost { border-radius: 999px; }
+.btn-primary { background: var(--brand-coral); color: var(--ink); }
+.btn-primary:hover { background: color-mix(in srgb, var(--brand-coral) 82%, var(--ink)); }
+.btn-secondary { background: var(--blue-soft); color: var(--ink); }
+.btn-danger { background: var(--red-soft); color: var(--ink); }
+.filter-chip.active { background: var(--brand-coral); border-color: var(--brand-coral); color: var(--ink); }
+.switch input:checked + .switch-track { background: var(--brand-coral); }
+.image-slot.primary::before { background: var(--brand-coral); color: var(--ink); border-radius: 999px; }
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus, .search-box input:focus {
+  border-color: var(--brand-coral); box-shadow: 0 0 0 3px var(--coral-soft);
+}
+
+/* Shell: light brand sidebar */
+.admin-sidebar { background: #FFFFFF; color: var(--ink); border-right: 1px solid var(--border); }
+.sidebar-brand { border-bottom-color: var(--border); }
+.sidebar-logo-img { background: transparent; padding: 0; height: 44px; }
+.sidebar-brand-text { color: var(--ink-soft); }
+.sidebar-group-label { color: var(--ink-soft); letter-spacing: 0.28em; font-weight: 400; }
+.sidebar-nav a { color: var(--ink); border-radius: 999px; }
+.sidebar-nav a .nav-icon { color: var(--ink-soft); }
+.sidebar-nav a:hover { background: var(--surface-sunk); color: var(--ink); }
+.sidebar-nav a.active { background: var(--coral-soft); color: var(--ink); font-weight: 500; }
+.sidebar-nav a.active .nav-icon { color: var(--ink); }
+.sidebar-logout { color: var(--ink-soft); border-top-color: var(--border); }
+.sidebar-logout .nav-icon { color: var(--ink-soft); }
+.sidebar-logout:hover { background: var(--red-soft); color: var(--ink); }
+.sidebar-logout:hover .nav-icon { color: var(--ink); }
+.admin-topbar { background: rgba(253, 246, 239, 0.94); }
+.topbar-heading h2 { font-weight: 400; font-size: 1.7rem; letter-spacing: -0.01em; }
+.topbar-search, .notif-bell { background: #fff; border-radius: 999px; }
+.notif-dot { background: var(--brand-coral); }
+.topbar-avatar { background: var(--brand-blue); color: var(--ink); }
+
+/* KPI cards: one brand colour each */
+.kpi-card-value { font-family: var(--font); font-weight: 500; font-size: 1.9rem; }
+.kpi-card.tone-coral .kpi-card-icon { background: var(--coral-soft); color: var(--ink); }
+.kpi-card.tone-blue .kpi-card-icon { background: var(--blue-soft); color: var(--ink); }
+.kpi-card.tone-sage .kpi-card-icon { background: var(--sage-soft); color: var(--ink); }
+.kpi-card.tone-lavender .kpi-card-icon { background: var(--lavender-soft); color: var(--ink); }
+.kpi-card-trend.up { background: var(--sage-soft); color: var(--ink); }
+.kpi-card-trend.down { background: var(--red-soft); color: var(--ink); }
+.quick-action-btn .icon { color: var(--ink); }
+.quick-action-btn:hover { background: var(--coral-soft); border-color: var(--coral-soft); color: var(--ink); }
+.panel-link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--brand-coral); text-underline-offset: 3px; }
+.data-table th { background: var(--surface-sunk); color: var(--ink-soft); }
+.data-table tr:hover td { background: color-mix(in srgb, var(--brand-cream) 60%, #fff); }
+.icon-action-btn:hover { background: var(--coral-soft); color: var(--ink); }
+
+/* Status badges: brand pastels, charcoal text — each state its own colour */
+.badge { border-radius: 999px; color: var(--ink) !important; }
+.badge-new, .badge-pending, .badge-shipment_created, .badge-pickup_scheduled { background: var(--amber-soft); }
+.badge-confirmed, .badge-paid, .badge-active, .badge-delivered { background: var(--sage-soft); }
+.badge-packing, .badge-ready_to_ship { background: var(--blue-soft); }
+.badge-shipped, .badge-out_for_delivery, .badge-picked_up, .badge-in_transit { background: var(--lavender-soft); }
+.badge-cancelled, .badge-failed, .badge-draft, .badge-delivery_failed { background: var(--red-soft); }
+.badge-refunded, .badge-returned { background: var(--beige-soft); }
+.status-timeline-dot { background: var(--brand-coral); }
+.toast-order { border-left-color: var(--brand-coral); }
+.toast-order-icon { color: var(--ink); }
+.shipping-provider-warning { color: var(--ink); }
+.shipping-error-box strong, .shipping-error-inline { color: var(--ink); }
+.admin-scrim { background: rgba(58, 51, 48, 0.4); }
+.login-screen { background: var(--brand-cream); }

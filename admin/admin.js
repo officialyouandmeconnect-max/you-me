@@ -67,7 +67,7 @@
 
   // Shared: render a product image (real upload OR one of the customer site's pastel
   // placeholder classes) as an <img> or a colored box, consistently across every admin view.
-  var PLACEHOLDER_COLORS = { 'img-blue': '#DCE9F1', 'img-beige': '#F1E4D3', 'img-pink': '#F7DEE1', 'img-sage': '#E3EBDD', 'img-dual': 'linear-gradient(135deg,#DCE9F1,#F7DEE1)' };
+  var PLACEHOLDER_COLORS = { 'img-blue': '#E9F0F6', 'img-beige': '#F8F0E5', 'img-pink': '#FDEDED', 'img-sage': '#E9F4EB', 'img-dual': 'linear-gradient(135deg,#E9F0F6,#FDEDED)' }; // brand-sheet colour tints
   function imageHtml(url, sizeClass) {
     sizeClass = sizeClass || 'thumb';
     if (!url) return '<div class="thumb-placeholder" style="background:#eee;"></div>';
@@ -1350,23 +1350,23 @@
     return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(titleSafe) + '</title><style>' +
       'body{font-family:Poppins,Arial,sans-serif;color:#2E2A26;margin:0;padding:32px;background:#fff;}' +
       '.invoice{max-width:760px;margin:0 auto;}' +
-      '.inv-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #F1E4D3;padding-bottom:20px;margin-bottom:24px;}' +
-      '.inv-brand h1{margin:0;font-size:1.6rem;color:#E68A98;}' +
+      '.inv-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #F7A7A7;padding-bottom:20px;margin-bottom:24px;}' +
+      '.inv-brand h1{margin:0;font-size:1.6rem;color:#3A3330;}' +
       '.inv-logo{display:block;height:48px;width:auto;max-width:220px;object-fit:contain;object-position:left center;}' +
-      '.inv-brand p{margin:6px 0 0;color:#6B6259;font-size:0.85rem;}' +
+      '.inv-brand p{margin:6px 0 0;color:#7A6F68;font-size:0.85rem;}' +
       '.inv-meta{text-align:right;font-size:0.85rem;color:#2E2A26;}' +
-      '.inv-meta strong{color:#E68A98;}' +
-      'h2.section{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;color:#6B6259;margin:24px 0 8px;}' +
+      '.inv-meta strong{color:#3A3330;}' +
+      'h2.section{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;color:#7A6F68;margin:24px 0 8px;}' +
       '.inv-cols{display:flex;gap:32px;}' +
       '.inv-cols > div{flex:1;font-size:0.9rem;line-height:1.5;}' +
       'table{width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:8px;}' +
-      'th{text-align:left;background:#FBF6F1;padding:8px 10px;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:#6B6259;}' +
-      'td{padding:8px 10px;border-bottom:1px solid #F1E4D3;}' +
+      'th{text-align:left;background:#FDF6EF;padding:8px 10px;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:#7A6F68;}' +
+      'td{padding:8px 10px;border-bottom:1px solid #E7CDA8;}' +
       'td.num,th.num{text-align:right;}' +
       '.summary-table{width:280px;margin-left:auto;margin-top:8px;}' +
       '.summary-table td{border-bottom:none;padding:4px 10px;}' +
       '.summary-table tr.grand td{font-weight:700;font-size:1rem;border-top:2px solid #2E2A26;padding-top:8px;}' +
-      '.inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #F1E4D3;font-size:0.78rem;color:#6B6259;text-align:center;}' +
+      '.inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #E7CDA8;font-size:0.78rem;color:#7A6F68;text-align:center;}' +
       '@media print{body{padding:0;} @page{size:A4;margin:16mm;}}' +
       '</style></head><body><div class="invoice">' +
       '<div class="inv-head">' +
@@ -2741,7 +2741,7 @@
             '<div class="form-field"><label>Alignment</label><select id="mAlign">' + ['left', 'center', 'right'].map(function (a) { return '<option value="' + a + '"' + (a === (cm.text_align || 'center') ? ' selected' : '') + '>' + a + '</option>'; }).join('') + '</select></div>' +
           '</div>' +
           '<div class="form-row">' +
-            '<div class="form-field"><label>Background Color</label><input type="text" id="mBgColor" value="' + esc(cm.text_bg_color || '') + '" placeholder="#F7DEE1"></div>' +
+            '<div class="form-field"><label>Background Color</label><input type="text" id="mBgColor" value="' + esc(cm.text_bg_color || '') + '" placeholder="#FDEDED"></div>' +
             '<div class="form-field"><label>Text Color</label><input type="text" id="mTextColor" value="' + esc(cm.text_color || '') + '" placeholder="#2E2A26"></div>' +
             '<div class="form-field"><label>Animation</label><select id="mAnimation">' + ['none', 'fade', 'slide_up', 'soft_reveal', 'marquee'].map(function (a) { return '<option value="' + a + '"' + (a === (cm.text_animation || 'fade') ? ' selected' : '') + '>' + a.replace('_', ' ') + '</option>'; }).join('') + '</select></div>' +
           '</div>' +
@@ -2806,7 +2806,7 @@
             '<div class="form-field"><label>Link (optional)</label><input type="text" id="aLink" value="' + esc(cc.announcement_link || '') + '"></div>' +
           '</div>' +
           '<div class="form-row">' +
-            '<div class="form-field"><label>Background Color</label><input type="text" id="aBg" value="' + esc(cc.announcement_bg_color || '') + '" placeholder="#F7DEE1"></div>' +
+            '<div class="form-field"><label>Background Color</label><input type="text" id="aBg" value="' + esc(cc.announcement_bg_color || '') + '" placeholder="#FDEDED"></div>' +
             '<div class="form-field"><label>Text Color</label><input type="text" id="aTextColor" value="' + esc(cc.announcement_text_color || '') + '" placeholder="#2E2A26"></div>' +
             '<div class="form-field"><label>Animation</label><select id="aAnimation">' + ['static', 'scrolling', 'fade'].map(function (a) { return '<option value="' + a + '"' + (a === (cc.announcement_animation || 'static') ? ' selected' : '') + '>' + a + '</option>'; }).join('') + '</select></div>' +
           '</div>' +
@@ -3000,13 +3000,13 @@
     if (url && media.banner_type !== 'animated_text') {
       return '<img src="' + esc(url) + '" style="width:100%;display:block;" alt="">';
     }
-    var bg = media.text_bg_color || '#F7DEE1';
+    var bg = media.text_bg_color || '#FDEDED';
     var fg = media.text_color || '#2E2A26';
     return '<div style="background:' + esc(bg) + ';color:' + esc(fg) + ';padding:32px 20px;text-align:' + esc(media.text_align || 'center') + ';">' +
       (media.text_headline ? '<div style="font-size:1.3rem;font-weight:700;">' + esc(media.text_headline) + '</div>' : '') +
       (media.text_subheadline ? '<div style="font-size:0.95rem;margin-top:4px;">' + esc(media.text_subheadline) + '</div>' : '') +
       (media.text_description ? '<div style="font-size:0.8rem;margin-top:8px;">' + esc(media.text_description) + '</div>' : '') +
-      (media.text_cta_text ? '<div style="margin-top:14px;"><span style="background:#E68A98;color:#fff;padding:8px 18px;border-radius:999px;font-size:0.8rem;font-weight:600;">' + esc(media.text_cta_text) + '</span></div>' : '') +
+      (media.text_cta_text ? '<div style="margin-top:14px;"><span style="background:#F7A7A7;color:#3A3330;padding:8px 18px;border-radius:999px;font-size:0.8rem;font-weight:600;">' + esc(media.text_cta_text) + '</span></div>' : '') +
     '</div>';
   }
 
@@ -3033,7 +3033,7 @@
         '<div style="position:relative;z-index:2;max-width:340px;">' +
           (media.text_headline ? '<div style="font-family:var(--font-heading, serif);font-size:' + (isMobile ? '1.3rem' : '1.7rem') + ';font-weight:700;color:#2E2A26;">' + esc(media.text_headline) + '</div>' : '') +
           (media.text_subheadline ? '<div style="font-size:0.92rem;color:#5A4B3E;margin-top:6px;">' + esc(media.text_subheadline) + '</div>' : '') +
-          (media.text_cta_text ? '<div style="margin-top:14px;"><span style="background:#E68A98;color:#fff;padding:9px 20px;border-radius:999px;font-size:0.8rem;font-weight:600;">' + esc(media.text_cta_text) + '</span></div>' : '') +
+          (media.text_cta_text ? '<div style="margin-top:14px;"><span style="background:#F7A7A7;color:#3A3330;padding:9px 20px;border-radius:999px;font-size:0.8rem;font-weight:600;">' + esc(media.text_cta_text) + '</span></div>' : '') +
         '</div>' +
       '</div>';
   }

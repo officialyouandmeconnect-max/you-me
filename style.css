@@ -3351,3 +3351,283 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; letter-spacing:
 @media (max-width: 720px) {
   .hero-ctas .btn { white-space: nowrap; letter-spacing: 0.08em; font-size: 0.7rem; gap: 6px; }
 }
+
+/* =========================================================
+   18. OFFICIAL BRAND GUIDELINE (Sep 2026) — supersedes the brown system in section 17.
+   Palette strictly from the You & Me brand sheet:
+     Dusty Blue #A7C5DB · Warm Beige #E7CDA8 · Soft Coral #F7A7A7
+     Lavender #DCCBEB · Sage Green #CFE6D3 · Butter Yellow #FFE7AB
+   Background = the sheet's cream. Text = the sheet's warm charcoal (needed for legibility —
+   the pastels never carry body text). Tints below are the same six colours mixed with white.
+   Category colour-coding follows the sheet: Kids = blue, Family = beige, Couples = coral,
+   Everyday / New = sage. Type: the sheet's clean geometric sans with wide-tracked caps (Jost).
+   ========================================================= */
+:root {
+  --brand-blue: #A7C5DB;
+  --brand-beige: #E7CDA8;
+  --brand-coral: #F7A7A7;
+  --brand-lavender: #DCCBEB;
+  --brand-sage: #CFE6D3;
+  --brand-butter: #FFE7AB;
+  --brand-cream: #FDF6EF;
+  --ink: #3A3330;
+  --ink-soft: #7A6F68;
+  --coral-tint: color-mix(in srgb, var(--brand-coral) 22%, #fff);
+  --blue-tint: color-mix(in srgb, var(--brand-blue) 25%, #fff);
+  --beige-tint: color-mix(in srgb, var(--brand-beige) 30%, #fff);
+  --sage-tint: color-mix(in srgb, var(--brand-sage) 45%, #fff);
+  --lavender-tint: color-mix(in srgb, var(--brand-lavender) 40%, #fff);
+  --butter-tint: color-mix(in srgb, var(--brand-butter) 45%, #fff);
+
+  /* Re-point every older token (sections 1–17) at the brand palette */
+  --brown-900: var(--ink);
+  --brown-800: var(--ink);
+  --brown-700: var(--brand-coral);
+  --brown-500: var(--ink-soft);
+  --brown-300: var(--brand-beige);
+  --brown-100: var(--beige-tint);
+  --brown-50: var(--brand-cream);
+  --rust: var(--ink);
+
+  --color-bg: var(--brand-cream);
+  --color-surface: #FFFFFF;
+  --color-text: var(--ink);
+  --color-text-soft: var(--ink-soft);
+  --color-ink: var(--ink);
+  --color-line: rgba(58, 51, 48, 0.10);
+  --color-pink: var(--brand-coral);
+  --color-pink-soft: var(--coral-tint);
+  --color-blue: var(--brand-blue);
+  --color-blue-soft: var(--blue-tint);
+  --color-beige: var(--brand-beige);
+  --color-beige-soft: var(--beige-tint);
+  --color-sage: var(--brand-sage);
+  --color-sage-soft: var(--sage-tint);
+  --color-cream: var(--beige-tint);
+
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --radius-sm: 14px;
+  --radius-btn: 999px;
+  --shadow-soft: 0 10px 30px rgba(58, 51, 48, 0.06);
+  --shadow-hover: 0 18px 40px rgba(58, 51, 48, 0.10);
+  --font-heading: 'Jost', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-body: 'Jost', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --footer-bg: var(--brand-blue);
+  --footer-text: var(--ink);
+  --footer-text-soft: rgba(58, 51, 48, 0.75);
+}
+h1, h2, h3 { font-family: var(--font-heading); font-weight: 400; letter-spacing: -0.01em; }
+::selection { background: var(--coral-tint); color: var(--ink); }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* Buttons: Soft Coral fill, charcoal label (white on coral fails contrast) */
+.btn { font-weight: 500; letter-spacing: 0.16em; }
+.btn-primary { background: var(--brand-coral); color: var(--ink); }
+.btn-primary:hover { background: color-mix(in srgb, var(--brand-coral) 82%, var(--ink)); color: var(--ink); }
+.btn-ghost, .btn-outline { border-color: var(--brand-beige); color: var(--ink); background: #fff; }
+.btn-ghost:hover, .btn-outline:hover { border-color: var(--brand-coral); background: var(--coral-tint); color: var(--ink); }
+.product-add-btn:disabled { background: var(--beige-tint); color: var(--ink-soft); }
+/* Text links stay charcoal with a coral underline */
+.link-btn, .pm-size-guide-link, .account-forgot, .gallery-back, .account-dash-section-head .link-btn, .faq-intro a {
+  color: var(--ink); text-decoration: underline; text-decoration-color: var(--brand-coral); text-underline-offset: 3px;
+}
+.view-all { color: var(--ink); border-bottom-color: var(--brand-coral); }
+.view-all:hover { color: var(--ink); }
+.eyebrow, .hero-eyebrow, .home-quicknav .shop-quicknav-heading, .shop-filter-group h4, .checkout-section h3, .pm-option-label, .footer-col h4 {
+  color: var(--ink-soft); letter-spacing: 0.3em; font-weight: 400;
+}
+
+/* Header: coral announcement, cream header, coral active underline */
+.announcement-bar { background: var(--brand-coral); color: var(--ink); font-weight: 500; }
+.site-header { background: rgba(253, 246, 239, 0.95); }
+.main-nav a { color: var(--ink); }
+.main-nav a:hover, .main-nav a.active { color: var(--ink); }
+.main-nav a.active::after { background: var(--brand-coral); height: 2px; }
+.cart-badge, .mbb-badge { background: var(--brand-coral); color: var(--ink); }
+.mbb-item.active, .mbb-item:active { color: var(--ink); }
+
+/* Section rhythm */
+.section-heading h2, .centered-heading, .faq-intro h2 { font-size: 2.4rem; font-weight: 400; }
+.section-heading h2::after, .centered-heading::after {
+  content: ''; display: block; width: 44px; height: 3px; border-radius: 3px; margin-top: 14px;
+  background: linear-gradient(90deg, var(--brand-blue) 0 33%, var(--brand-beige) 33% 66%, var(--brand-coral) 66%);
+}
+.centered-heading::after { margin-left: auto; margin-right: auto; }
+
+/* Hero: brand cream + soft pastel arch */
+.hero { background: var(--brand-cream); }
+.hero-copy h1 { font-weight: 300; letter-spacing: -0.02em; }
+.hero-copy h1 .accent { color: var(--ink); font-style: normal; font-weight: 500;
+  background: linear-gradient(transparent 62%, var(--coral-tint) 62%); padding: 0 4px; }
+.hero-eyebrow { color: var(--ink-soft); }
+.hero-points li::before { background: var(--brand-coral); }
+.hero-points li:nth-child(2)::before { background: var(--brand-blue); }
+.hero-points li:nth-child(3)::before { background: var(--brand-sage); }
+.hero-art {
+  background: radial-gradient(circle at 50% 42%, #fff 0%, var(--coral-tint) 55%, var(--blue-tint) 100%);
+  border-radius: 999px 999px var(--radius-lg) var(--radius-lg);
+}
+.hero-baby-art { filter: drop-shadow(0 16px 26px rgba(58, 51, 48, 0.12)); }
+
+/* Trust strip icons in brand colours */
+.trust-strip { background: var(--brand-cream); }
+.trust-strip-inner { border-radius: 999px; }
+.trust-strip-inner li:nth-child(1) svg { color: var(--ink); }
+.trust-strip-inner li svg { color: var(--ink); }
+.trust-strip-inner li { gap: 12px; }
+.trust-strip-inner li::before { content: ''; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--brand-blue); }
+.trust-strip-inner li:nth-child(2)::before { background: var(--brand-sage); }
+.trust-strip-inner li:nth-child(3)::before { background: var(--brand-beige); }
+.trust-strip-inner li:nth-child(4)::before { background: var(--brand-coral); }
+.trust-strip-inner li svg { display: none; }
+@media (max-width: 860px) { .trust-strip-inner { border-radius: var(--radius-md); } }
+
+/* Category tiles: colour-coded per the brand sheet */
+.category-tile { border-radius: var(--radius-lg); color: var(--ink); }
+.category-tile.tile-1 { --tile-bg: var(--brand-blue); }       /* Kids */
+.category-tile.tile-2 { --tile-bg: var(--brand-sage); }       /* New / everyday */
+.category-tile.tile-3 { --tile-bg: var(--brand-beige); }      /* Family */
+.category-tile.tile-4 { --tile-bg: var(--brand-coral); }      /* Couples */
+.category-tile-art { color: rgba(255, 255, 255, 0.75); }
+.category-tile-art svg path, .category-tile-art svg circle { stroke-width: 1.1; }
+.category-tile-text strong { font-family: var(--font-heading); font-weight: 500; font-size: 1.6rem; }
+.category-tile-text small { color: var(--ink); opacity: 0.8; }
+.category-tile-tag { background: rgba(255, 255, 255, 0.9); color: var(--ink); border-radius: 999px; }
+
+/* Age / gender chips */
+.home-quicknav .shop-quicknav-chip:hover { border-color: var(--brand-coral); color: var(--ink); background: var(--coral-tint); }
+.home-quicknav .shop-quicknav-chip svg { color: var(--ink-soft); }
+#shopByGenderSection .shop-quicknav-chip:nth-child(1) svg { color: var(--ink); }
+
+/* Product cards */
+.product-img { border-radius: var(--radius-md); background: var(--beige-tint); }
+.product-img .placeholder-img,
+.placeholder-img.img-blue, .placeholder-img.img-pink, .placeholder-img.img-beige, .placeholder-img.img-sage, .placeholder-img.img-dual {
+  background: linear-gradient(180deg, #fff 0%, var(--beige-tint) 100%);
+}
+.product-img .placeholder-img::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 6.5a1.8 1.8 0 1 1 1.8 1.8c-.9 0-1.8.6-1.8 1.5v.7M12 10.5 3.5 16.2c-.8.5-.4 1.8.5 1.8h16c.9 0 1.3-1.3.5-1.8L12 10.5Z' fill='none' stroke='%23CFE6D3' stroke-width='0.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  opacity: 1;
+}
+.product-badge { border-radius: 999px; font-weight: 500; }
+.product-badge-new { background: var(--brand-sage); color: var(--ink); }
+.product-badge-sale { background: var(--brand-coral); color: var(--ink); }
+.product-badge-oos { background: var(--brand-beige); color: var(--ink); }
+.wishlist-btn { color: var(--ink); }
+.wishlist-btn.active { color: var(--brand-coral); }
+.product-quick-view { border-radius: 999px; }
+.product-quick-view:hover { color: var(--ink); background: #fff; }
+.product-card h3 { color: var(--ink); font-weight: 400; }
+.product-card h3:hover { color: var(--ink); text-decoration: underline; text-decoration-color: var(--brand-coral); text-underline-offset: 3px; }
+.product-price { color: var(--ink); font-weight: 500; }
+.product-old-price { color: var(--ink-soft); }
+.product-discount { background: var(--coral-tint); color: var(--ink); padding: 2px 8px; border-radius: 999px; font-weight: 500; }
+.product-sizes span { border-radius: 999px; color: var(--ink); border-color: rgba(58, 51, 48, 0.14); padding: 3px 9px; }
+.product-stock.in-stock, .product-stock.low-stock, .product-stock.out-of-stock,
+.pm-stock.in-stock, .pm-stock.low-stock, .pm-stock.out-of-stock { color: var(--ink); }
+.product-stock::before, .pm-stock::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: var(--brand-sage); vertical-align: middle; }
+.product-stock.low-stock::before, .pm-stock.low-stock::before { background: var(--brand-butter); }
+.product-stock.out-of-stock::before, .pm-stock.out-of-stock::before { background: var(--brand-coral); }
+
+/* Shop pages */
+.gallery-filter-chip.active { background: var(--brand-coral); border-color: var(--brand-coral); color: var(--ink); }
+.shop-toolbar-badge { background: var(--brand-coral); color: var(--ink); }
+.shop-filter-option input[type="radio"], .shop-filter-option input[type="checkbox"] { accent-color: var(--brand-coral); }
+.view-gallery .section-heading h2 { font-weight: 300; }
+.coming-soon-card .deco { color: var(--brand-coral) !important; }
+.coming-soon-card h2 { font-weight: 300; }
+.view-coming-soon { background: linear-gradient(180deg, var(--brand-cream), var(--lavender-tint)); }
+
+/* Panels: product modal, quick add, cart, checkout */
+.pm-name { font-family: var(--font-heading); font-weight: 400; }
+.pm-size-btn { border-radius: 999px; border-color: rgba(58, 51, 48, 0.18); }
+.pm-size-btn:hover { border-color: var(--brand-coral); }
+.pm-size-btn.selected { background: var(--brand-coral); border-color: var(--brand-coral); color: var(--ink); }
+.pm-color-btn.selected { border-color: var(--ink); }
+.pm-gallery-thumbs button.active { border-color: var(--brand-coral); }
+.cart-totals-row.grand { font-family: var(--font-body); font-weight: 500; font-size: 1.15rem; }
+.form-field input, .form-field select, .form-field textarea { border-color: rgba(58, 51, 48, 0.18); border-radius: 12px; }
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus {
+  border-color: var(--brand-coral); box-shadow: 0 0 0 3px var(--coral-tint);
+}
+
+/* Login / account */
+.account-welcome h3 { font-family: var(--font-heading); font-weight: 400; font-size: 1.7rem; }
+.account-tabs { border-radius: 999px; background: var(--beige-tint); }
+.account-tab { border-radius: 999px; }
+.account-tab.active { background: #fff; color: var(--ink); }
+.btn-google { border-radius: 999px; }
+.view-account { background: linear-gradient(180deg, var(--brand-cream), var(--blue-tint)); }
+.account-side-nav, .account-dash-content { border-radius: var(--radius-lg); }
+.account-nav-item { color: var(--ink); border-radius: 999px; }
+.account-nav-item:hover { background: var(--beige-tint); color: var(--ink); }
+.account-nav-item.active { background: var(--brand-coral); color: var(--ink); }
+.account-nav-logout:hover { color: var(--ink); background: var(--coral-tint); }
+.account-dash-content h2, .account-dash-section-head h3 { font-family: var(--font-heading); font-weight: 400; }
+.account-stat-card { background: var(--blue-tint); }
+.account-stat-card:nth-child(2) { background: var(--sage-tint); }
+.account-stat-card:nth-child(3) { background: var(--beige-tint); }
+.account-stat-card:nth-child(4) { background: var(--coral-tint); }
+.account-stat-value { font-family: var(--font-body); font-weight: 500; color: var(--ink); }
+.order-card:hover { border-color: var(--brand-coral); }
+.badge-cancelled, .badge-failed, .badge-draft, .badge-delivery_failed { background: var(--coral-tint); color: var(--ink); }
+
+/* About / reviews / FAQ / newsletter / footer */
+.value-icon { background: var(--beige-tint); color: var(--ink); }
+.value-list li:nth-child(1) .value-icon { background: var(--butter-tint); }
+.value-list li:nth-child(2) .value-icon { background: var(--sage-tint); }
+.value-list li:nth-child(3) .value-icon { background: var(--coral-tint); }
+.value-list li:nth-child(4) .value-icon { background: var(--blue-tint); }
+.about-copy h2 { font-family: var(--font-heading); font-weight: 400; }
+.quote-mark { color: var(--brand-coral); }
+.stars { color: var(--brand-coral); }
+.faq-item summary::after { color: var(--brand-coral); }
+.newsletter-inner { background: var(--brand-coral); color: var(--ink); }
+.newsletter-copy .eyebrow { color: var(--ink); }
+.newsletter-copy h2 { color: var(--ink); font-weight: 400; }
+.newsletter-sub, .newsletter-note { color: rgba(58, 51, 48, 0.78); }
+.newsletter-input-row .btn-primary { background: var(--ink); color: #fff; }
+.newsletter-input-row .btn-primary:hover { background: #000; color: #fff; }
+.newsletter-feedback { color: var(--ink); }
+.site-footer { background: var(--footer-bg); color: var(--ink); }
+.footer-col h4 { color: var(--ink); }
+.footer-col a, .footer-link { color: var(--footer-text-soft); }
+.footer-col a:hover, .footer-link:hover { color: var(--ink); }
+.footer-logo { background: var(--brand-cream); }
+.footer-connect-heading { color: var(--ink); font-family: var(--font-heading); font-weight: 500; }
+.footer-newsletter-form input { background: #fff; border-color: transparent; color: var(--ink); }
+.footer-newsletter-form input::placeholder { color: var(--ink-soft); }
+.footer-newsletter-form .btn { background: var(--ink); color: #fff; }
+.footer-newsletter-form .btn:hover { background: #000; }
+.footer-social-icon { background: rgba(255, 255, 255, 0.55); color: var(--ink); }
+.footer-bottom { border-color: rgba(58, 51, 48, 0.15); color: var(--footer-text-soft); }
+
+@media (max-width: 720px) {
+  .section-heading h2, .centered-heading, .faq-intro h2 { font-size: 1.9rem; }
+  .category-tile-text strong { font-size: 1.35rem; }
+}
+
+/* 18b. Legibility: Soft Coral is a fill/accent colour only. Every rule that used the old accent
+   token as TEXT colour is set back to charcoal here (coral text on cream fails contrast). */
+.account-dash-section-head .link-btn, .account-empty-icon, .account-forgot button, .account-stat-value,
+.breadcrumb a:hover, .btn-outline, .campaign-offer-section .campaign-coupon strong,
+.campaign-offer-section .campaign-offer-label, .cart-item-price, .cart-item-save, .checkout-location-change,
+.checkout-section h3, .deliver-to-bar-change, .eyebrow, .faq-intro a:hover, .gallery-back,
+.gallery-empty .link-btn, .hero-eyebrow, .journey-node-latest .journey-node-title, .location-ios-help-toggle,
+.location-result-bad, .main-nav a:hover, .main-nav a.active, .main-nav ul a.active, .mbb-item:active,
+.order-card-remove:hover, .pm-delivery-row .link-btn, .pm-price, .pm-size-guide-link, .pm-stock.out-of-stock,
+.product-card h3:hover, .product-discount, .product-price, .product-quick-view:hover,
+.product-stock.out-of-stock, .shop-now, .shop-sidebar-head .link-btn, .simple-node.current .simple-node-label,
+.success-order-id, .tracking-eta strong, .view-all, .view-all:hover, .link-btn, .account-forgot,
+.account-nav-item:hover, .home-quicknav .shop-quicknav-chip:hover, .panel-close:hover, .value-icon {
+  color: var(--ink);
+}
+.account-nav-item.active { color: var(--ink); }
+.deliver-to-bar-change, .checkout-location-change, .cart-item-save, .account-forgot button, .pm-delivery-row .link-btn,
+.shop-sidebar-head .link-btn, .gallery-empty .link-btn {
+  text-decoration: underline; text-decoration-color: var(--brand-coral); text-underline-offset: 3px;
+}
+/* Shop page title: no colour bar under the H2 (it collides with the subtitle) */
+.view-gallery .section-heading h2::after, .coming-soon-card h2::after { display: none; }

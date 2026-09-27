@@ -980,7 +980,7 @@
         var email = input ? input.value.trim() : '';
         var feedback = document.getElementById('notifyFeedback');
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-          if (feedback) { feedback.textContent = 'Please enter a valid email address.'; feedback.style.color = '#C5677A'; }
+          if (feedback) { feedback.textContent = 'Please enter a valid email address.'; feedback.style.color = '#3A3330'; }
           return;
         }
         try {
@@ -3710,23 +3710,23 @@
       return '<!doctype html><html><head><meta charset="utf-8"><title>' + escapeHtml(titleSafe) + '</title><style>' +
         'body{font-family:Poppins,Arial,sans-serif;color:#2E2A26;margin:0;padding:32px;background:#fff;}' +
         '.invoice{max-width:760px;margin:0 auto;}' +
-        '.inv-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #F1E4D3;padding-bottom:20px;margin-bottom:24px;}' +
-        '.inv-brand h1{margin:0;font-size:1.6rem;color:#E68A98;}' +
+        '.inv-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #F7A7A7;padding-bottom:20px;margin-bottom:24px;}' +
+        '.inv-brand h1{margin:0;font-size:1.6rem;color:#3A3330;}' +
         '.inv-logo{display:block;height:48px;width:auto;max-width:220px;object-fit:contain;object-position:left center;}' +
-        '.inv-brand p{margin:6px 0 0;color:#6B6259;font-size:0.85rem;}' +
+        '.inv-brand p{margin:6px 0 0;color:#7A6F68;font-size:0.85rem;}' +
         '.inv-meta{text-align:right;font-size:0.85rem;color:#2E2A26;}' +
-        '.inv-meta strong{color:#E68A98;}' +
-        'h2.section{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;color:#6B6259;margin:24px 0 8px;}' +
+        '.inv-meta strong{color:#3A3330;}' +
+        'h2.section{font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;color:#7A6F68;margin:24px 0 8px;}' +
         '.inv-cols{display:flex;gap:32px;}' +
         '.inv-cols > div{flex:1;font-size:0.9rem;line-height:1.5;}' +
         'table{width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:8px;}' +
-        'th{text-align:left;background:#FBF6F1;padding:8px 10px;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:#6B6259;}' +
-        'td{padding:8px 10px;border-bottom:1px solid #F1E4D3;}' +
+        'th{text-align:left;background:#FDF6EF;padding:8px 10px;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:#7A6F68;}' +
+        'td{padding:8px 10px;border-bottom:1px solid #E7CDA8;}' +
         'td.num,th.num{text-align:right;}' +
         '.summary-table{width:280px;margin-left:auto;margin-top:8px;}' +
         '.summary-table td{border-bottom:none;padding:4px 10px;}' +
         '.summary-table tr.grand td{font-weight:700;font-size:1rem;border-top:2px solid #2E2A26;padding-top:8px;}' +
-        '.inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #F1E4D3;font-size:0.78rem;color:#6B6259;text-align:center;}' +
+        '.inv-footer{margin-top:32px;padding-top:16px;border-top:1px solid #E7CDA8;font-size:0.78rem;color:#7A6F68;text-align:center;}' +
         '@media print{body{padding:0;} @page{size:A4;margin:16mm;}}' +
         '</style></head><body><div class="invoice">' +
         '<div class="inv-head">' +
@@ -4611,7 +4611,7 @@
       var emailInput = document.getElementById(emailInputId);
       var email = emailInput ? emailInput.value.trim() : '';
       var isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-      if (!isValid) { feedback.textContent = 'Please enter a valid email address.'; feedback.style.color = '#C5677A'; return; }
+      if (!isValid) { feedback.textContent = 'Please enter a valid email address.'; feedback.style.color = '#3A3330'; return; }
 
       var submitBtn = form.querySelector('button[type="submit"], button');
       if (submitBtn) submitBtn.disabled = true;
@@ -4636,7 +4636,7 @@
         })
         .catch(function () {
           feedback.textContent = 'Could not subscribe right now — please try again.';
-          feedback.style.color = '#C5677A';
+          feedback.style.color = '#3A3330';
         })
         .then(function () { if (submitBtn) submitBtn.disabled = false; });
     });
