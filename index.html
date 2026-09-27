@@ -20,7 +20,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260903j">
+<link rel="stylesheet" href="style.css?v=20260928a">
 </head>
 <body>
 
@@ -132,7 +132,7 @@
         <h1>Made for Moments that <span class="accent">Last Forever</span></h1>
         <div class="hero-rule"><span>&#10084;</span></div>
         <p>Thoughtful designs for kids, families and couples who love to match.</p>
-        <a href="#featured-products" class="btn btn-primary">Shop Now <span class="arrow">&#8594;</span></a>
+        <a href="#all" class="btn btn-primary">Shop Now <span class="arrow">&#8594;</span></a>
       </div>
       <div class="hero-visual">
         <div class="hero-art">
@@ -144,6 +144,35 @@
       </div>
     </div>
   </section>
+
+  <!-- ============ 3a. TRUST STRIP (only claims the site already makes elsewhere) ============ -->
+  <section class="trust-strip" aria-label="Why shop with us">
+    <ul class="trust-strip-inner">
+      <li><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3 7h11v9H3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M14 10h4l3 3v3h-7v-6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="7" cy="18" r="1.6" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="17.5" cy="18" r="1.6" fill="none" stroke="currentColor" stroke-width="1.7"/></svg><span>Free shipping over &#8377;999</span></li>
+      <li><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3c4 0 8 2 8 6 0 7-4 11-8 12-4-1-8-5-8-12 0-4 4-6 8-6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><span>Safe &amp; soft fabrics</span></li>
+      <li><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3 14.6 8.6 21 9.4 16.5 13.6 17.6 20 12 16.9 6.4 20 7.5 13.6 3 9.4 9.4 8.6 12 3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><span>Premium quality</span></li>
+      <li><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8.7 8 9 4.6-.3 8-4 8-9V6l-8-3Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><span>Fast &amp; secure delivery</span></li>
+    </ul>
+  </section>
+
+  <!-- ============ 3b/3c. SHOP FOR YOUR LITTLE ONE (age + gender, real data only) ============ -->
+  <div class="home-quicknav">
+  <!-- ============ 3b. SHOP BY AGE (real product ageGroup values only, see script.js renderShopByAge) ============ -->
+  <section class="shop-quicknav" id="shopByAgeSection" hidden aria-label="Shop by age" data-reveal="stagger">
+    <div class="shop-quicknav-inner">
+      <h2 class="shop-quicknav-heading">Shop by Age</h2>
+      <div class="shop-quicknav-scroll" id="shopByAgeChips"></div>
+    </div>
+  </section>
+
+  <!-- ============ 3c. BABY BOYS / GIRLS / UNISEX (real product gender values only) ============ -->
+  <section class="shop-quicknav" id="shopByGenderSection" hidden aria-label="Shop by gender" data-reveal="stagger">
+    <div class="shop-quicknav-inner">
+      <h2 class="shop-quicknav-heading">Shop by Gender</h2>
+      <div class="shop-quicknav-scroll" id="shopByGenderChips"></div>
+    </div>
+  </section>
+  </div>
 
   <!-- ============ 3a2. RETURNING CUSTOMER PERSONALIZATION (logged-in only, real data only) ============ -->
   <!-- Hidden by default and left empty until renderPersonalizedSection() in script.js decides
@@ -194,22 +223,6 @@
           <small>Fresh styles every week</small>
         </span>
       </a>
-    </div>
-  </section>
-
-  <!-- ============ 3b. SHOP BY AGE (real product ageGroup values only, see script.js renderShopByAge) ============ -->
-  <section class="shop-quicknav" id="shopByAgeSection" hidden aria-label="Shop by age" data-reveal="stagger">
-    <div class="shop-quicknav-inner">
-      <h2 class="shop-quicknav-heading">Shop by Age</h2>
-      <div class="shop-quicknav-scroll" id="shopByAgeChips"></div>
-    </div>
-  </section>
-
-  <!-- ============ 3c. BABY BOYS / GIRLS / UNISEX (real product gender values only) ============ -->
-  <section class="shop-quicknav" id="shopByGenderSection" hidden aria-label="Shop by gender" data-reveal="stagger">
-    <div class="shop-quicknav-inner">
-      <h2 class="shop-quicknav-heading">Shop by Gender</h2>
-      <div class="shop-quicknav-scroll" id="shopByGenderChips"></div>
     </div>
   </section>
 
@@ -769,6 +782,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260903p"></script>
+<script src="script.js?v=20260928a"></script>
 </body>
 </html>

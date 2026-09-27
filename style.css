@@ -1003,7 +1003,9 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
   .carousel-arrow { display: none; }
 }
 
-@media (max-width: 720px) {
+/* Hamburger drawer takes over at 1024px (was 720px): between 721-1024px the 7 nav links +
+   delivery pill + 4 icons didn't fit, pushing the page ~200px wider than the screen. */
+@media (max-width: 1024px) {
   /* Header: logo left, hamburger + Cart right, nothing floating in between (see the DOM-order
      bug-fix comment on .nav-toggle in index.html — this rule is just what makes that layout
      actually visible). Search/Wishlist/Account move into the drawer instead of staying in the
@@ -1073,6 +1075,9 @@ h1, h2, h3 { font-family: var(--font-heading); font-weight: 600; margin: 0; colo
     font-weight: 600;
   }
   .mobile-nav-action:active { background: var(--color-cream); }
+}
+
+@media (max-width: 720px) {
   .section { padding: 60px 20px; }
   .section-heading h2, .centered-heading { font-size: 1.6rem; }
   .hero-copy h1 { font-size: 1.9rem; }
@@ -2298,7 +2303,7 @@ a.footer-social-icon:hover { background: var(--color-surface); transform: transl
    just starts in its .is-revealed state, same final look, zero animation).
    ========================================================= */
 @media (prefers-reduced-motion: no-preference) {
-  [data-reveal] { opacity: 0; transition: opacity 0.6s ease, transform 0.6s ease; }
+  [data-reveal] { opacity: 0; transition: opacity 0.4s ease, transform 0.4s ease; }
   [data-reveal="fade-up"] { transform: translateY(22px); }
   [data-reveal="fade"] { transform: none; }
   [data-reveal="stagger"] > * { opacity: 0; transform: translateY(16px); transition: opacity 0.5s ease, transform 0.5s ease; }
@@ -2359,3 +2364,91 @@ a.footer-social-icon:hover { background: var(--color-surface); transform: transl
   }
   @keyframes heroSoftConfettiDrift { from { background-position: 0 0; } to { background-position: 0 420px; } }
 }
+
+/* =========================================================
+   14. HOME REDESIGN (Sep 2026)
+   Shopping-first homepage: tighter hero, trust strip, age/gender as big tap targets right under
+   the hero, compact collection tiles. Everything data-driven still hides itself when empty.
+   ========================================================= */
+
+/* Hero — shorter so products start closer to the fold. */
+.hero-inner { padding: 48px 24px 36px; }
+.hero-art { aspect-ratio: 4 / 3; }
+
+/* Trust strip */
+.trust-strip { padding: 0 24px; margin-top: -8px; position: relative; z-index: 5; }
+.trust-strip-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft);
+  padding: 16px 24px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.trust-strip-inner li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.trust-strip-inner svg { color: var(--color-pink); flex-shrink: 0; }
+
+/* Age + gender: one band, two columns on desktop, larger tiles */
+.home-quicknav {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 36px 24px 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.home-quicknav .shop-quicknav { padding: 0; }
+.home-quicknav .shop-quicknav-heading {
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+.home-quicknav .shop-quicknav-scroll { flex-wrap: wrap; gap: 12px; overflow: visible; }
+.home-quicknav .shop-quicknav-chip {
+  padding: 14px 22px;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-pink-soft);
+  box-shadow: 0 4px 14px rgba(64, 46, 33, 0.06);
+}
+.home-quicknav .shop-quicknav-chip:nth-child(4n+2) { background: var(--color-blue-soft); }
+.home-quicknav .shop-quicknav-chip:nth-child(4n+3) { background: var(--color-sage-soft); }
+.home-quicknav .shop-quicknav-chip:nth-child(4n+4) { background: var(--color-beige-soft); }
+.home-quicknav .shop-quicknav-chip:hover { transform: translateY(-2px); box-shadow: var(--shadow-soft); }
+#shopByGenderSection .shop-quicknav-chip:nth-child(1) { background: var(--color-pink-soft); }
+#shopByGenderSection .shop-quicknav-chip:nth-child(2) { background: var(--color-blue-soft); }
+/* Only one of the two has data → let it use the full width */
+.home-quicknav:has(> .shop-quicknav[hidden]) { grid-template-columns: 1fr; }
+
+.category-strip { margin-top: 32px; }
+
+/* Collections — short colour tiles instead of tall empty image blocks */
+.collection-img { aspect-ratio: 16 / 9; margin-bottom: 12px; }
+.collection-card { padding: 10px 10px 16px; }
+
+@media (max-width: 860px) {
+  .home-quicknav { grid-template-columns: 1fr; gap: 20px; padding-top: 28px; }
+  .trust-strip-inner { grid-template-columns: repeat(2, 1fr); padding: 14px 16px; }
+  .trust-strip-inner li { justify-content: flex-start; font-size: 0.8rem; }
+}
+@media (max-width: 720px) {
+  .trust-strip { padding: 0 16px; }
+  .home-quicknav { padding: 24px 16px 4px; }
+  .home-quicknav .shop-quicknav-scroll { flex-wrap: nowrap; overflow-x: auto; }
+  .home-quicknav .shop-quicknav-chip { padding: 12px 18px; font-size: 0.88rem; }
+  .collection-img { aspect-ratio: 4 / 3; }
+}
+

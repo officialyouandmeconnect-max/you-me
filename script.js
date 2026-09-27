@@ -4510,7 +4510,7 @@
           observer.unobserve(entry.target);
         }
       });
-    }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+    }, { threshold: 0, rootMargin: '0px 0px 15% 0px' }); // start revealing just before a section scrolls in, so fast scrolling never shows blank space
     els.forEach(function (el) { observer.observe(el); });
   }
 
@@ -5119,7 +5119,12 @@
     // New Arrivals / Search all filter the same live array) waits for the store API first.
     loadSizeGuide();
     loadProducts().then(function () {
-      renderProductGrid(grid, PRODUCTS.filter(function (p) { return p.featured; }));
+      // Featured Products hides itself entirely when Admin hasn't flagged anything as featured,
+      // instead of leaving an empty heading + blank grid on the homepage.
+      var featuredItems = PRODUCTS.filter(function (p) { return p.featured; });
+      renderProductGrid(grid, featuredItems);
+      var featuredSection = document.getElementById('featured-products');
+      if (featuredSection) featuredSection.hidden = featuredItems.length === 0;
       renderShopByAge();
       renderShopByGender();
       renderHomepageNewArrivals();
@@ -5132,7 +5137,12 @@
         var moreStyles = PRODUCTS.filter(function (p) { return !p.featured; }).slice(0, 12);
         moreStylesEl.innerHTML = moreStyles.map(renderProductCard).join('');
         var moreStylesSection = document.getElementById('more-styles');
-        if (moreStylesSection) moreStylesSection.hidden = moreStyles.length === 0;
+        if (moreStylesSection) {
+          moreStylesSection.hidden = moreStyles.length === 0;
+          // With nothing featured this row is the main product showcase, not "more" of anything.
+          var moreStylesHeading = moreStylesSection.querySelector('h2');
+          if (moreStylesHeading && !featuredItems.length) moreStylesHeading.textContent = 'Shop Our Styles';
+        }
       }
 
       // The one and only campaign read for the whole homepage — see CampaignService above.
