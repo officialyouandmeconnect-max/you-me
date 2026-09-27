@@ -4639,9 +4639,12 @@
           '<p>Once your order ships, track its real-time status any time from My Orders in your account.</p>'
       },
       returns: {
-        title: 'Returns & Exchanges',
-        html: '<p>If something isn&rsquo;t quite right, we accept exchanges within 7 days of delivery for unused items with tags intact.</p>' +
-          '<p>To start a return or exchange, message us on WhatsApp with your Order ID and we&rsquo;ll take it from there.</p>'
+        // Business rule (Sep 2026): no returns, no exchanges, no refunds at this stage. Keep every
+        // policy surface (this popup, home FAQ + its JSON-LD, meta description) consistent with it.
+        title: 'Return Policy',
+        html: '<p>As a new brand, we&rsquo;re not able to offer returns, exchanges or refunds at this stage &mdash; all sales are final.</p>' +
+          '<p>To help you get it right the first time, every product has its own Size Guide in its product details. Please check it before ordering.</p>' +
+          '<p>If there&rsquo;s a problem with your order, message us on WhatsApp with your Order ID and we&rsquo;ll look into it.</p>'
       },
       // BUG FIX: this used to be a hardcoded generic Age/Height/Chest table with invented
       // numbers (no real source). `html` is now computed at open() time from real,
@@ -4671,6 +4674,7 @@
       terms: {
         title: 'Terms & Conditions',
         html: '<p>Orders placed through this site are confirmed automatically once payment succeeds &mdash; pricing, stock, and delivery charges are calculated at checkout and are final at that point.</p>' +
+          '<p>We do not currently accept returns or exchanges, and all sales are final. Please check the product&rsquo;s Size Guide before ordering.</p>' +
           '<p>Product colors may vary slightly from what you see on screen. For help with an order, you can reach us on WhatsApp.</p>' +
           '<p class="info-disclaimer">This is placeholder terms text for the current version of the site &mdash; replace with your finalized terms before launch.</p>'
       }
