@@ -569,6 +569,7 @@
       views.comingSoon.hidden = name !== 'comingSoon';
       var accountView = document.getElementById('viewAccountDashboard');
       if (accountView) accountView.hidden = name !== 'accountDashboard';
+      document.body.dataset.view = name; // lets CSS drop the footer signup on Home (it has its own)
     }
 
     function handle() {
