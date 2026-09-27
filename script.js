@@ -4425,7 +4425,12 @@
     var wishlistBadge = document.getElementById('wishlistBadge');
     var cartBtn = document.getElementById('cartBtn');
 
-    function updateCartBadge() { if (cartBadge) cartBadge.textContent = String(CartService.getCount()); }
+    var mbbCartBadge = document.getElementById('mbbCartBadge');
+    function updateCartBadge() {
+      var count = CartService.getCount();
+      if (cartBadge) cartBadge.textContent = String(count);
+      if (mbbCartBadge) { mbbCartBadge.textContent = String(count); mbbCartBadge.hidden = count === 0; }
+    }
     function updateWishlistBadge() {
       if (!wishlistBadge) return;
       var count = WishlistService.getCount();
@@ -4439,6 +4444,15 @@
     updateWishlistBadge();
 
     if (cartBtn) cartBtn.addEventListener('click', function () { CartDrawer.open(); });
+
+    // Mobile bottom bar: Wishlist / Account / Cart just click the real header buttons (hidden
+    // on mobile but still in the DOM), so every panel opens through its one existing handler.
+    document.querySelectorAll('[data-mbb-proxy]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var target = document.getElementById(btn.getAttribute('data-mbb-proxy'));
+        if (target) target.click();
+      });
+    });
   }
 
   /* ---------- 20. Chrome: mobile nav, sticky header, testimonial carousel, newsletter ---------- */

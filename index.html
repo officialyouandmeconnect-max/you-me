@@ -18,9 +18,9 @@
 <meta name="description" content="You & Me — thoughtful matching outfits for kids, families and couples.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260928a">
+<link rel="stylesheet" href="style.css?v=20260928b">
 </head>
 <body>
 
@@ -129,10 +129,13 @@
     </div>
     <div class="hero-inner">
       <div class="hero-copy">
-        <h1>Made for Moments that <span class="accent">Last Forever</span></h1>
-        <div class="hero-rule"><span>&#10084;</span></div>
-        <p>Thoughtful designs for kids, families and couples who love to match.</p>
-        <a href="#all" class="btn btn-primary">Shop Now <span class="arrow">&#8594;</span></a>
+        <span class="hero-eyebrow">Baby essentials &middot; Soft &amp; safe</span>
+        <h1>Made for moments that <span class="accent">last forever</span></h1>
+        <p>Soft, thoughtful pieces for your little one &mdash; with family &amp; couple matching sets on the way.</p>
+        <div class="hero-ctas">
+          <a href="#all" class="btn btn-primary">Shop Now <span class="arrow">&#8594;</span></a>
+          <a href="#new-arrivals" class="btn btn-ghost">New Arrivals</a>
+        </div>
       </div>
       <div class="hero-visual">
         <div class="hero-art">
@@ -410,7 +413,9 @@
   <section class="section newsletter-section" id="contact" data-reveal="fade">
     <div class="section-inner newsletter-inner">
       <div class="newsletter-copy">
-        <h2>Stay Connected for New Arrivals &amp; Special Offers!</h2>
+        <span class="eyebrow">Coming soon</span>
+        <h2>Family &amp; couple matching sets are on the way</h2>
+        <p class="newsletter-sub">Be the first to know when they drop &mdash; plus new arrivals and member-only offers.</p>
       </div>
 
       <form class="newsletter-form" id="newsletterForm" novalidate>
@@ -535,6 +540,25 @@
 </main>
 
 <!-- ============ SITE FOOTER ============ -->
+<!-- Mobile-only bottom bar (<=720px): proxies the existing header buttons, no duplicate logic. -->
+<nav class="mobile-bottom-bar" id="mobileBottomBar" aria-label="Quick actions">
+  <a href="#home" class="mbb-item" data-mbb="home">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4v-9Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span>Home</span>
+  </a>
+  <a href="#all" class="mbb-item" data-mbb="shop">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="4" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="13" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>Shop</span>
+  </a>
+  <button type="button" class="mbb-item" data-mbb-proxy="wishlistBtn">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 20s-7-4.4-9.3-9C1.2 7.7 3 4.5 6.4 4.5c2 0 3.4 1.1 5.6 3.5 2.2-2.4 3.6-3.5 5.6-3.5 3.4 0 5.2 3.2 3.7 6.5C19 15.6 12 20 12 20Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span>Wishlist</span>
+  </button>
+  <button type="button" class="mbb-item" data-mbb-proxy="accountBtn">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 20c0-4.4 3.6-7 8-7s8 2.6 8 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>Account</span>
+  </button>
+  <button type="button" class="mbb-item" data-mbb-proxy="cartBtn">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 8h12l-1 12H7L6 8Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 8a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>Cart</span><span class="mbb-badge" id="mbbCartBadge" hidden>0</span>
+  </button>
+</nav>
+
 <footer class="site-footer">
   <div class="footer-wave" aria-hidden="true">
     <svg viewBox="0 0 1440 60" preserveAspectRatio="none"><path d="M0,30 C220,58 420,4 720,22 C1020,40 1240,58 1440,26 L1440,60 L0,60 Z"></path></svg>
@@ -782,6 +806,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260928a"></script>
+<script src="script.js?v=20260928b"></script>
 </body>
 </html>
