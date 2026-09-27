@@ -356,3 +356,159 @@ input, select, textarea { font-family: inherit; }
 .campaign-save-feedback { padding: 10px 16px; border-radius: 10px; font-size: 0.85rem; font-weight: 600; margin-bottom: 14px; }
 .campaign-save-feedback.ok { background: #E3EBDD; color: #3f5c37; }
 .campaign-save-feedback.err { background: #F7DEE1; color: #8a2f3f; }
+
+/* =========================================================
+   BROWN PREMIUM (Sep 2026) — matches the storefront's design system (style.css section 17).
+   The legacy "coral" tokens now carry the brown brand colour so every existing rule follows.
+   Status badge colours stay distinct on purpose: they're semantic, not decorative.
+   ========================================================= */
+:root {
+  --bg: #F7F2EC;
+  --surface: #FFFFFF;
+  --surface-sunk: #F4EDE4;
+  --border: #E8DDD1;
+  --text: #2B1D14;
+  --text-soft: #7B6A5D;
+  --text-faint: #A6978A;
+
+  --coral: #6B4430;
+  --coral-dark: #4E3022;
+  --coral-soft: #EFE3D6;
+  --beige: #A88462;
+  --beige-dark: #6B4430;
+  --beige-soft: #F1E7DB;
+  --red: #A4532F;
+  --red-soft: #F6ECE6;
+
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px rgba(43,29,20,0.04), 0 4px 16px rgba(43,29,20,0.04);
+  --shadow-md: 0 14px 36px rgba(43,29,20,0.12);
+  --font: 'Jost', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+}
+body { font-size: 14.5px; }
+h1, h2, h3, h4 { font-weight: 600; }
+
+/* Buttons: squared, calm, no glow */
+.btn-primary, .btn-secondary, .btn-danger, .btn-ghost { border-radius: 8px; font-weight: 500; letter-spacing: 0.02em; }
+.btn-primary { background: var(--coral); box-shadow: none; }
+.btn-primary:hover { background: var(--coral-dark); opacity: 1; }
+.btn-secondary { background: var(--coral-soft); color: var(--coral-dark); }
+.btn-ghost { border: 1px solid var(--border); color: var(--text); }
+.btn-ghost:hover { border-color: var(--coral); opacity: 1; }
+
+/* Inputs */
+.form-field label { font-weight: 500; color: var(--text); }
+.form-field input, .form-field select, .form-field textarea,
+.status-select-row select, #paymentStatusSelect, #orderStatusSelect, #shipProviderSelect, #amzPaymentType,
+.search-box input, .variant-table input[type="number"] {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus, .search-box input:focus {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px rgba(107,68,48,0.12);
+}
+
+/* Shell: dark brown sidebar, light workspace */
+.admin-app { gap: 0; padding: 0; }
+.admin-sidebar {
+  background: #2B1D14;
+  color: #EFE3D6;
+  border-radius: 0;
+  box-shadow: none;
+  top: 0;
+  height: 100vh;
+  padding: 22px 14px;
+  width: 248px;
+}
+.sidebar-brand { border-bottom-color: rgba(239,227,214,0.12); padding: 2px 6px 20px; }
+.sidebar-logo-img { background: #FBF8F4; border-radius: 8px; padding: 5px 8px; height: 40px; box-sizing: content-box; }
+.sidebar-brand-text { color: rgba(239,227,214,0.55); letter-spacing: 0.16em; font-weight: 500; }
+.sidebar-group-label {
+  font-size: 0.64rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(239,227,214,0.42);
+  padding: 16px 12px 6px;
+}
+.sidebar-group-label:first-child { padding-top: 4px; }
+.sidebar-nav { gap: 2px; }
+.sidebar-nav a { color: rgba(239,227,214,0.78); font-weight: 400; border-left: none; border-radius: 8px; padding: 10px 12px; }
+.sidebar-nav a .nav-icon { color: rgba(239,227,214,0.6); }
+.sidebar-nav a:hover { background: rgba(239,227,214,0.08); color: #fff; }
+.sidebar-nav a.active { background: #EFE3D6; color: #2B1D14; font-weight: 500; }
+.sidebar-nav a.active .nav-icon { color: #6B4430; }
+.sidebar-logout { color: rgba(239,227,214,0.7); border-top: 1px solid rgba(239,227,214,0.12); border-radius: 0; padding-top: 16px; }
+.sidebar-logout .nav-icon { color: rgba(239,227,214,0.6); }
+.sidebar-logout:hover { background: rgba(164,83,47,0.18); color: #fff; }
+.sidebar-logout:hover .nav-icon { color: #fff; }
+
+.admin-main { gap: 0; }
+.admin-topbar {
+  border-radius: 0;
+  box-shadow: none;
+  border-bottom: 1px solid var(--border);
+  top: 0;
+  padding: 18px 32px;
+  background: rgba(255,255,255,0.94);
+  backdrop-filter: blur(8px);
+}
+.topbar-heading h2 { font-family: var(--font-display); font-size: 1.9rem; font-weight: 600; letter-spacing: 0; line-height: 1.1; }
+.topbar-subtitle { font-weight: 400; }
+.topbar-search { border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+.notif-bell { border-radius: 8px; background: var(--bg); border: 1px solid var(--border); }
+.topbar-avatar { background: #6B4430; }
+.admin-content { padding: 28px 32px 48px; max-width: 1400px; }
+
+/* Cards */
+.kpi-card, .stat-card, .panel-card { box-shadow: none; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.kpi-card-icon { border-radius: 10px; }
+.kpi-card.tone-coral .kpi-card-icon { background: var(--coral-soft); color: var(--coral); }
+.kpi-card-value { font-family: var(--font-display); font-size: 2.2rem; font-weight: 600; letter-spacing: 0; }
+.kpi-card-label { font-weight: 500; letter-spacing: 0.02em; }
+.panel-card h3 { font-size: 1.02rem; font-weight: 600; }
+.panel-link { color: var(--coral); font-weight: 500; }
+.quick-action-btn { border: 1px solid var(--border); background: var(--surface); font-weight: 500; }
+.quick-action-btn:hover { background: var(--coral-soft); border-color: var(--coral-soft); color: var(--coral-dark); }
+.quick-action-btn .icon { color: var(--coral); }
+
+/* Tables */
+.data-table th { color: var(--text-soft); font-weight: 500; letter-spacing: 0.1em; background: var(--bg); }
+.data-table th:first-child { border-top-left-radius: 8px; }
+.data-table th:last-child { border-top-right-radius: 8px; }
+.data-table td { padding: 14px; }
+.data-table tr:hover td { background: #FBF8F4; }
+.thumb, .thumb-placeholder { border-radius: 8px; }
+.icon-action-btn { border-radius: 8px; }
+.icon-action-btn:hover { background: var(--coral-soft); color: var(--coral); }
+.badge { border-radius: 6px; font-weight: 500; letter-spacing: 0.02em; }
+.filter-chip { border: 1px solid var(--border); font-weight: 500; }
+.filter-chip.active { background: var(--coral); border-color: var(--coral); }
+.image-slot.primary::before { background: var(--coral); border-radius: 4px; }
+.status-timeline-dot { background: var(--coral); }
+.toast-order { border-left-color: var(--coral); }
+.admin-modal-inner { border-radius: var(--radius-lg); }
+.admin-scrim { background: rgba(43,29,20,0.45); }
+.switch input:checked + .switch-track { background: var(--coral); }
+.login-screen { background: #F7F2EC; }
+
+@media (max-width: 900px) {
+  .admin-sidebar { left: 0; top: 0; bottom: 0; height: 100vh; border-radius: 0; transform: translateX(-105%); }
+  .admin-topbar { padding: 14px 16px; }
+  .topbar-heading h2 { font-size: 1.5rem; }
+  .admin-content { padding: 20px 14px 40px; }
+  .mobile-nav-toggle { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border); padding: 7px; }
+}
+.kpi-card-value, .topbar-heading h2 { font-variant-numeric: lining-nums tabular-nums; }
+@media (max-width: 600px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .kpi-card { padding: 14px; gap: 10px; }
+  .kpi-card-icon { width: 34px; height: 34px; }
+  .kpi-card-value { font-size: 1.6rem; }
+}

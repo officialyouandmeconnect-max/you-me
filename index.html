@@ -18,7 +18,7 @@
 <meta name="description" content="Shop soft, safe baby clothes and kids wear from You &amp; Me. Rompers, onesies, co-ords and sets for babies and little ones. Free shipping over &#8377;999, UPI &amp; card payments. Family &amp; couple matching sets coming soon.">
 <link rel="canonical" href="https://officialyouandme.in/">
 <meta name="robots" content="index, follow, max-image-preview:large">
-<meta name="theme-color" content="#FAF6F0">
+<meta name="theme-color" content="#6B4430">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="You &amp; Me">
 <meta property="og:locale" content="en_IN">
@@ -31,7 +31,7 @@
 <meta name="twitter:title" content="You &amp; Me | Baby Clothes &amp; Matching Family Outfits">
 <meta name="twitter:description" content="Soft, thoughtful baby clothes and kids wear, shipped across India.">
 <meta name="twitter:image" content="https://officialyouandme.in/images/hero-art.png">
-<link rel="apple-touch-icon" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <script type="application/ld+json">
 {
  "@context": "https://schema.org",
@@ -122,9 +122,12 @@
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
-<link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20260928d">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="favicon-48.png" sizes="48x48" type="image/png">
+<link rel="icon" href="favicon.png" sizes="512x512" type="image/png">
+<link rel="manifest" href="site.webmanifest">
+<link rel="stylesheet" href="style.css?v=20260929a">
 </head>
 <body>
 
@@ -233,13 +236,18 @@
     </div>
     <div class="hero-inner">
       <div class="hero-copy">
-        <span class="hero-eyebrow">Baby essentials &middot; Soft &amp; safe</span>
+        <span class="hero-eyebrow">The You &amp; Me Edit</span>
         <h1>Made for moments that <span class="accent">last forever</span></h1>
-        <p>Soft, thoughtful pieces for your little one &mdash; with family &amp; couple matching sets on the way.</p>
+        <p>Soft, thoughtfully made clothing for your little one &mdash; with matching sets for the whole family on the way.</p>
         <div class="hero-ctas">
-          <a href="#all" class="btn btn-primary">Shop Now <span class="arrow">&#8594;</span></a>
+          <a href="#all" class="btn btn-primary">Shop the Collection <span class="arrow">&#8594;</span></a>
           <a href="#new-arrivals" class="btn btn-ghost">New Arrivals</a>
         </div>
+        <ul class="hero-points" aria-label="Why You &amp; Me">
+          <li>Free shipping over &#8377;999</li>
+          <li>Secure UPI &amp; card payments</li>
+          <li>Ships across India</li>
+        </ul>
       </div>
       <div class="hero-visual">
         <div class="hero-art">
@@ -262,6 +270,49 @@
     </ul>
   </section>
 
+  <!-- ============ 3a2. RETURNING CUSTOMER PERSONALIZATION (logged-in only, real data only) ============ -->
+  <!-- Hidden by default and left empty until renderPersonalizedSection() in script.js decides
+       there's genuinely enough real data (My Little One age match, wishlist, or browsing
+       history) to justify showing it. Guests and thin-data returning customers simply never see
+       this section — the New Arrivals / Featured Products sections beneath it are the fallback,
+       nothing extra is rendered for them. -->
+  <section class="section personalized-section" id="personalizedSection" hidden aria-label="Just for you" data-reveal="fade-up">
+    <div class="section-inner" id="personalizedSectionInner"><!-- rows injected via JS --></div>
+  </section>
+
+  <!-- ============ 4. SHOP BY CATEGORY (editorial tiles; add a photo later with style="--tile-img:url(...)") ============ -->
+  <section class="section category-tiles-section" id="shop-by-collection" aria-labelledby="catTilesHeading" data-reveal="fade-up">
+    <div class="section-inner">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Collections</span>
+          <h2 id="catTilesHeading">Shop by Category</h2>
+        </div>
+        <a href="#all" class="view-all">Shop All <span class="arrow">&#8594;</span></a>
+      </div>
+      <div class="category-tiles">
+        <a href="#kids" class="category-tile tile-1">
+          <span class="category-tile-art" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 4 4 7l2 3 2-1.5V20h8V8.5L18 10l2-3-4-3-2 2h-4L8 4Z" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/></svg></span>
+          <span class="category-tile-text"><strong>Kids Wear</strong><small>Rompers, sets &amp; everyday essentials</small><em>Shop now &#8594;</em></span>
+        </a>
+        <a href="#new-arrivals" class="category-tile tile-2">
+          <span class="category-tile-art" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21c0-6 4-10 8-11-1 6-3 9-8 11Z" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/><path d="M12 21c0-5-3-8-8-9 1 5 3 8 8 9Z" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/></svg></span>
+          <span class="category-tile-text"><strong>New Arrivals</strong><small>The latest pieces, just in</small><em>Shop now &#8594;</em></span>
+        </a>
+        <a href="#family" class="category-tile tile-3">
+          <span class="category-tile-tag">Coming soon</span>
+          <span class="category-tile-art" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="6" r="2.4" fill="none" stroke="currentColor" stroke-width="0.9"/><circle cx="16" cy="6" r="2.4" fill="none" stroke="currentColor" stroke-width="0.9"/><path d="M3 19c0-3.3 2.2-5.3 5-5.3s5 2 5 5.3M11 19c0-3.3 2.2-5.3 5-5.3s5 2 5 5.3" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linecap="round"/></svg></span>
+          <span class="category-tile-text"><strong>Family Wear</strong><small>Matching looks for everyone</small><em>Get notified &#8594;</em></span>
+        </a>
+        <a href="#couples" class="category-tile tile-4">
+          <span class="category-tile-tag">Coming soon</span>
+          <span class="category-tile-art" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-9.3-9C1.2 7.7 3 4.5 6.4 4.5c2 0 3.4 1.1 5.6 3.5 2.2-2.4 3.6-3.5 5.6-3.5 3.4 0 5.2 3.2 3.7 6.5C19 15.6 12 20 12 20Z" fill="none" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/></svg></span>
+          <span class="category-tile-text"><strong>Couple Sets</strong><small>Better together, always</small><em>Get notified &#8594;</em></span>
+        </a>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ 3b/3c. SHOP FOR YOUR LITTLE ONE (age + gender, real data only) ============ -->
   <div class="home-quicknav">
   <!-- ============ 3b. SHOP BY AGE (real product ageGroup values only, see script.js renderShopByAge) ============ -->
@@ -281,63 +332,11 @@
   </section>
   </div>
 
-  <!-- ============ 3a2. RETURNING CUSTOMER PERSONALIZATION (logged-in only, real data only) ============ -->
-  <!-- Hidden by default and left empty until renderPersonalizedSection() in script.js decides
-       there's genuinely enough real data (My Little One age match, wishlist, or browsing
-       history) to justify showing it. Guests and thin-data returning customers simply never see
-       this section — the New Arrivals / Featured Products sections beneath it are the fallback,
-       nothing extra is rendered for them. -->
-  <section class="section personalized-section" id="personalizedSection" hidden aria-label="Just for you" data-reveal="fade-up">
-    <div class="section-inner" id="personalizedSectionInner"><!-- rows injected via JS --></div>
-  </section>
-
-  <!-- ============ 4. CATEGORY HIGHLIGHT STRIP ============ -->
-  <section class="category-strip" aria-label="Shop by category" data-reveal="fade-up">
-    <div class="category-strip-inner">
-      <a href="#kids" class="category-item">
-        <span class="category-icon icon-blue" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M8 4 4 7l2 3 2-1.5V20h8V8.5L18 10l2-3-4-3-2 2h-4L8 4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-        </span>
-        <span class="category-text">
-          <strong>Kids Wear</strong>
-          <small>Comfort for little ones</small>
-        </span>
-      </a>
-      <a href="#family" class="category-item">
-        <span class="category-icon icon-beige" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="8" cy="6" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="16" cy="6" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 19c0-3.3 2.2-5.3 5-5.3s5 2 5 5.3M11 19c0-3.3 2.2-5.3 5-5.3s5 2 5 5.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </span>
-        <span class="category-text">
-          <strong>Family Wear</strong>
-          <small>Made for every family moment</small>
-        </span>
-      </a>
-      <a href="#couples" class="category-item">
-        <span class="category-icon icon-pink" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 20s-7-4.4-9.3-9C1.2 7.7 3 4.5 6.4 4.5c2 0 3.4 1.1 5.6 3.5 2.2-2.4 3.6-3.5 5.6-3.5 3.4 0 5.2 3.2 3.7 6.5C19 15.6 12 20 12 20Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-        </span>
-        <span class="category-text">
-          <strong>Couple Sets</strong>
-          <small>Better together, always</small>
-        </span>
-      </a>
-      <a href="#new-arrivals" class="category-item">
-        <span class="category-icon icon-sage" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 21c0-6 4-10 8-11-1 6-3 9-8 11Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 21c0-5-3-8-8-9 1 5 3 8 8 9Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-        </span>
-        <span class="category-text">
-          <strong>New Arrivals</strong>
-          <small>Fresh styles every week</small>
-        </span>
-      </a>
-    </div>
-  </section>
-
   <!-- ============ 4b. NEW ARRIVALS (real Admin-flagged products only) ============ -->
   <section class="section products-section" id="homeNewArrivals" hidden data-reveal="fade-up">
     <div class="section-inner">
       <div class="section-heading">
-        <h2>New Arrivals</h2>
+        <div><span class="eyebrow">Just in</span><h2>New Arrivals</h2></div>
         <a href="#new-arrivals" class="view-all">View All <span class="arrow">&#8594;</span></a>
       </div>
       <div class="product-grid" id="homeNewArrivalsGrid">
@@ -350,7 +349,7 @@
   <section class="section products-section" id="featured-products" data-reveal="fade-up">
     <div class="section-inner">
       <div class="section-heading">
-        <h2>Featured Products</h2>
+        <div><span class="eyebrow">Our picks</span><h2>Featured Products</h2></div>
         <a href="#all" class="view-all">View All <span class="arrow">&#8594;</span></a>
       </div>
 
@@ -360,49 +359,11 @@
     </div>
   </section>
 
-  <!-- ============ 6. SHOP BY COLLECTION ============ -->
-  <section class="section collection-section" id="shop-by-collection" data-reveal="fade-up">
-    <div class="section-inner">
-      <div class="section-heading">
-        <h2>Shop by Collection</h2>
-        <a href="#all" class="view-all">View All <span class="arrow">&#8594;</span></a>
-      </div>
-
-      <div class="collection-grid">
-        <a href="#kids?filter=baby" class="collection-card">
-          <div class="collection-img placeholder-img img-blue"></div>
-          <h3>Baby Essentials</h3>
-          <span class="shop-now">Shop Now <span class="arrow">&#8594;</span></span>
-        </a>
-        <a href="#kids?filter=tshirts" class="collection-card">
-          <div class="collection-img placeholder-img img-beige"></div>
-          <h3>Everyday Basics</h3>
-          <span class="shop-now">Shop Now <span class="arrow">&#8594;</span></span>
-        </a>
-        <a href="#kids" class="collection-card">
-          <div class="collection-img placeholder-img img-pink"></div>
-          <h3>Matching Outfits</h3>
-          <span class="shop-now">Shop Now <span class="arrow">&#8594;</span></span>
-        </a>
-        <a href="#kids?filter=sets" class="collection-card">
-          <div class="collection-img placeholder-img img-sage"></div>
-          <h3>Cozy Sets</h3>
-          <span class="shop-now">Shop Now <span class="arrow">&#8594;</span></span>
-        </a>
-        <a href="#new-arrivals" class="collection-card">
-          <div class="collection-img placeholder-img img-dual"></div>
-          <h3>Seasonal Styles</h3>
-          <span class="shop-now">Shop Now <span class="arrow">&#8594;</span></span>
-        </a>
-      </div>
-    </div>
-  </section>
-
   <!-- ============ 6b. MORE STYLES DISCOVERY ============ -->
   <section class="section" id="more-styles" data-reveal="fade-up">
     <div class="section-inner">
       <div class="section-heading">
-        <h2>More Styles You&rsquo;ll Love</h2>
+        <div><span class="eyebrow">Discover</span><h2>More Styles You&rsquo;ll Love</h2></div>
         <a href="#all" class="view-all">View All <span class="arrow">&#8594;</span></a>
       </div>
       <div class="pm-discovery-scroll" id="moreStylesScroll">
@@ -930,6 +891,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260928d"></script>
+<script src="script.js?v=20260929a"></script>
 </body>
 </html>

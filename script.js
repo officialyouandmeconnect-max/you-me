@@ -427,38 +427,57 @@
   }
 
   var MAX_VISIBLE_COLOR_DOTS = 4;
+  var MAX_CARD_SIZES = 4;
   function renderProductCard(product) {
     var discount = discountPercent(product);
     var stock = stockInfo(product.stock);
+    var soldOut = product.stock <= 0;
     var oldPriceHtml = product.oldPrice ? '<span class="product-old-price">' + formatPrice(product.oldPrice) + '</span>' : '';
     var discountHtml = discount > 0 ? '<span class="product-discount">' + discount + '% OFF</span>' : '';
     var visibleColors = product.colors.slice(0, MAX_VISIBLE_COLOR_DOTS);
     var extraColors = product.colors.length - visibleColors.length;
     var colorDots = visibleColors.map(function (c) { return '<span class="product-color-dot" style="background:' + c.hex + '" title="' + escapeHtml(c.name) + '"></span>'; }).join('') +
       (extraColors > 0 ? '<span class="product-color-dot-more">+' + extraColors + '</span>' : '');
+    // Real sizes only (product.sizes from Admin) — shown so shoppers see availability before opening.
+    var sizes = product.sizes || [];
+    var sizesHtml = sizes.length
+      ? '<div class="product-sizes" aria-label="Available sizes">' +
+          sizes.slice(0, MAX_CARD_SIZES).map(function (sz) { return '<span>' + escapeHtml(sz) + '</span>'; }).join('') +
+          (sizes.length > MAX_CARD_SIZES ? '<span class="more">+' + (sizes.length - MAX_CARD_SIZES) + '</span>' : '') +
+        '</div>'
+      : '';
     var wishActive = WishlistService.has(product.id);
+    var nameAttr = escapeHtml(product.name);
 
     return (
-      '<article class="product-card" data-id="' + product.id + '">' +
+      '<article class="product-card' + (soldOut ? ' is-sold-out' : '') + '" data-id="' + product.id + '">' +
         '<div class="product-img" data-open-product="' + product.id + '">' +
           productImageHtml(product.images[0], product.name) +
           productBadgeHtml(product) +
-          '<button class="wishlist-btn' + (wishActive ? ' active' : '') + '" type="button" aria-label="Toggle wishlist for ' + escapeHtml(product.name) + '" data-wishlist="' + product.id + '">' +
+          '<button class="wishlist-btn' + (wishActive ? ' active' : '') + '" type="button" aria-label="Toggle wishlist for ' + nameAttr + '" data-wishlist="' + product.id + '">' +
             heartIconSVG(wishActive) +
           '</button>' +
-          '<button class="product-quick-view" type="button" aria-label="Quick view ' + escapeHtml(product.name) + '" data-quick-view="' + product.id + '">' +
+          '<button class="product-quick-view" type="button" aria-label="Quick view ' + nameAttr + '" data-quick-view="' + product.id + '">' +
             '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>' +
-          '</button>' +
-          '<button class="product-quick-add" type="button" aria-label="Add ' + escapeHtml(product.name) + ' to cart" data-add-to-cart="' + product.id + '"' + (product.stock <= 0 ? ' disabled' : '') + '>' +
-            '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>' +
+            '<span>Quick view</span>' +
           '</button>' +
         '</div>' +
-        '<h3 data-open-product="' + product.id + '">' + escapeHtml(product.name) + '</h3>' +
-        '<div class="product-price-row">' +
-          '<span class="product-price">' + formatPrice(product.price) + '</span>' + oldPriceHtml + discountHtml +
+        '<div class="product-info">' +
+          '<h3 data-open-product="' + product.id + '">' + escapeHtml(product.name) + '</h3>' +
+          '<div class="product-price-row">' +
+            '<span class="product-price">' + formatPrice(product.price) + '</span>' + oldPriceHtml + discountHtml +
+          '</div>' +
+          sizesHtml +
+          (product.colors.length ? '<div class="product-chip-row">' + colorDots + '</div>' : '') +
+          (stock.cls !== 'in-stock' ? '<div class="product-stock ' + stock.cls + '">' + stock.label + '</div>' : '') +
+          '<div class="product-card-cta">' +
+            // Same data-add-to-cart hook as before (QuickAdd: size/colour sheet, or direct add).
+            '<button class="btn btn-primary btn-sm product-add-btn" type="button" data-add-to-cart="' + product.id + '"' + (soldOut ? ' disabled' : '') + ' aria-label="Add ' + nameAttr + ' to cart">' +
+              (soldOut ? 'Sold Out' : '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 8h12l-1 12H7L6 8Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 8a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Add to Cart') +
+            '</button>' +
+            '<button class="btn btn-ghost btn-sm product-details-btn" type="button" data-open-product="' + product.id + '" aria-label="View details for ' + nameAttr + '">Details</button>' +
+          '</div>' +
         '</div>' +
-        (product.colors.length ? '<div class="product-chip-row">' + colorDots + '</div>' : '') +
-        (stock.cls !== 'in-stock' ? '<div class="product-stock ' + stock.cls + '">' + stock.label + '</div>' : '') +
       '</article>'
     );
   }
@@ -4426,8 +4445,16 @@
     var cartBtn = document.getElementById('cartBtn');
 
     var mbbCartBadge = document.getElementById('mbbCartBadge');
+    var lastCartCount = CartService.getCount();
+    function bump(el) {
+      if (!el) return;
+      el.classList.remove('is-bumping'); void el.offsetWidth; // restart the CSS animation
+      el.classList.add('is-bumping');
+    }
     function updateCartBadge() {
       var count = CartService.getCount();
+      if (count > lastCartCount) { bump(cartBadge); bump(mbbCartBadge); bump(cartBtn); }
+      lastCartCount = count;
       if (cartBadge) cartBadge.textContent = String(count);
       if (mbbCartBadge) { mbbCartBadge.textContent = String(count); mbbCartBadge.hidden = count === 0; }
     }

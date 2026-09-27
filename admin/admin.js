@@ -677,16 +677,17 @@
 
   /* ---------- 3. Router + shell chrome ---------- */
   var NAV_ITEMS = [
-    { route: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-    { route: 'products', label: 'Products', icon: 'products' },
-    { route: 'orders', label: 'Orders', icon: 'orders' },
-    { route: 'customers', label: 'Customers', icon: 'customers' },
-    { route: 'inventory', label: 'Inventory', icon: 'inventory' },
-    { route: 'shipping', label: 'Shipping', icon: 'shipping' },
-    { route: 'categories', label: 'Categories', icon: 'categories' },
-    { route: 'media', label: 'Media Library', icon: 'media' },
-    { route: 'campaigns', label: 'Campaigns & Offers', icon: 'campaigns' },
-    { route: 'settings', label: 'Settings', icon: 'settings' }
+    // `group` only drives the sidebar section labels; order here is the sidebar order.
+    { route: 'dashboard', label: 'Dashboard', icon: 'dashboard', group: 'Overview' },
+    { route: 'orders', label: 'Orders', icon: 'orders', group: 'Sales' },
+    { route: 'shipping', label: 'Shipping', icon: 'shipping', group: 'Sales' },
+    { route: 'customers', label: 'Customers', icon: 'customers', group: 'Sales' },
+    { route: 'products', label: 'Products', icon: 'products', group: 'Catalog' },
+    { route: 'inventory', label: 'Inventory', icon: 'inventory', group: 'Catalog' },
+    { route: 'categories', label: 'Categories', icon: 'categories', group: 'Catalog' },
+    { route: 'media', label: 'Media Library', icon: 'media', group: 'Catalog' },
+    { route: 'campaigns', label: 'Campaigns & Offers', icon: 'campaigns', group: 'Marketing' },
+    { route: 'settings', label: 'Settings', icon: 'settings', group: 'System' }
   ];
   var ROUTE_TITLES = {}, ROUTE_SUBTITLES = {
     dashboard: "Here's what's happening with You & Me today.",
@@ -754,8 +755,11 @@
     // place — see the /you-me comment this used to require in index.html before this rewrite.
     var navEl = document.getElementById('sidebarNav');
     if (navEl) {
+      var lastGroup = null;
       navEl.innerHTML = NAV_ITEMS.map(function (item) {
-        return '<a href="' + BASE_PATH + '/admin/' + item.route + '" data-route="' + item.route + '">' +
+        var heading = item.group && item.group !== lastGroup ? '<div class="sidebar-group-label">' + esc(item.group) + '</div>' : '';
+        lastGroup = item.group;
+        return heading + '<a href="' + BASE_PATH + '/admin/' + item.route + '" data-route="' + item.route + '">' +
           '<span class="nav-icon">' + svgIcon(item.icon) + '</span><span>' + esc(item.label) + '</span></a>';
       }).join('');
     }
@@ -764,6 +768,11 @@
     if (mobileToggle) {
       mobileToggle.innerHTML = svgIcon('menu');
       mobileToggle.addEventListener('click', function () { document.getElementById('adminSidebar').classList.toggle('open'); });
+      // Mobile: tapping outside the open sidebar closes it.
+      document.addEventListener('click', function (e) {
+        var sb = document.getElementById('adminSidebar');
+        if (sb.classList.contains('open') && !sb.contains(e.target) && !mobileToggle.contains(e.target)) sb.classList.remove('open');
+      });
     }
     var logoutIcon = document.querySelector('#logoutBtn .nav-icon');
     if (logoutIcon) logoutIcon.innerHTML = svgIcon('logout');
