@@ -357,9 +357,14 @@
 
   function openPanel(panel) {
     if (!panel) return;
+    // Centered modals would otherwise stack visibly; the one underneath steps back until the
+    // top one closes (e.g. Cart → Checkout, Wishlist → Select Options).
+    openPanels.forEach(function (p) { if (p !== panel) p.classList.add('is-behind'); });
+    panel.classList.remove('is-behind');
     panel.hidden = false;
     void panel.offsetWidth;
     panel.classList.add('open');
+    openPanels = openPanels.filter(function (p) { return p !== panel; });
     openPanels.push(panel);
     var scrim = getScrim();
     if (scrim) { scrim.hidden = false; void scrim.offsetWidth; scrim.classList.add('visible'); }
@@ -370,10 +375,12 @@
     if (!panel) return;
     panel.classList.remove('open');
     openPanels = openPanels.filter(function (p) { return p !== panel; });
+    var top = openPanels[openPanels.length - 1];
+    if (top) top.classList.remove('is-behind');
     window.setTimeout(function () { if (!panel.classList.contains('open')) panel.hidden = true; }, 300);
     if (openPanels.length === 0) {
       var scrim = getScrim();
-      if (scrim) { scrim.classList.remove('visible'); window.setTimeout(function () { scrim.hidden = true; }, 250); }
+      if (scrim) { scrim.classList.remove('visible'); window.setTimeout(function () { if (openPanels.length === 0) scrim.hidden = true; }, 250); }
       document.body.style.overflow = '';
     }
   }
@@ -631,6 +638,7 @@
       showView('home');
       setActiveNav('home');
       window.scrollTo(0, 0);
+      if (parsed.params.info) window.setTimeout(function () { InfoModal.open(parsed.params.info); }, 60);
     }
 
     function navigate(hash) { window.location.hash = hash; }
@@ -1062,11 +1070,13 @@
       var sizeGuideHtml = state.sizeGuideOpen ? sizeGuideTableHtml(p.ageGroup) : '';
 
       body().innerHTML =
+        '<div class="pm-layout"><div class="pm-media">' +
         '<div class="pm-gallery-main">' +
           productImageHtml(p.images[state.galleryIndex]) +
           '<button type="button" class="wishlist-btn' + (wishActive ? ' active' : '') + '" style="position:absolute;top:14px;right:14px;" aria-label="Toggle wishlist" data-wishlist="' + p.id + '">' + heartIconSVG(wishActive) + '</button>' +
         '</div>' +
         '<div class="pm-gallery-thumbs">' + thumbs + '</div>' +
+        '</div><div class="pm-details">' +
         '<h2 class="pm-name" id="productModalTitle">' + escapeHtml(p.name) + '</h2>' +
         '<div class="pm-price-row">' +
           '<span class="pm-price">' + formatPrice(p.price) + '</span>' +
@@ -1107,6 +1117,7 @@
           '<button type="button" class="btn btn-primary" id="pmBuyNowSticky"' + (p.stock <= 0 ? ' disabled' : '') + '>Buy Now</button>' +
         '</div>' +
         productDetailAccordionHtml(p) +
+        '</div></div>' +
         discoveryRowHtml('You May Also Like', PRODUCTS.filter(function (o) { return o.id !== p.id && o.category === p.category; }).slice(0, 8)) +
         discoveryRowHtml('Recently Viewed', RecentlyViewedService.get(p.id, 8));
     }
@@ -1454,6 +1465,40 @@
   })();
 
   /* ---------- 13. Cart drawer ---------- */
+  /* ---------- Shared UI pieces (empty states, shortcuts) — one look everywhere ---------- */
+  var UI_ICONS = {
+    bag: '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M16 22h32l-3 30H19L16 22Z" fill="#F7A7A7"/><path d="M24 22a8 8 0 0 1 16 0" fill="none" stroke="#3A3330" stroke-width="2.6" stroke-linecap="round"/><path d="M26 34c2 3 10 3 12 0" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>',
+    heart: '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 52S12 40 8.5 28C6.2 20 11 13 18.5 13c5.5 0 9 3.3 13.5 8 4.5-4.7 8-8 13.5-8C53 13 57.8 20 55.5 28 52 40 32 52 32 52Z" fill="#F7A7A7"/><path d="M20 24c1.5-3 4-4.5 7-4.5" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>',
+    star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.6 5.6 6.1.7-4.5 4.2 1.2 6.1L12 16.4l-5.4 3 1.2-6.1-4.5-4.2 6.1-.7z"/></svg>'
+  };
+  function emptyStateHtml(opts) {
+    return '<div class="ym-empty">' +
+      '<div class="ym-empty-art">' + opts.icon +
+        '<span class="ym-empty-star s1">' + UI_ICONS.star + '</span><span class="ym-empty-star s2">' + UI_ICONS.star + '</span>' +
+      '</div>' +
+      '<h3>' + opts.title + '</h3>' +
+      '<p>' + opts.text + '</p>' +
+      (opts.action ? '<button type="button" class="btn btn-primary" id="' + opts.action.id + '">' + opts.action.label + '</button>' : '') +
+      (opts.shortcuts ? '<div class="ym-shortcuts"><span>Or browse</span>' +
+        [['kids', 'Kids Wear', 'blue'], ['new-arrivals', 'New Arrivals', 'sage'], ['family', 'Family Wear', 'beige'], ['couples', 'Couple Sets', 'coral']].map(function (c) {
+          return '<a href="#' + c[0] + '" class="ym-shortcut tone-' + c[2] + '" data-close-panel>' + c[1] + '</a>';
+        }).join('') + '</div>' : '') +
+    '</div>';
+  }
+  // Links inside a popup that navigate elsewhere close the popup first.
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('[data-close-panel]')) closeAllPanels();
+  });
+  function freeShippingHtml(subtotal) {
+    var goal = CONFIG.freeShippingThreshold;
+    var left = Math.max(0, goal - subtotal);
+    var pct = Math.min(100, Math.round((subtotal / goal) * 100));
+    return '<div class="ym-freeship' + (left === 0 ? ' is-done' : '') + '">' +
+      '<p>' + (left === 0 ? 'You&rsquo;ve unlocked <strong>free shipping</strong> &#10003;' : 'Add <strong>' + formatPrice(left) + '</strong> more for <strong>free shipping</strong>') + '</p>' +
+      '<div class="ym-freeship-bar"><span style="width:' + pct + '%"></span></div>' +
+    '</div>';
+  }
+
   var CartDrawer = (function () {
     function panel() { return document.getElementById('cartDrawer'); }
     function bodyEl() { return document.getElementById('cartDrawerBody'); }
@@ -1468,34 +1513,46 @@
       var f = footerEl();
       if (!b || !f) return;
 
+      var countEl = document.getElementById('cartDrawerCount');
+      if (countEl) countEl.textContent = items.length ? CartService.getCount() + (CartService.getCount() === 1 ? ' item' : ' items') : '';
       if (items.length === 0) {
-        b.innerHTML =
-          '<div class="cart-empty">' +
-            '<svg viewBox="0 0 24 24" width="40" height="40"><path d="M6 8h12l-1 12H7L6 8Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 8a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>' +
-            '<p>Your cart is empty.</p>' +
-          '</div>';
-        f.innerHTML = '<button type="button" class="btn btn-primary btn-block" id="cartContinueShopping">Continue Shopping</button>';
+        b.innerHTML = emptyStateHtml({
+          icon: UI_ICONS.bag,
+          title: 'Your cart is empty',
+          text: 'Soft, thoughtful pieces are waiting for you.',
+          action: { id: 'cartContinueShopping', label: 'Continue Shopping' },
+          shortcuts: true
+        });
+        f.innerHTML = '';
+        f.hidden = true;
         return;
       }
+      f.hidden = false;
 
-      b.innerHTML = items.map(function (item) {
+      var totals0 = CartService.getTotals();
+      b.innerHTML = freeShippingHtml(totals0.subtotal) + items.map(function (item) {
         return (
           '<div class="cart-item" data-line-id="' + item.lineId + '">' +
-            '<div class="cart-item-img">' + productImageHtml(item.img) + '</div>' +
-            '<div>' +
+            '<div class="cart-item-img">' + productImageHtml(item.img, item.name) + '</div>' +
+            '<div class="cart-item-info">' +
               '<div class="cart-item-name">' + escapeHtml(item.name) + '</div>' +
-              '<div class="cart-item-meta">Size: ' + escapeHtml(item.size) + ' &middot; Color: ' + escapeHtml(item.color) + '</div>' +
-              '<div class="cart-item-price">' + formatPrice(item.price * item.qty) + '</div>' +
-            '</div>' +
-            '<div class="cart-item-controls">' +
-              '<button type="button" class="cart-item-remove" data-remove="' + item.lineId + '">Remove</button>' +
-              '<button type="button" class="cart-item-save" data-save-for-later="' + item.lineId + '" data-save-product="' + item.productId + '">' +
-                (WishlistService.has(item.productId) ? 'In Wishlist' : 'Save for Later') +
-              '</button>' +
-              '<div class="qty-stepper">' +
-                '<button type="button" data-cart-qty="-1" data-line="' + item.lineId + '" aria-label="Decrease quantity">&minus;</button>' +
-                '<span>' + item.qty + '</span>' +
-                '<button type="button" data-cart-qty="1" data-line="' + item.lineId + '" aria-label="Increase quantity">+</button>' +
+              '<div class="cart-item-meta">' +
+                (item.size ? '<span class="ym-chip">Size ' + escapeHtml(item.size) + '</span>' : '') +
+                (item.color ? '<span class="ym-chip">' + escapeHtml(item.color) + '</span>' : '') +
+              '</div>' +
+              '<div class="cart-item-bottom">' +
+                '<div class="qty-stepper">' +
+                  '<button type="button" data-cart-qty="-1" data-line="' + item.lineId + '" aria-label="Decrease quantity">&minus;</button>' +
+                  '<span>' + item.qty + '</span>' +
+                  '<button type="button" data-cart-qty="1" data-line="' + item.lineId + '" aria-label="Increase quantity">+</button>' +
+                '</div>' +
+                '<div class="cart-item-price">' + formatPrice(item.price * item.qty) + '</div>' +
+              '</div>' +
+              '<div class="cart-item-controls">' +
+                '<button type="button" class="cart-item-save" data-save-for-later="' + item.lineId + '" data-save-product="' + item.productId + '">' +
+                  (WishlistService.has(item.productId) ? 'In Wishlist' : 'Save for later') +
+                '</button>' +
+                '<button type="button" class="cart-item-remove" data-remove="' + item.lineId + '">Remove</button>' +
               '</div>' +
             '</div>' +
           '</div>'
@@ -1539,7 +1596,7 @@
         return;
       }
 
-      if (event.target.id === 'cartContinueShopping' || event.target.id === 'cartContinueShopping2') { close(); return; }
+      if (event.target.id === 'cartContinueShopping' || event.target.id === 'cartContinueShopping2') { close(); if (event.target.id === 'cartContinueShopping') Router.navigate('all'); return; }
       if (event.target.id === 'cartClearBtn') { CartService.clear(); render(); return; }
       if (event.target.id === 'cartCheckoutBtn') {
         if (CartService.getItems().length === 0) return;
@@ -1564,28 +1621,76 @@
     function open() { render(); openPanel(panel()); }
     function close() { closePanel(panel()); }
 
+    // "Move to Cart": size/colour still has to be chosen (QuickAdd); the item leaves the wishlist
+    // only once it has actually landed in the cart.
+    var pendingMove = null;
+    CartService.onChange(function () {
+      if (!pendingMove) return;
+      var inCart = CartService.getItems().some(function (it) { return String(it.productId) === String(pendingMove); });
+      if (inCart) { WishlistService.remove(pendingMove); pendingMove = null; }
+    });
+
     function render() {
       var b = bodyEl();
       if (!b) return;
-      if (headingEl()) headingEl().textContent = 'Your Wishlist ♡';
+      if (headingEl()) headingEl().textContent = 'Your Wishlist';
       var products = WishlistService.getIds().map(findProduct).filter(Boolean);
+      var countEl = document.getElementById('wishlistDrawerCount');
+      if (countEl) countEl.textContent = products.length ? products.length + (products.length === 1 ? ' item' : ' items') : '';
       if (products.length === 0) {
-        b.innerHTML =
-          '<div class="cart-empty">' + heartIconSVG(false).replace('width="15" height="15"', 'width="40" height="40"') +
-          '<p>Your wishlist is waiting for something lovely ♡</p>' +
-          '<button type="button" class="btn btn-primary" id="wishlistExploreBtn" style="margin-top:14px;">Explore Kids Wear</button></div>';
+        var picks = PRODUCTS.filter(function (p) { return p.newArrival || p.featured; }).slice(0, 3);
+        b.innerHTML = emptyStateHtml({
+          icon: UI_ICONS.heart,
+          title: 'Your wishlist is empty',
+          text: 'Tap the heart on anything you love and it will wait for you here.',
+          action: { id: 'wishlistExploreBtn', label: 'Explore Kids Wear' },
+          shortcuts: false
+        }) + (picks.length ? '<div class="ym-picks"><h4>You might like</h4><div class="ym-picks-row">' + picks.map(function (p) {
+          return '<button type="button" class="ym-pick" data-open-product="' + p.id + '">' +
+            '<span class="ym-pick-img">' + productImageHtml(p.images[0], p.name) + '</span>' +
+            '<span class="ym-pick-name">' + escapeHtml(p.name) + '</span>' +
+            '<span class="ym-pick-price">' + formatPrice(p.price) + '</span></button>';
+        }).join('') + '</div></div>' : '');
         var exploreBtn = document.getElementById('wishlistExploreBtn');
         if (exploreBtn) exploreBtn.addEventListener('click', function () { close(); Router.navigate('kids'); });
         return;
       }
-      b.innerHTML = '<div class="product-grid" style="grid-template-columns:repeat(2,1fr);gap:14px;">' + products.map(renderProductCard).join('') + '</div>';
+      b.innerHTML = products.map(function (p) {
+        var soldOut = p.stock <= 0;
+        return '<div class="wish-item">' +
+          '<button type="button" class="wish-item-img" data-open-product="' + p.id + '">' + productImageHtml(p.images[0], p.name) + '</button>' +
+          '<div class="wish-item-info">' +
+            '<button type="button" class="wish-item-name" data-open-product="' + p.id + '">' + escapeHtml(p.name) + '</button>' +
+            (p.sizes && p.sizes.length ? '<div class="cart-item-meta">' + p.sizes.slice(0, 4).map(function (sz) { return '<span class="ym-chip">' + escapeHtml(sz) + '</span>'; }).join('') + (p.sizes.length > 4 ? '<span class="ym-chip">+' + (p.sizes.length - 4) + '</span>' : '') + '</div>' : '') +
+            '<div class="wish-item-price">' + formatPrice(p.price) + (p.oldPrice ? ' <s>' + formatPrice(p.oldPrice) + '</s>' : '') + '</div>' +
+            '<div class="wish-item-actions">' +
+              '<button type="button" class="btn btn-primary btn-sm" data-wish-move="' + p.id + '"' + (soldOut ? ' disabled' : '') + '>' + (soldOut ? 'Sold out' : 'Move to Cart') + '</button>' +
+              '<button type="button" class="cart-item-remove" data-wish-remove="' + p.id + '">Remove</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
     }
 
-    WishlistService.onChange(function () { if (panel() && !panel().hidden) render(); });
+    function onClick(e) {
+      var move = e.target.closest('[data-wish-move]');
+      if (move) { pendingMove = move.dataset.wishMove; QuickAdd.open(pendingMove); return; }
+      var rm = e.target.closest('[data-wish-remove]');
+      if (rm) { WishlistService.remove(rm.dataset.wishRemove); showToast('Removed from Wishlist'); }
+    }
+
+    WishlistService.onChange(function () {
+      if (panel() && !panel().hidden) render();
+      document.querySelectorAll('[data-wishlist]').forEach(function (btn) {
+        var active = WishlistService.has(btn.dataset.wishlist);
+        btn.classList.toggle('active', active);
+      });
+    });
 
     function init() {
       var btn = document.getElementById('wishlistBtn');
       if (btn) btn.addEventListener('click', open);
+      if (bodyEl()) bodyEl().addEventListener('click', onClick);
     }
 
     return { open: open, close: close, render: render, init: init };
@@ -3022,9 +3127,16 @@
     function get() { return current; }
     function onChange(fn) { listeners.push(fn); }
 
+    // Header label always explains itself: "Kakkanad · 682030", or "PIN 682030" when we have no
+    // real area name — never a bare, unexplained number.
+    function areaName(loc) {
+      if (!loc) return '';
+      return (loc.locality || loc.city || '').split(',')[0].trim();
+    }
     function labelText() {
       if (!current || !current.pincode) return 'Select location';
-      return current.locality ? current.locality + ' ' + current.pincode : current.pincode;
+      var area = areaName(current);
+      return area ? area + ' · ' + current.pincode : 'PIN ' + current.pincode;
     }
     function updateHeaderLabel() {
       var t = labelText();
@@ -3110,42 +3222,66 @@
     function panel() { return document.getElementById('locationSheet'); }
     function body() { return document.getElementById('locationSheetBody'); }
 
+    var PIN_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="9.5" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>';
+    var GPS_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    // Coordinates less precise than this are "approximate": we still show the area we found,
+    // but never auto-apply a PIN code from them (wrong-PIN risk on Wi-Fi/IP-based fixes).
+    var MAX_TRUSTED_ACCURACY_M = 1500;
+
+    function currentCardHtml() {
+      if (!current || !current.pincode) return '';
+      var area = [current.locality, current.city].filter(Boolean).filter(function (v, i, arr) { return arr.indexOf(v) === i; }).join(', ');
+      var badge = current.checked === false ? '<span class="loc-badge tone-beige">Couldn’t check yet</span>'
+        : current.serviceable ? '<span class="loc-badge tone-sage">&#10003; Delivery available</span>'
+        : '<span class="loc-badge tone-coral">Not deliverable yet</span>';
+      return '<div class="loc-current">' +
+        '<span class="loc-current-icon">' + PIN_ICON + '</span>' +
+        '<div class="loc-current-text"><small>Delivering to</small><strong>' + escapeHtml(area || 'Your area') + '</strong><span>PIN ' + escapeHtml(current.pincode) + '</span></div>' +
+        badge +
+      '</div>';
+    }
+
     function bodyHtml() {
       var user = SessionService.getUser();
       var addressesHtml = user && savedAddresses.length
-        ? '<div class="location-section"><h4>Saved Addresses</h4>' +
+        ? '<div class="location-section"><h4>Saved addresses</h4>' +
             savedAddresses.map(function (a) {
               return '<button type="button" class="location-address-option" data-select-address="' + a.id + '">' +
                 '<strong>' + escapeHtml(a.label || 'Home') + '</strong>' +
-                '<span>' + escapeHtml(a.city || '') + (a.state ? ', ' + escapeHtml(a.state) : '') + ' — ' + escapeHtml(a.pincode) + '</span>' +
+                '<span>' + escapeHtml(a.city || '') + (a.state ? ', ' + escapeHtml(a.state) : '') + ' &middot; ' + escapeHtml(a.pincode) + '</span>' +
               '</button>';
             }).join('') +
           '</div>'
         : '';
       return (
+        '<div id="locationCurrentCard">' + currentCardHtml() + '</div>' +
         '<div class="location-section">' +
-          '<button type="button" class="btn btn-outline location-current-btn" id="locationUseCurrentBtn">' +
-            '<svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
-            'Use My Current Location' +
-          '</button>' +
-          '<p class="location-hint" id="locationCurrentHint"></p>' +
-          '<button type="button" class="link-btn location-ios-help-toggle" id="locationIosHelpToggle">How to enable location</button>' +
+          '<button type="button" class="loc-gps-btn" id="locationUseCurrentBtn">' + GPS_ICON + '<span>Use my current location</span></button>' +
+          '<div class="loc-status" id="locationStatus" hidden></div>' +
           '<div class="location-ios-help" id="locationIosHelp" hidden>' +
-            '<p>On iPhone (Safari): Settings app &rarr; Safari &rarr; Location &rarr; Allow, or the "aA" menu in the address bar &rarr; Website Settings &rarr; Location &rarr; Allow.</p>' +
-            '<p>On Android (Chrome): tap the lock/info icon next to the address bar &rarr; Permissions &rarr; Location &rarr; Allow.</p>' +
-            '<p>You can also just enter your PIN code below — location access is optional.</p>' +
+            '<p><strong>iPhone (Safari):</strong> Settings &rarr; Safari &rarr; Location &rarr; Allow, or &ldquo;aA&rdquo; in the address bar &rarr; Website Settings &rarr; Location.</p>' +
+            '<p><strong>Android (Chrome):</strong> tap the lock icon next to the address bar &rarr; Permissions &rarr; Location &rarr; Allow.</p>' +
           '</div>' +
         '</div>' +
+        '<div class="loc-divider"><span>or enter your PIN code</span></div>' +
         '<div class="location-section">' +
-          '<h4>Enter Pincode</h4>' +
           '<div class="location-pin-row">' +
-            '<input type="text" inputmode="numeric" maxlength="6" placeholder="6-digit PIN code" id="locationPinInput" value="' + (current && current.pincode ? escapeHtml(current.pincode) : '') + '">' +
+            '<input type="text" inputmode="numeric" autocomplete="postal-code" maxlength="6" placeholder="6-digit PIN code" id="locationPinInput" aria-label="PIN code" value="' + (current && current.pincode ? escapeHtml(current.pincode) : '') + '">' +
             '<button type="button" class="btn btn-primary" id="locationCheckBtn">Check</button>' +
           '</div>' +
-          '<p class="location-result" id="locationResult"></p>' +
+          '<div class="location-result" id="locationResult" role="status" aria-live="polite"></div>' +
         '</div>' +
         addressesHtml
       );
+    }
+
+    // One status line, four designed states: loading / success / info / error.
+    function setStatus(state, html) {
+      var el = document.getElementById('locationStatus');
+      if (!el) return;
+      el.hidden = !html;
+      el.className = 'loc-status is-' + state;
+      el.innerHTML = (state === 'loading' ? '<span class="loc-spinner" aria-hidden="true"></span>' : '') + '<div>' + html + '</div>';
     }
 
     function renderResult(el, result) {
@@ -3153,14 +3289,16 @@
       if (!result) { el.innerHTML = ''; el.className = 'location-result'; return; }
       if (result.checked === false) {
         el.className = 'location-result location-result-error';
-        el.textContent = result.error || "We couldn't check delivery availability right now. Please try again.";
+        el.textContent = result.error || 'We couldn’t check delivery right now. Please try again.';
       } else if (result.serviceable) {
         el.className = 'location-result location-result-ok';
-        el.textContent = '✓ Delivery available to ' + result.pincode + (result.etaDays != null ? ' — usually ' + result.etaDays + ' day' + (result.etaDays === 1 ? '' : 's') : '');
+        el.innerHTML = '<strong>Delivery available to ' + escapeHtml(result.pincode) + '</strong>' + (result.etaDays != null ? '<span>Usually arrives in ' + result.etaDays + ' day' + (result.etaDays === 1 ? '' : 's') + '</span>' : '');
       } else {
         el.className = 'location-result location-result-bad';
-        el.textContent = 'Delivery is currently unavailable to this PIN code.';
+        el.innerHTML = '<strong>We currently don’t deliver to this PIN code.</strong><span>We’re adding new areas regularly.</span>';
       }
+      var card = document.getElementById('locationCurrentCard');
+      if (card) card.innerHTML = currentCardHtml();
     }
 
     function open() {
@@ -3177,94 +3315,93 @@
     }
     function close() { closePanel(panel()); }
 
+    function areaLine(geo) {
+      return [geo.locality, geo.city].filter(Boolean).filter(function (v, i, arr) { return arr.indexOf(v) === i; }).join(', ');
+    }
+
     function bind() {
       var currentBtn = document.getElementById('locationUseCurrentBtn');
-      var hintEl = document.getElementById('locationCurrentHint');
       var iosHelpEl = document.getElementById('locationIosHelp');
-      if (currentBtn) currentBtn.addEventListener('click', function () {
-        // Called synchronously, directly inside this click handler — nothing async runs before
-        // it. Safari (iOS in particular) only honors getCurrentPosition() when it's invoked
-        // straight from a real user gesture; deferring it behind any await/promise first is a
-        // documented cause of silent failures there.
-        markExplicit();
-        if (iosHelpEl) iosHelpEl.hidden = true;
-        if (!navigator.geolocation) { hintEl.textContent = 'Location isn\'t supported on this browser — please enter your PIN code below.'; return; }
-        currentBtn.disabled = true;
-        hintEl.textContent = 'Getting your location…';
-        navigator.geolocation.getCurrentPosition(
-          function (pos) {
-            hintEl.textContent = 'Got your location — looking up your PIN code…';
-            var lat = pos.coords.latitude, lng = pos.coords.longitude;
-            reverseGeocode(lat, lng).then(function (geo) {
-              currentBtn.disabled = false;
-              var pinInput = document.getElementById('locationPinInput');
-              var resultEl = document.getElementById('locationResult');
-              if (geo.status === 'ok' && geo.pincode) {
-                hintEl.textContent = 'Found your area — checking delivery for PIN ' + geo.pincode + '…';
-                if (pinInput) pinInput.value = geo.pincode;
-                var locality = [geo.locality, geo.state].filter(Boolean).join(', ');
-                selectPincode(geo.pincode, {
-                  locality: locality || null, city: geo.city || null, district: geo.district || null,
-                  state: geo.state || null, latitude: lat, longitude: lng, source: 'current_location'
-                }).then(function (result) {
-                  hintEl.textContent = 'Detected PIN ' + geo.pincode + (locality ? ' — ' + locality : '') + '.';
-                  renderResult(resultEl, result);
-                });
-              } else if (geo.status === 'no_postal_code' || geo.status === 'no_results') {
-                hintEl.textContent = "We got your location but couldn't find a PIN code for it — please enter it below.";
-                if (pinInput) pinInput.focus();
-              } else {
-                hintEl.textContent = "We couldn't determine your PIN code right now — please enter it below.";
-                if (pinInput) pinInput.focus();
-              }
-            });
-          },
-          // Real browser geolocation errors have three distinct codes — never collapsed into
-          // one generic message, per the spec's explicit PERMISSION_DENIED / POSITION_UNAVAILABLE
-          // / TIMEOUT split. The PIN input stays visible and usable in every case; the prompt is
-          // never re-triggered automatically (that's the browser's own decision on the next click).
-          function (err) {
-            currentBtn.disabled = false;
-            var pinInput = document.getElementById('locationPinInput');
-            if (err && err.code === 1 /* PERMISSION_DENIED */) {
-              hintEl.textContent = 'Location access is turned off for this website. You can allow location access in your browser settings, or enter your PIN code below.';
-              if (iosHelpEl) iosHelpEl.hidden = false;
-            } else if (err && err.code === 2 /* POSITION_UNAVAILABLE */) {
-              hintEl.textContent = "We couldn't detect your current location. Please enter your PIN code manually.";
-            } else if (err && err.code === 3 /* TIMEOUT */) {
-              hintEl.textContent = 'Location detection took too long. Please try again or enter your PIN code.';
-            } else {
-              hintEl.textContent = 'Location permission was not granted — please enter your PIN code below.';
-            }
-            if (pinInput) pinInput.focus();
-          },
-          // Deliberately not GPS-level accuracy — a PIN-code check only needs neighbourhood
-          // precision, and enableHighAccuracy:true is slower and drains battery for no benefit
-          // here. maximumAge lets a very recent cached fix answer instantly instead of
-          // re-polling the radio, without risking a stale multi-hour-old position.
-          { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 }
-        );
-      });
-      var iosHelpToggle = document.getElementById('locationIosHelpToggle');
-      if (iosHelpToggle) iosHelpToggle.addEventListener('click', function () {
-        if (iosHelpEl) iosHelpEl.hidden = !iosHelpEl.hidden;
-      });
-
       var pinInput = document.getElementById('locationPinInput');
       var checkBtn = document.getElementById('locationCheckBtn');
       var resultEl = document.getElementById('locationResult');
+      function askForPin() { if (pinInput) { pinInput.value = ''; pinInput.focus(); } }
+
+      if (currentBtn) currentBtn.addEventListener('click', function () {
+        // getCurrentPosition() runs synchronously inside the click handler — Safari (iOS) only
+        // honours it straight from a user gesture.
+        markExplicit();
+        if (iosHelpEl) iosHelpEl.hidden = true;
+        renderResult(resultEl, null);
+        if (!navigator.geolocation) { setStatus('error', 'Location isn’t supported on this browser. Please enter your PIN code below.'); askForPin(); return; }
+        currentBtn.disabled = true;
+        setStatus('loading', 'Detecting your location…');
+        navigator.geolocation.getCurrentPosition(
+          function (pos) {
+            var lat = pos.coords.latitude, lng = pos.coords.longitude, acc = pos.coords.accuracy;
+            setStatus('loading', 'Finding your area…');
+            reverseGeocode(lat, lng).then(function (geo) {
+              currentBtn.disabled = false;
+              var area = areaLine(geo);
+              var approximate = !(acc > 0) || acc > MAX_TRUSTED_ACCURACY_M;
+              var validPin = geo.status === 'ok' && /^[1-9][0-9]{5}$/.test(String(geo.pincode || ''));
+
+              if (validPin && !approximate) {
+                setStatus('success', '<strong>Location detected &#10003;</strong>' + (area ? '<span>' + escapeHtml(area) + ' &middot; PIN ' + escapeHtml(geo.pincode) + '</span>' : '<span>PIN ' + escapeHtml(geo.pincode) + '</span>'));
+                if (pinInput) pinInput.value = geo.pincode;
+                selectPincode(geo.pincode, {
+                  locality: geo.locality || null, city: geo.city || null, district: geo.district || null,
+                  state: geo.state || null, latitude: lat, longitude: lng, source: 'current_location'
+                }).then(function (result) { renderResult(resultEl, result); });
+                return;
+              }
+              if (geo.status === 'error') {
+                setStatus('error', 'We couldn’t look up your area right now. Please enter your PIN code below.');
+              } else if (approximate && (area || validPin)) {
+                setStatus('info', '<strong>We found your approximate location' + (area ? ': ' + escapeHtml(area) : '') + '</strong><span>It isn’t precise enough to be sure of your PIN code (±' + Math.round(acc / 100) / 10 + ' km). Please enter it below.</span>');
+              } else if (area) {
+                setStatus('info', '<strong>We found your location: ' + escapeHtml(area) + '</strong><span>We couldn’t reliably detect the PIN code. Please enter it below.</span>');
+              } else {
+                setStatus('info', '<strong>We got your location</strong><span>…but couldn’t match it to a PIN code. Please enter it below.</span>');
+              }
+              askForPin();
+            });
+          },
+          function (err) {
+            currentBtn.disabled = false;
+            if (err && err.code === 1) {
+              setStatus('error', '<strong>Location access is blocked</strong><span>Allow location for this site in your browser settings, or enter your PIN code below.</span>');
+              if (iosHelpEl) iosHelpEl.hidden = false;
+            } else if (err && err.code === 2) {
+              setStatus('error', '<strong>Your location isn’t available right now</strong><span>Please enter your PIN code below.</span>');
+            } else if (err && err.code === 3) {
+              setStatus('error', '<strong>Location detection timed out</strong><span>Try again, or enter your PIN code below.</span>');
+            } else {
+              setStatus('error', 'Location permission wasn’t granted. Please enter your PIN code below.');
+            }
+            askForPin();
+          },
+          // High accuracy + a fresh fix: a PIN code boundary can be a few hundred metres away,
+          // and a cached/Wi-Fi-only fix is the main cause of a wrong PIN.
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        );
+      });
+
       function doCheck() {
         var pincode = (pinInput.value || '').trim();
         if (!/^[1-9][0-9]{5}$/.test(pincode)) { resultEl.className = 'location-result location-result-error'; resultEl.textContent = 'Enter a valid 6-digit PIN code.'; return; }
         checkBtn.disabled = true; checkBtn.textContent = 'Checking…';
         markExplicit();
-        selectPincode(pincode, null).then(function (result) {
+        // Keep the area name only if it belongs to this same PIN (e.g. after "enter it below").
+        var keep = current && current.pincode === pincode ? current : null;
+        selectPincode(pincode, keep ? { locality: keep.locality, city: keep.city, district: keep.district, state: keep.state, source: keep.source } : null).then(function (result) {
           checkBtn.disabled = false; checkBtn.textContent = 'Check';
           renderResult(resultEl, result);
         });
       }
       if (checkBtn) checkBtn.addEventListener('click', doCheck);
       if (pinInput) pinInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') doCheck(); });
+      if (pinInput) pinInput.addEventListener('input', function () { pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 6); });
 
       body().querySelectorAll('[data-select-address]').forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -4673,17 +4810,23 @@
     var CONTENT = {
       shipping: {
         title: 'Shipping Information',
-        html: '<p>We currently ship across India. Once your order is confirmed, delivery is handled by our courier partners and typically arrives within a few business days depending on your location.</p>' +
-          '<p>Delivery charges (if any) are calculated at checkout and shown before you pay &mdash; orders over &#8377;999 ship free. Before you order, you can check whether we deliver to your PIN code using the &ldquo;Deliver to&rdquo; option in the header or on any product page.</p>' +
-          '<p>Once your order ships, track its real-time status any time from My Orders in your account.</p>'
+        html: '<div class="info-highlight tone-coral"><strong>Free shipping on orders over &#8377;' + CONFIG.freeShippingThreshold + '</strong><span>Smaller orders show any delivery charge at checkout, before you pay.</span></div>' +
+          '<div class="info-points">' +
+            '<div class="info-point"><span class="info-point-dot tone-blue"></span><div><h3>Where we ship</h3><p>Across India, through our courier partners.</p></div></div>' +
+            '<div class="info-point"><span class="info-point-dot tone-sage"></span><div><h3>How long it takes</h3><p>Usually a few business days, depending on your location.</p></div></div>' +
+            '<div class="info-point"><span class="info-point-dot tone-beige"></span><div><h3>Check your PIN code</h3><p>Use &ldquo;Deliver to&rdquo; in the header or on any product to confirm delivery before you order.</p></div></div>' +
+            '<div class="info-point"><span class="info-point-dot tone-lavender"></span><div><h3>Track your order</h3><p>Live courier updates appear in My Orders once your order ships.</p></div></div>' +
+          '</div>'
       },
       returns: {
         // Business rule (Sep 2026): no returns, no exchanges, no refunds at this stage. Keep every
         // policy surface (this popup, home FAQ + its JSON-LD, meta description) consistent with it.
         title: 'Return Policy',
-        html: '<p>As a new brand, we&rsquo;re not able to offer returns, exchanges or refunds at this stage &mdash; all sales are final.</p>' +
-          '<p>To help you get it right the first time, every product has its own Size Guide in its product details. Please check it before ordering.</p>' +
-          '<p>If there&rsquo;s a problem with your order, message us on WhatsApp with your Order ID and we&rsquo;ll look into it.</p>'
+        html: '<div class="info-highlight tone-beige"><strong>All sales are final</strong><span>As a new brand, we&rsquo;re not able to offer returns, exchanges or refunds at this stage.</span></div>' +
+          '<div class="info-points">' +
+            '<div class="info-point"><span class="info-point-dot tone-blue"></span><div><h3>Check the Size Guide first</h3><p>Every product has its own Size Guide in its details &mdash; please check it before ordering.</p></div></div>' +
+            '<div class="info-point"><span class="info-point-dot tone-coral"></span><div><h3>Problem with an order?</h3><p>Message us on WhatsApp with your Order ID and we&rsquo;ll look into it.</p></div></div>' +
+          '</div>'
       },
       // BUG FIX: this used to be a hardcoded generic Age/Height/Chest table with invented
       // numbers (no real source). `html` is now computed at open() time from real,
@@ -4693,16 +4836,21 @@
       sizeGuide: { title: 'Size Guide', dynamic: true },
       faq: {
         title: 'Frequently Asked Questions',
-        html: '<h3>How do I place an order?</h3><p>Add items to your cart, go to checkout, fill in your delivery details, and complete payment securely &mdash; your order is placed as soon as payment succeeds.</p>' +
-          '<h3>Do you accept online payment?</h3><p>Yes &mdash; we accept UPI, credit/debit cards, netbanking and more through our secure payment partner, Cashfree.</p>' +
-          '<h3>How do I know if you deliver to my area?</h3><p>Use the &ldquo;Deliver to&rdquo; option in the header, or check right on a product page, to confirm delivery availability for your PIN code before you order.</p>' +
-          '<h3>How do I track my order?</h3><p>Open My Orders in your account and select the order &mdash; you&rsquo;ll see real courier updates there once it ships, no tracking ID needed.</p>' +
-          '<h3>Can I change my size or address after ordering?</h3><p>If your order hasn&rsquo;t shipped yet, message us on WhatsApp with your Order ID and we&rsquo;ll do our best to help.</p>'
+        html: '<div class="faq-list info-faq">' +
+          '<details class="faq-item" open><summary>How do I place an order?</summary><p>Add items to your cart, go to checkout, fill in your delivery details, and complete payment securely &mdash; your order is placed as soon as payment succeeds.</p></details>' +
+          '<details class="faq-item"><summary>Do you accept online payment?</summary><p>Yes &mdash; UPI, credit/debit cards, netbanking and more through our secure payment partner, Cashfree.</p></details>' +
+          '<details class="faq-item"><summary>Do you deliver to my area?</summary><p>Use &ldquo;Deliver to&rdquo; in the header, or on any product, to check your PIN code before you order.</p></details>' +
+          '<details class="faq-item"><summary>How do I track my order?</summary><p>Open My Orders in your account &mdash; live courier updates appear there once it ships.</p></details>' +
+          '<details class="faq-item"><summary>Can I change my size or address after ordering?</summary><p>If your order hasn&rsquo;t shipped yet, message us on WhatsApp with your Order ID and we&rsquo;ll do our best to help.</p></details>' +
+          '</div>'
       },
       orderHelp: {
         title: 'Order Help',
-        html: '<p>Your order is placed and paid for securely right on the site &mdash; there&rsquo;s no manual confirmation step. You can check its status any time from My Orders in your account.</p>' +
-          '<p>Need help with an existing order? Message us on WhatsApp with your Order ID and we&rsquo;ll sort it out.</p>'
+        html: '<div class="info-points">' +
+            '<div class="info-point"><span class="info-point-dot tone-sage"></span><div><h3>Paid = placed</h3><p>Your order is confirmed as soon as payment succeeds &mdash; no manual confirmation step.</p></div></div>' +
+            '<div class="info-point"><span class="info-point-dot tone-blue"></span><div><h3>Order status</h3><p>Check it any time from My Orders in your account.</p></div></div>' +
+            '<div class="info-point"><span class="info-point-dot tone-coral"></span><div><h3>Need a hand?</h3><p>Message us on WhatsApp with your Order ID and we&rsquo;ll sort it out.</p></div></div>' +
+          '</div>'
       },
       privacy: {
         title: 'Privacy Policy',
@@ -4721,13 +4869,18 @@
 
     function panel() { return document.getElementById('infoModal'); }
 
+    // Privacy / Terms are full website pages; the popup shows a short version + a link.
+    var PAGE_LINKS = { privacy: 'privacy.html', terms: 'terms.html' };
     function open(key) {
       var entry = CONTENT[key];
       if (!entry) return;
+      panel().dataset.kind = key; // drives the header icon (see style.css section 20)
       document.getElementById('infoModalTitle').textContent = entry.title;
-      document.getElementById('infoModalBody').innerHTML = entry.dynamic
-        ? '<p>Sizing varies slightly by style &mdash; each product&rsquo;s own Size Guide (in its product details) is the most accurate for that item.</p>' + sizeGuideTableHtml(null)
-        : entry.html;
+      document.getElementById('infoModalBody').innerHTML = (entry.dynamic
+        ? '<div class="info-highlight tone-blue"><strong>Sizing varies slightly by style</strong><span>Each product&rsquo;s own Size Guide (in its details) is the most accurate for that item.</span></div>' + sizeGuideTableHtml(null)
+        : entry.html) +
+        (PAGE_LINKS[key] ? '<a class="btn btn-ghost info-page-link" href="' + PAGE_LINKS[key] + '">Read the full ' + entry.title + '</a>' : '') +
+        (key !== 'privacy' && key !== 'terms' ? '<a class="info-help" href="https://wa.me/' + CONFIG.whatsappNumber + '" target="_blank" rel="noopener">Still have a question? <strong>Chat with us on WhatsApp</strong></a>' : '');
       openPanel(panel());
     }
 

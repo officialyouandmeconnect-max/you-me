@@ -127,7 +127,7 @@
 <link rel="icon" href="favicon-48.png" sizes="48x48" type="image/png">
 <link rel="icon" href="favicon.png" sizes="512x512" type="image/png">
 <link rel="manifest" href="site.webmanifest">
-<link rel="stylesheet" href="style.css?v=20260930b">
+<link rel="stylesheet" href="style.css?v=20261001a">
 </head>
 <body>
 
@@ -517,7 +517,7 @@
 <div class="panel address-picker-sheet shop-filter-sheet" id="shopFilterSheet" role="dialog" aria-modal="true" aria-labelledby="shopFilterSheetTitle" hidden>
   <div class="address-picker-header">
     <h2 id="shopFilterSheetTitle">Filters</h2>
-    <button class="panel-close" id="shopFilterSheetClose" aria-label="Close">&times;</button>
+    <button class="panel-close" id="shopFilterSheetClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="address-picker-body" id="shopFilterSheetBody"><!-- injected --></div>
   <div class="shop-filter-sheet-footer">
@@ -530,7 +530,7 @@
 <div class="panel address-picker-sheet shop-filter-sheet" id="shopSortSheet" role="dialog" aria-modal="true" aria-labelledby="shopSortSheetTitle" hidden>
   <div class="address-picker-header">
     <h2 id="shopSortSheetTitle">Sort By</h2>
-    <button class="panel-close" id="shopSortSheetClose" aria-label="Close">&times;</button>
+    <button class="panel-close" id="shopSortSheetClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="address-picker-body" id="shopSortSheetBody"><!-- injected --></div>
 </div>
@@ -643,7 +643,7 @@
         <ul>
           <li><a href="#about">Our Story</a></li>
           <li><a class="footer-link" href="privacy.html">Privacy Policy</a></li>
-          <li><button type="button" class="footer-link" data-info="terms">Terms &amp; Conditions</button></li>
+          <li><a href="terms.html">Terms &amp; Conditions</a></li>
         </ul>
       </div>
 
@@ -677,15 +677,16 @@
 
 <!-- Product Detail Modal -->
 <div class="panel product-modal" id="productModal" role="dialog" aria-modal="true" aria-labelledby="productModalTitle" hidden>
-  <button class="panel-close" id="productModalClose" aria-label="Close product details">&times;</button>
+  <button class="panel-close" id="productModalClose" aria-label="Close product details"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   <div class="product-modal-body" id="productModalBody"><!-- injected --></div>
 </div>
 
 <!-- Cart Drawer -->
 <div class="panel cart-drawer" id="cartDrawer" role="dialog" aria-modal="true" aria-label="Shopping cart" hidden>
-  <div class="cart-drawer-header">
-    <h2>Your Cart</h2>
-    <button class="panel-close" id="cartDrawerClose" aria-label="Close cart">&times;</button>
+  <div class="cart-drawer-header ym-modal-head">
+    <span class="ym-modal-icon tone-coral" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8h12l-1 12H7L6 8Z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg></span>
+    <div class="ym-modal-title"><h2>Your Cart</h2><small id="cartDrawerCount"></small></div>
+    <button class="panel-close" id="cartDrawerClose" aria-label="Close cart"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="cart-drawer-body" id="cartDrawerBody"><!-- injected --></div>
   <div class="cart-drawer-footer" id="cartDrawerFooter"><!-- injected --></div>
@@ -695,7 +696,7 @@
 <div class="panel checkout-modal" id="checkoutModal" role="dialog" aria-modal="true" aria-labelledby="checkoutTitle" hidden>
   <div class="checkout-modal-header">
     <h2 id="checkoutTitle">Checkout</h2>
-    <button class="panel-close" id="checkoutModalClose" aria-label="Close checkout">&times;</button>
+    <button class="panel-close" id="checkoutModalClose" aria-label="Close checkout"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="checkout-modal-body" id="checkoutModalBody"><!-- injected --></div>
 </div>
@@ -704,23 +705,24 @@
 <div class="panel address-picker-sheet" id="addressPickerSheet" role="dialog" aria-modal="true" aria-labelledby="addressPickerTitle" hidden>
   <div class="address-picker-header">
     <h2 id="addressPickerTitle">Choose delivery address</h2>
-    <button class="panel-close" id="addressPickerClose" aria-label="Close">&times;</button>
+    <button class="panel-close" id="addressPickerClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="address-picker-body" id="addressPickerBody" role="radiogroup" aria-labelledby="addressPickerTitle"><!-- injected --></div>
 </div>
 
 <!-- Order Success Modal -->
 <div class="panel success-modal" id="successModal" role="dialog" aria-modal="true" aria-labelledby="successTitle" hidden>
-  <button class="panel-close" id="successModalClose" aria-label="Close">&times;</button>
+  <button class="panel-close" id="successModalClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   <div class="success-modal-body" id="successModalBody"><!-- injected --></div>
 </div>
 
 <!-- Delivery Location selector — same bottom-sheet(mobile)/centered-modal(desktop) pattern as
      the address picker. Never window.prompt/alert. -->
 <div class="panel address-picker-sheet" id="locationSheet" role="dialog" aria-modal="true" aria-labelledby="locationSheetTitle" hidden>
-  <div class="address-picker-header">
-    <h2 id="locationSheetTitle">Delivery Location</h2>
-    <button class="panel-close" id="locationSheetClose" aria-label="Close">&times;</button>
+  <div class="address-picker-header ym-modal-head">
+    <span class="ym-modal-icon tone-blue" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.4"/></svg></span>
+    <div class="ym-modal-title"><h2 id="locationSheetTitle">Delivery Location</h2><small>Check delivery to your area</small></div>
+    <button class="panel-close" id="locationSheetClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="address-picker-body" id="locationSheetBody"><!-- injected --></div>
 </div>
@@ -728,7 +730,7 @@
 <div class="panel address-picker-sheet" id="quickAddSheet" role="dialog" aria-modal="true" aria-labelledby="quickAddSheetTitle" hidden>
   <div class="address-picker-header">
     <h2 id="quickAddSheetTitle">Select Options</h2>
-    <button class="panel-close" id="quickAddSheetClose" aria-label="Close">&times;</button>
+    <button class="panel-close" id="quickAddSheetClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="address-picker-body" id="quickAddSheetBody"><!-- injected --></div>
 </div>
@@ -736,7 +738,7 @@
 <div class="panel quick-view-sheet" id="quickViewSheet" role="dialog" aria-modal="true" aria-labelledby="quickViewSheetTitle" hidden>
   <div class="address-picker-header">
     <h2 id="quickViewSheetTitle">Quick View</h2>
-    <button class="panel-close" id="quickViewSheetClose" aria-label="Close">&times;</button>
+    <button class="panel-close" id="quickViewSheetClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="address-picker-body" id="quickViewSheetBody"><!-- injected --></div>
 </div>
@@ -746,7 +748,7 @@
 <div class="panel confirm-sheet" id="confirmModal" role="alertdialog" aria-modal="true" aria-labelledby="confirmModalTitle" hidden>
   <div class="address-picker-header">
     <h2 id="confirmModalTitle">Are you sure?</h2>
-    <button class="panel-close" id="confirmModalClose" aria-label="Close">&times;</button>
+    <button class="panel-close" id="confirmModalClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="confirm-sheet-body" id="confirmModalBody"><!-- injected --></div>
 </div>
@@ -757,14 +759,14 @@
 <div class="panel confirm-sheet" id="secondaryPhoneSheet" role="dialog" aria-modal="true" aria-labelledby="secondaryPhoneSheetTitle" hidden>
   <div class="address-picker-header">
     <h2 id="secondaryPhoneSheetTitle">Add Secondary Number</h2>
-    <button class="panel-close" id="secondaryPhoneSheetClose" aria-label="Close">&times;</button>
+    <button class="panel-close" id="secondaryPhoneSheetClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="confirm-sheet-body" id="secondaryPhoneSheetBody"><!-- injected --></div>
 </div>
 
 <!-- Payment Result (Cashfree redirects the customer back here after checkout) -->
 <div class="panel success-modal payment-result-modal" id="paymentResultModal" role="dialog" aria-modal="true" aria-labelledby="paymentResultTitle" hidden>
-  <button class="panel-close" id="paymentResultClose" aria-label="Close">&times;</button>
+  <button class="panel-close" id="paymentResultClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   <div class="success-modal-body" id="paymentResultBody"><!-- injected --></div>
 </div>
 
@@ -775,7 +777,7 @@
       <svg viewBox="0 0 24 24" width="18" height="18"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><line x1="20" y1="20" x2="16.6" y2="16.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       <input type="text" id="searchInput" placeholder="Search products..." autocomplete="off">
     </div>
-    <button class="panel-close" id="searchOverlayClose" aria-label="Close search">&times;</button>
+    <button class="panel-close" id="searchOverlayClose" aria-label="Close search"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="search-overlay-body" id="searchOverlayBody">
     <p class="search-hint">Try &ldquo;baby&rdquo;, &ldquo;cotton&rdquo;, &ldquo;pink&rdquo; or a product name.</p>
@@ -784,18 +786,20 @@
 
 <!-- Wishlist Drawer -->
 <div class="panel wishlist-drawer" id="wishlistDrawer" role="dialog" aria-modal="true" aria-label="Wishlist" hidden>
-  <div class="cart-drawer-header">
-    <h2>Your Wishlist</h2>
-    <button class="panel-close" id="wishlistDrawerClose" aria-label="Close wishlist">&times;</button>
+  <div class="cart-drawer-header ym-modal-head">
+    <span class="ym-modal-icon tone-coral" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-9.3-9C1.2 7.7 3 4.5 6.4 4.5c2 0 3.4 1.1 5.6 3.5 2.2-2.4 3.6-3.5 5.6-3.5 3.4 0 5.2 3.2 3.7 6.5C19 15.6 12 20 12 20Z"/></svg></span>
+    <div class="ym-modal-title"><h2>Your Wishlist</h2><small id="wishlistDrawerCount"></small></div>
+    <button class="panel-close" id="wishlistDrawerClose" aria-label="Close wishlist"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="cart-drawer-body" id="wishlistDrawerBody"><!-- injected --></div>
 </div>
 
 <!-- Account Panel -->
 <div class="panel account-panel" id="accountPanel" role="dialog" aria-modal="true" aria-labelledby="accountTitle" hidden>
-  <div class="checkout-modal-header">
-    <h2 id="accountTitle">Account</h2>
-    <button class="panel-close" id="accountPanelClose" aria-label="Close account">&times;</button>
+  <div class="checkout-modal-header ym-modal-head">
+    <span class="ym-modal-icon tone-blue" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></span>
+    <div class="ym-modal-title"><h2 id="accountTitle">Account</h2></div>
+    <button class="panel-close" id="accountPanelClose" aria-label="Close account"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="checkout-modal-body" id="accountPanelBody"><!-- injected --></div>
 </div>
@@ -804,16 +808,17 @@
 <div class="panel address-form-panel" id="addressFormPanel" role="dialog" aria-modal="true" aria-labelledby="addressFormTitle" hidden>
   <div class="checkout-modal-header">
     <h2 id="addressFormTitle">Add Address</h2>
-    <button class="panel-close" id="addressFormClose" aria-label="Close">&times;</button>
+    <button class="panel-close" id="addressFormClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="checkout-modal-body" id="addressFormBody"><!-- injected --></div>
 </div>
 
 <!-- Info Modal (Shipping / Returns / Size Guide / FAQ / Order Help / Privacy / Terms) -->
 <div class="panel info-modal" id="infoModal" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle" hidden>
-  <div class="checkout-modal-header">
-    <h2 id="infoModalTitle">Info</h2>
-    <button class="panel-close" id="infoModalClose" aria-label="Close">&times;</button>
+  <div class="checkout-modal-header ym-modal-head">
+    <span class="ym-modal-icon info-kind-icon" aria-hidden="true"></span>
+    <div class="ym-modal-title"><h2 id="infoModalTitle">Info</h2></div>
+    <button class="panel-close" id="infoModalClose" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
   </div>
   <div class="checkout-modal-body" id="infoModalBody"><!-- injected --></div>
 </div>
@@ -824,6 +829,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20260930a"></script>
+<script src="script.js?v=20261001a"></script>
 </body>
 </html>
