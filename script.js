@@ -3159,13 +3159,75 @@
     // browser) — turns the coordinates navigator.geolocation hands back into a real PIN code.
     // Never guessed/derived client-side; a failure here always degrades honestly to "please
     // confirm your PIN" rather than showing an invented code.
-    function reverseGeocode(lat, lng) {
+    function reverseGeocodeServer(lat, lng) {
       return fetch(SUPABASE_URL + '/functions/v1/reverse-geocode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'apikey': SUPABASE_ANON_KEY },
         body: JSON.stringify({ lat: lat, lng: lng })
       }).then(function (r) { return r.json().catch(function () { return { status: 'error' }; }); })
         .catch(function () { return { status: 'error' }; });
+    }
+
+    // Fallback: OpenStreetMap Nominatim (no key, CORS-enabled; one request per user click,
+    // well inside its usage policy). Used only when the Google-backed server lookup fails or
+    // finds nothing. Same honesty rule: only a real 6-digit postcode field counts as a PIN.
+    function reverseGeocodeOsm(lat, lng) {
+      var url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=en' +
+        '&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lng);
+      return fetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          var a = (data && data.address) || {};
+          var pin = String(a.postcode || '').replace(/\s+/g, '');
+          var locality = a.suburb || a.neighbourhood || a.village || a.town || a.city_district || null;
+          var city = a.city || a.town || a.village || a.state_district || null;
+          var out = { locality: locality, city: city, district: a.state_district || a.county || null, state: a.state || null, source: 'osm' };
+          if (/^[1-9][0-9]{5}$/.test(pin)) { out.status = 'ok'; out.pincode = pin; }
+          else { out.status = (locality || city) ? 'no_postal_code' : 'no_results'; out.pincode = null; }
+          return out;
+        })
+        .catch(function () { return { status: 'error' }; });
+    }
+
+    // Typed PIN → real area name (OpenStreetMap postcode search), so "Delivering to" and the
+    // header show "Tirurangadi, Malappuram" instead of a bare number. Display-only; never
+    // changes the PIN the customer entered.
+    function areaForPin(pin) {
+      var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&accept-language=en&limit=1&country=India&postalcode=' + encodeURIComponent(pin);
+      return fetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (list) {
+          var a = (list && list[0] && list[0].address) || null;
+          if (!a || String(a.postcode || '').replace(/\s+/g, '') !== pin) return null;
+          return { locality: a.suburb || a.village || a.town || a.county || null, city: a.city || a.state_district || null, district: a.state_district || null, state: a.state || null };
+        })
+        .catch(function () { return null; });
+    }
+    var areaLookedUp = {};
+    function fillAreaIfMissing() {
+      if (!current || !current.pincode || current.locality || current.city) return Promise.resolve(current);
+      var pin = current.pincode;
+      if (areaLookedUp[pin]) return Promise.resolve(current);
+      return areaForPin(pin).then(function (area) {
+        areaLookedUp[pin] = true;
+        if (!area || !current || current.pincode !== pin || current.locality || current.city) return current;
+        current = Object.assign({}, current, area);
+        persist();
+        return current;
+      });
+    }
+
+    function reverseGeocode(lat, lng) {
+      return reverseGeocodeServer(lat, lng).then(function (geo) {
+        if (geo && geo.status === 'ok' && /^[1-9][0-9]{5}$/.test(String(geo.pincode || ''))) return geo;
+        return reverseGeocodeOsm(lat, lng).then(function (osm) {
+          if (osm.status === 'ok') return osm;
+          // Neither found a PIN: keep whichever result at least names the area.
+          if (geo && (geo.locality || geo.city)) return geo;
+          if (osm.locality || osm.city) return osm;
+          return geo && geo.status !== 'no_results' ? geo : osm;
+        });
+      });
     }
 
     // `extra` carries whatever real fields we actually have — city/district/state/locality/
@@ -3236,7 +3298,7 @@
         : '<span class="loc-badge tone-coral">Not deliverable yet</span>';
       return '<div class="loc-current">' +
         '<span class="loc-current-icon">' + PIN_ICON + '</span>' +
-        '<div class="loc-current-text"><small>Delivering to</small><strong>' + escapeHtml(area || 'Your area') + '</strong><span>PIN ' + escapeHtml(current.pincode) + '</span></div>' +
+        '<div class="loc-current-text"><small>Delivering to</small><strong>' + escapeHtml(area || 'PIN ' + current.pincode) + '</strong><span>' + (area ? 'PIN ' + escapeHtml(current.pincode) : (areaLookedUp[current.pincode] ? 'Delivery PIN code' : 'Looking up your area…')) + '</span></div>' +
         badge +
       '</div>';
     }
@@ -3306,6 +3368,10 @@
       body().innerHTML = bodyHtml();
       bind();
       openPanel(panel());
+      fillAreaIfMissing().then(function () {
+        var card = document.getElementById('locationCurrentCard');
+        if (card) card.innerHTML = currentCardHtml();
+      });
       var user = SessionService.getUser();
       if (user) {
         supabaseClient.from('addresses').select('*').order('is_default', { ascending: false }).order('created_at', { ascending: false })
@@ -3397,6 +3463,10 @@
         selectPincode(pincode, keep ? { locality: keep.locality, city: keep.city, district: keep.district, state: keep.state, source: keep.source } : null).then(function (result) {
           checkBtn.disabled = false; checkBtn.textContent = 'Check';
           renderResult(resultEl, result);
+          return fillAreaIfMissing();
+        }).then(function () {
+          var card = document.getElementById('locationCurrentCard');
+          if (card) card.innerHTML = currentCardHtml();
         });
       }
       if (checkBtn) checkBtn.addEventListener('click', doCheck);
