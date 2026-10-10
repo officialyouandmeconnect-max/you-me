@@ -4411,3 +4411,157 @@ body[data-view="home"] #footerNewsletterFeedback { display: none; }
 @media (hover: hover) and (pointer: fine) {
   .btn-primary:not(:disabled):hover { background: var(--ink); color: #fff; }
 }
+
+/* =========================================================
+   23. SEND BUTTON (newsletter Subscribe) — adapted from uiverse.io marcelodolza/fat-zebra-11
+   Brand surfaces + coral accent. States come from JS (.is-sending / .is-sent) tied to the real
+   subscribe result, not :focus.
+   ========================================================= */
+.ym-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.send-btn {
+  --send-accent: var(--brand-coral);
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 158px;
+  height: 48px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 0.5px 0.5px 1px rgba(255, 255, 255, 0.4), 0 8px 18px rgba(58, 51, 48, 0.14), 0 3px 4px rgba(58, 51, 48, 0.05);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.send-btn:disabled { cursor: progress; opacity: 1; }
+.send-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  border-radius: inherit;
+  border: 2px solid transparent;
+  background: linear-gradient(#fff, var(--brand-cream)) padding-box,
+              linear-gradient(to bottom, rgba(58, 51, 48, 0.06), rgba(58, 51, 48, 0.3)) border-box;
+  transition: transform 0.4s ease, box-shadow 0.4s ease;
+}
+.send-btn::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  z-index: 0;
+  border-radius: inherit;
+  background: linear-gradient(to top, #fff, var(--coral-tint));
+  filter: blur(0.5px);
+}
+.send-outline {
+  position: absolute;
+  inset: -2px;
+  z-index: -1;
+  border-radius: inherit;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.send-outline::before {
+  content: '';
+  position: absolute;
+  inset: -100%;
+  background: conic-gradient(from 180deg, transparent 60%, var(--send-accent) 80%, transparent 100%);
+  animation: send-spin 2s linear infinite paused;
+}
+@keyframes send-spin { to { transform: rotate(360deg); } }
+
+.send-state { position: relative; z-index: 1; display: flex; align-items: center; padding-left: 26px; }
+.send-state--sent { display: none; }
+.send-icon { position: absolute; left: 0; top: 0; bottom: 0; margin: auto; display: flex; align-items: center; transform: scale(1.2); transition: transform 0.3s ease; }
+.send-icon svg { overflow: visible; display: block; }
+.send-letters { display: flex; }
+.send-letters span { display: block; opacity: 0; animation: send-slide-down 0.8s ease forwards calc(var(--i) * 0.03s); }
+
+/* Default state: plane lands on load */
+.send-state--default .send-icon svg { animation: send-land 0.6s ease forwards; }
+.send-state--default .send-icon::before {
+  content: ''; position: absolute; top: 50%; left: -5px; height: 2px; width: 0;
+  background: linear-gradient(to right, transparent, rgba(58, 51, 48, 0.45));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .send-btn:not(:disabled):hover { transform: scale(1.03); box-shadow: 0 0 1px 2px rgba(255, 255, 255, 0.4), 0 14px 28px rgba(58, 51, 48, 0.2), 0 8px 3px -3px rgba(58, 51, 48, 0.04); }
+  .send-btn:not(:disabled):hover::after { transform: scale(1.04, 1.08); box-shadow: inset 0 -1px 3px 0 #fff; }
+  .send-btn:not(:disabled):hover .send-outline { opacity: 1; }
+  .send-btn:not(:disabled):hover .send-outline::before { animation-play-state: running; }
+  .send-btn:not(.is-sending):not(.is-sent):hover .send-letters span { opacity: 1; animation: send-wave 0.5s ease forwards calc(var(--i) * 0.02s); }
+  .send-btn:not(.is-sending):not(.is-sent):hover .send-state--default .send-icon { transform: rotate(45deg) scale(1.2); }
+}
+.send-btn:active { transform: scale(0.99); }
+
+/* Sending: letters scatter, plane takes off with a contrail */
+.send-btn.is-sending .send-state--default .send-letters span { opacity: 1; animation: send-disappear 0.6s ease forwards calc(var(--i) * 0.03s); }
+.send-btn.is-sending .send-state--default .send-icon { transform: rotate(0) scale(1.2); }
+.send-btn.is-sending .send-state--default .send-icon svg { animation: send-take-off 0.8s linear forwards; }
+.send-btn.is-sending .send-state--default .send-icon::before { animation: send-contrail 0.8s linear forwards; }
+
+/* Sent: "Subscribed" + check drop in */
+.send-btn.is-sent .send-state--default { position: absolute; visibility: hidden; }
+.send-btn.is-sent .send-state--sent { display: flex; }
+.send-btn.is-sent .send-state--sent .send-letters span { opacity: 0; animation: send-slide-down 0.8s ease forwards calc(var(--i) * 0.06s); }
+.send-btn.is-sent .send-state--sent .send-icon svg { opacity: 0; animation: send-appear 1.2s ease forwards 0.5s; }
+
+@keyframes send-wave {
+  30% { opacity: 1; transform: translateY(4px); }
+  50% { opacity: 1; transform: translateY(-3px); color: var(--send-accent); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes send-slide-down {
+  0% { opacity: 0; transform: translateY(-20px) translateX(5px) rotate(-90deg); color: var(--send-accent); filter: blur(5px); }
+  30% { opacity: 1; transform: translateY(4px) rotate(0); filter: blur(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes send-disappear {
+  from { opacity: 1; }
+  to { opacity: 0; transform: translateX(5px) translateY(20px); color: var(--send-accent); filter: blur(5px); }
+}
+@keyframes send-take-off {
+  0% { opacity: 1; }
+  60% { opacity: 1; transform: translateX(70px) rotate(45deg) scale(2); }
+  100% { opacity: 0; transform: translateX(160px) rotate(45deg) scale(0); }
+}
+@keyframes send-land {
+  0% { transform: translateX(-60px) translateY(30px) rotate(-50deg) scale(2); opacity: 0; filter: blur(3px); }
+  100% { transform: none; opacity: 1; filter: blur(0); }
+}
+@keyframes send-contrail {
+  0% { width: 0; opacity: 1; }
+  8% { width: 15px; }
+  60% { opacity: 0.7; width: 80px; }
+  100% { opacity: 0; width: 160px; }
+}
+@keyframes send-appear {
+  0% { opacity: 0; transform: scale(4) rotate(-40deg); color: var(--send-accent); filter: blur(4px); }
+  30% { opacity: 1; transform: scale(0.6); filter: blur(1px); }
+  50% { opacity: 1; transform: scale(1.2); filter: blur(0); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Fit the existing layouts */
+.newsletter-input-row .send-btn { height: 48px; }
+.send-btn--compact { min-width: 140px; height: 44px; padding: 0 18px; font-size: 0.88rem; }
+.footer-newsletter-form { align-items: center; }
+@media (max-width: 720px) {
+  .newsletter-input-row .send-btn { min-width: 128px; height: 44px; padding: 0 14px; font-size: 0.84rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .send-btn *, .send-btn *::before, .send-btn::before, .send-btn::after { animation: none !important; transition: none !important; }
+  .send-letters span { opacity: 1; }
+  .send-btn.is-sent .send-state--sent .send-icon svg { opacity: 1; }
+}

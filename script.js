@@ -4828,6 +4828,28 @@
   // newsletter_subscribers (migration 0022_newsletter_subscribers.sql). A duplicate submit (an
   // email already on the list) still shows the same success message — never reveals whether an
   // address was already subscribed, same enumeration-safe pattern as password reset elsewhere.
+  // Animated "send" button (adapted from uiverse.io marcelodolza/fat-zebra-11). States are driven
+  // by the real result — .is-sending while saving, .is-sent only after the insert succeeds —
+  // never by :focus like the original, so a bad email or failed save never shows "Subscribed".
+  function initSendButtons() {
+    document.querySelectorAll('.send-btn .send-letters[data-text]').forEach(function (el) {
+      el.innerHTML = el.dataset.text.split('').map(function (ch, i) {
+        return '<span style="--i:' + i + '">' + (ch === ' ' ? '&nbsp;' : escapeHtml(ch)) + '</span>';
+      }).join('');
+    });
+  }
+  function setSendState(btn, state) {
+    if (!btn || !btn.classList.contains('send-btn')) return;
+    btn.classList.remove('is-sending', 'is-sent');
+    if (state) btn.classList.add('is-' + state);
+    var label = btn.querySelector('[data-send-label]');
+    if (label) label.textContent = state === 'sent' ? 'Subscribed' : state === 'sending' ? 'Subscribing…' : 'Subscribe';
+    if (state === 'sent') {
+      window.clearTimeout(btn._sendReset);
+      btn._sendReset = window.setTimeout(function () { setSendState(btn, null); }, 3200);
+    }
+  }
+
   function bindNewsletterForm(formId, emailInputId, feedbackId, source) {
     var form = document.getElementById(formId);
     var feedback = document.getElementById(feedbackId);
@@ -4842,6 +4864,7 @@
 
       var submitBtn = form.querySelector('button[type="submit"], button');
       if (submitBtn) submitBtn.disabled = true;
+      setSendState(submitBtn, 'sending');
       feedback.textContent = '';
       supabaseClient.from('newsletter_subscribers').insert({ email: email, source: source || null })
         .then(function (res) {
@@ -4854,6 +4877,7 @@
           feedback.textContent = 'Thanks for subscribing! Welcome to the You & Me family.';
           feedback.style.color = '';
           form.reset();
+          window.setTimeout(function () { setSendState(submitBtn, 'sent'); }, 650); // let the take-off finish
           // Fire-and-forget — the subscription itself is already saved regardless of whether
           // this email actually sends (Gmail SMTP being down/unconfigured never blocks or
           // reverses a real signup, and the customer never sees this fail even if it does).
@@ -4864,12 +4888,14 @@
         .catch(function () {
           feedback.textContent = 'Could not subscribe right now — please try again.';
           feedback.style.color = '#3A3330';
+          setSendState(submitBtn, null);
         })
         .then(function () { if (submitBtn) submitBtn.disabled = false; });
     });
   }
 
   function initNewsletterForm() {
+    initSendButtons();
     bindNewsletterForm('newsletterForm', 'newsletterEmail', 'newsletterFeedback', 'homepage');
     bindNewsletterForm('footerNewsletterForm', 'footerNewsletterEmail', 'footerNewsletterFeedback', 'footer');
   }
