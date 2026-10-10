@@ -4385,3 +4385,17 @@ body[data-view="home"] #footerNewsletterFeedback { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .btn-swap-text, .btn-swap-icon, .btn-swap-host::before, .btn-swap-host::after { transition: none; }
 }
+
+/* 22b. Swap button refinements
+   - Product cards already show the price right above the button → no tooltip there
+     (it covered the size chips). The product popup keeps it.
+   - Hover = charcoal fill + white icon instead of a muddy darker coral. */
+.product-card .btn-swap-host::before, .product-card .btn-swap-host::after { display: none !important; }
+@media (hover: hover) and (pointer: fine) {
+  .btn-swap-host.btn-primary:not(:disabled):hover,
+  .btn-swap-host.btn-primary:not(:disabled):focus-visible { background: var(--ink); color: #fff; }
+  .btn-swap-host.btn-outline:not(:disabled):hover,
+  .btn-swap-host.btn-outline:not(:disabled):focus-visible { background: var(--coral-tint); border-color: var(--brand-coral); color: var(--ink); }
+  .btn-swap-host { transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease, transform 0.2s ease; }
+  .btn-swap-host:not(:disabled):active { transform: scale(0.97); }
+}
