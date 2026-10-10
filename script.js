@@ -434,6 +434,14 @@
   }
 
   var MAX_VISIBLE_COLOR_DOTS = 4;
+  // "Swap" button (adapted from uiverse.io quick-stingray-2): on hover the label slides up and
+  // a cart icon slides in, with a price tooltip above. Pure presentation — the outer <button>
+  // keeps every existing id / data-* hook, so click handling is unchanged.
+  var CART_ICON_SVG = '<svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M0 2.5A.5.5 0 0 1 .5 2H2a.5.5 0 0 1 .485.379L2.89 4H14.5a.5.5 0 0 1 .485.621l-1.5 6A.5.5 0 0 1 13 11H4a.5.5 0 0 1-.485-.379L1.61 3H.5a.5.5 0 0 1-.5-.5zM3.14 5l1.25 5h8.22l1.25-5H3.14zM5 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm-2 1a2 2 0 1 1 4 0 2 2 0 0 1-4 0zm9-1a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm-2 1a2 2 0 1 1 4 0 2 2 0 0 1-4 0z"/></svg>';
+  function swapLabel(label) {
+    return '<span class="btn-swap"><span class="btn-swap-text">' + label + '</span><span class="btn-swap-icon">' + CART_ICON_SVG + '</span></span>';
+  }
+
   var MAX_CARD_SIZES = 4;
   function renderProductCard(product) {
     var discount = discountPercent(product);
@@ -479,8 +487,8 @@
           (stock.cls !== 'in-stock' ? '<div class="product-stock ' + stock.cls + '">' + stock.label + '</div>' : '') +
           '<div class="product-card-cta">' +
             // Same data-add-to-cart hook as before (QuickAdd: size/colour sheet, or direct add).
-            '<button class="btn btn-primary btn-sm product-add-btn" type="button" data-add-to-cart="' + product.id + '"' + (soldOut ? ' disabled' : '') + ' aria-label="Add ' + nameAttr + ' to cart">' +
-              (soldOut ? 'Sold Out' : '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 8h12l-1 12H7L6 8Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 8a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Add to Cart') +
+            '<button class="btn btn-primary btn-sm product-add-btn' + (soldOut ? '' : ' btn-swap-host') + '" type="button" data-add-to-cart="' + product.id + '"' + (soldOut ? ' disabled' : ' data-tooltip="' + formatPrice(product.price) + '"') + ' aria-label="Add ' + nameAttr + ' to cart">' +
+              (soldOut ? 'Sold Out' : swapLabel('Add to Cart')) +
             '</button>' +
             '<button class="btn btn-ghost btn-sm product-details-btn" type="button" data-open-product="' + product.id + '" aria-label="View details for ' + nameAttr + '">Details</button>' +
           '</div>' +
@@ -1102,8 +1110,8 @@
         '</div>' +
         '<p class="pm-selection-error" id="pmSelectionError"></p>' +
         '<div class="pm-actions">' +
-          '<button type="button" class="btn btn-outline" id="pmAddToCart"' + (p.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
-          '<button type="button" class="btn btn-primary" id="pmBuyNow"' + (p.stock <= 0 ? ' disabled' : '') + '>Buy Now</button>' +
+          '<button type="button" class="btn btn-outline btn-swap-host" id="pmAddToCart" data-tooltip="' + formatPrice(p.price) + '"' + (p.stock <= 0 ? ' disabled' : '') + '>' + swapLabel('Add to Cart') + '</button>' +
+          '<button type="button" class="btn btn-primary btn-swap-host" id="pmBuyNow" data-tooltip="' + formatPrice(p.price) + '"' + (p.stock <= 0 ? ' disabled' : '') + '>' + swapLabel('Buy Now') + '</button>' +
         '</div>' +
         '<p class="pm-stock-note">Stock and price are confirmed automatically when you check out.</p>' +
         (p.stock <= 0
@@ -1113,8 +1121,8 @@
               '<p class="account-payment-note" id="pmNotifyFeedback"></p></div>'
           : '') +
         '<div class="pm-sticky-actions">' +
-          '<button type="button" class="btn btn-outline" id="pmAddToCartSticky"' + (p.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
-          '<button type="button" class="btn btn-primary" id="pmBuyNowSticky"' + (p.stock <= 0 ? ' disabled' : '') + '>Buy Now</button>' +
+          '<button type="button" class="btn btn-outline btn-swap-host" id="pmAddToCartSticky" data-tooltip="' + formatPrice(p.price) + '"' + (p.stock <= 0 ? ' disabled' : '') + '>' + swapLabel('Add to Cart') + '</button>' +
+          '<button type="button" class="btn btn-primary btn-swap-host" id="pmBuyNowSticky" data-tooltip="' + formatPrice(p.price) + '"' + (p.stock <= 0 ? ' disabled' : '') + '>' + swapLabel('Buy Now') + '</button>' +
         '</div>' +
         productDetailAccordionHtml(p) +
         '</div></div>' +
@@ -1233,8 +1241,8 @@
       }
 
       if (event.target.id === 'pmSizeGuideToggle') { state.sizeGuideOpen = !state.sizeGuideOpen; render(); return; }
-      if (event.target.id === 'pmAddToCart' || event.target.id === 'pmAddToCartSticky') { doAddToCart(false); return; }
-      if (event.target.id === 'pmBuyNow' || event.target.id === 'pmBuyNowSticky') { doAddToCart(true); return; }
+      if (event.target.closest('#pmAddToCart, #pmAddToCartSticky')) { doAddToCart(false); return; }
+      if (event.target.closest('#pmBuyNow, #pmBuyNowSticky')) { doAddToCart(true); return; }
 
       if (event.target.id === 'pmDeliveryChange') { DeliveryLocation.open(); return; }
       if (event.target.id === 'pmDeliveryCheckBtn') {

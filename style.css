@@ -4322,3 +4322,66 @@ body[data-view="home"] #footerNewsletterFeedback { display: none; }
 @media (max-width: 720px) {
   .panel .product-modal-body { padding: 36px 18px 120px; }
 }
+
+/* =========================================================
+   22. SWAP BUTTON (Add to Cart / Buy Now) — adapted from uiverse.io "quick-stingray-2"
+   Hover: label slides up, cart icon slides in, price tooltip rises above the button.
+   Brand colours only; animation only on devices that can hover (phones keep plain labels).
+   ========================================================= */
+.btn-swap-host { position: relative; overflow: visible; }
+.btn-swap { position: relative; display: block; overflow: hidden; height: 1.5em; line-height: 1.5em; width: 100%; }
+.btn-swap-text, .btn-swap-icon {
+  display: flex; align-items: center; justify-content: center; height: 100%; width: 100%;
+  transition: transform 0.4s cubic-bezier(.2, .8, .2, 1);
+}
+.btn-swap-icon { position: absolute; left: 0; top: 100%; }
+.btn-swap-icon svg { width: 20px; height: 20px; }
+
+.btn-swap-host::before, .btn-swap-host::after {
+  position: absolute; left: 50%; pointer-events: none; z-index: 5;
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.3s ease, transform 0.35s cubic-bezier(.2, .8, .2, 1), visibility 0.3s;
+}
+.btn-swap-host::before {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 14px);
+  transform: translate(-50%, 8px);
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px rgba(58, 51, 48, 0.18);
+}
+.btn-swap-host::after {
+  content: '';
+  bottom: calc(100% + 3px);
+  transform: translate(-50%, 8px);
+  border: 6px solid transparent;
+  border-top-color: var(--ink);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-swap-host:not(:disabled):hover .btn-swap-text,
+  .btn-swap-host:not(:disabled):focus-visible .btn-swap-text { transform: translateY(-100%); }
+  .btn-swap-host:not(:disabled):hover .btn-swap-icon,
+  .btn-swap-host:not(:disabled):focus-visible .btn-swap-icon { transform: translateY(-100%); }
+  .btn-swap-host:not(:disabled):hover::before, .btn-swap-host:not(:disabled):hover::after,
+  .btn-swap-host:not(:disabled):focus-visible::before, .btn-swap-host:not(:disabled):focus-visible::after {
+    opacity: 1; visibility: visible; transform: translate(-50%, 0);
+  }
+}
+/* Inside horizontal sliders the tooltip would be clipped — keep just the slide */
+.pm-discovery-scroll .btn-swap-host::before, .pm-discovery-scroll .btn-swap-host::after,
+#homeNewArrivalsGrid .btn-swap-host::before, #homeNewArrivalsGrid .btn-swap-host::after { display: none; }
+@media (min-width: 721px) {
+  #homeNewArrivalsGrid .btn-swap-host::before, #homeNewArrivalsGrid .btn-swap-host::after { display: block; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-swap-text, .btn-swap-icon, .btn-swap-host::before, .btn-swap-host::after { transition: none; }
+}
