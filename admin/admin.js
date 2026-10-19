@@ -329,14 +329,21 @@
         return supabaseClient.from('products').select(PRODUCT_SELECT).eq('id', id).single()
           .then(function (res) { throwIfError(res); return mapSupabaseProduct(res.data); });
       },
+      // SKU left blank = auto: the products.sku DB default (next_product_sku(), migration 0029)
+      // assigns the next unused YM### atomically. A non-empty sku is an admin manual override.
+      peekNextSku: function () {
+        return supabaseClient.rpc('peek_next_product_sku').then(function (res) { throwIfError(res); return res.data; });
+      },
       create: function (payload) {
-        return supabaseClient.from('products').insert({
-          sku: payload.sku, name: payload.name, description: payload.description || '', fabric: payload.fabric || '',
+        var row = {
+          name: payload.name, description: payload.description || '', fabric: payload.fabric || '',
           category: payload.category, subcategory: payload.subcategory || null, age_group: payload.ageGroup || null, gender: payload.gender || null,
           price: payload.price, sale_price: payload.salePrice, stock: 0,
           featured: !!payload.featured, new_arrival: !!payload.newArrival, status: payload.status || 'active'
-        }).select().single().then(function (res) {
-          throwIfError(res);
+        };
+        if (payload.sku) row.sku = payload.sku;
+        return supabaseClient.from('products').insert(row).select().single().then(function (res) {
+          throwIfSkuError(res, payload.sku);
           var product = res.data;
           return writeProductChildren(product, payload).then(function () { return AdminAPI.products.get(product.id); });
         });
@@ -349,26 +356,32 @@
           featured: !!payload.featured, new_arrival: !!payload.newArrival, status: payload.status || 'active',
           updated_at: new Date().toISOString()
         }).eq('id', id).select().single().then(function (res) {
-          throwIfError(res);
+          throwIfSkuError(res, payload.sku);
           var product = res.data;
-          return Promise.all([
+          return renameVariantColors(id, payload.colorRenames).then(function () { return Promise.all([
             supabaseClient.from('product_images').delete().eq('product_id', id),
             supabaseClient.from('product_sizes').delete().eq('product_id', id),
             supabaseClient.from('product_colors').delete().eq('product_id', id)
-          ]).then(function () { return writeProductChildren(product, payload, true); })
+          ]); }).then(function () { return writeProductChildren(product, payload, true); })
             .then(function () { return recomputeProductStock(id); })
             .then(function () { return AdminAPI.products.get(id); });
         });
       },
       duplicate: function (id) {
         return AdminAPI.products.get(id).then(function (p) {
-          var sku = p.sku + '-COPY-' + Date.now().toString().slice(-5);
-          return AdminAPI.products.create({
-            sku: sku, name: p.name + ' (Copy)', description: p.description, fabric: p.fabric,
-            category: p.category, subcategory: p.subcategory, ageGroup: p.ageGroup,
+          var copy = {
+            sku: null, name: p.name + ' (Copy)', description: p.description, fabric: p.fabric,
+            category: p.category, subcategory: p.subcategory, ageGroup: p.ageGroup, gender: p.gender,
             price: p.oldPrice || p.price, salePrice: p.oldPrice ? p.price : null,
             images: p.images, sizes: p.sizes, colors: p.colors,
             featured: false, newArrival: false, status: 'draft'
+          };
+          // Copy gets the next auto SKU; falls back to the old "-COPY-" suffix only if the auto
+          // SKU migration (0029) isn't applied yet.
+          return AdminAPI.products.create(copy).catch(function (err) {
+            if (!/Automatic SKU is not set up/.test(err.message)) throw err;
+            copy.sku = p.sku + '-COPY-' + Date.now().toString().slice(-5);
+            return AdminAPI.products.create(copy);
           });
         });
       },
@@ -710,6 +723,23 @@
       if (new Date(o.created_at) > new Date(c.lastOrderAt)) { c.lastOrderAt = o.created_at; c.name = o.customer_name; c.email = o.email; }
     });
     return Object.keys(byPhone).map(function (k) { return byPhone[k]; });
+  }
+
+  // products.sku is UNIQUE — turn the raw constraint error into something an admin can act on.
+  function throwIfSkuError(res, sku) {
+    if (res.error && /products_sku_key/.test(res.error.message || '')) throw new Error('SKU "' + (sku || '') + '" is already used by another product. Choose a different SKU or switch back to Auto.');
+    if (res.error && /null value in column "sku"/.test(res.error.message || '')) throw new Error('Automatic SKU is not set up yet (run migration 0029_auto_product_sku.sql) — enter a SKU manually for now.');
+    return throwIfError(res);
+  }
+
+  // Variants (and their stock) are keyed by color NAME, so renaming a color in the form must
+  // carry its existing variant rows over to the new name instead of orphaning their stock.
+  function renameVariantColors(productId, renames) {
+    return (renames || []).reduce(function (chain, r) {
+      return chain.then(function () {
+        return supabaseClient.from('product_variants').update({ color: r.to }).eq('product_id', productId).eq('color', r.from).then(throwIfError);
+      });
+    }, Promise.resolve());
   }
 
   function writeProductChildren(product, payload) {
@@ -1359,74 +1389,122 @@
     });
   }
 
+  // Preset dress colors for the Add/Edit Product color picker (name shown on the storefront).
+  var COLOR_PRESETS = [
+    { name: 'White', hex: '#FFFFFF' }, { name: 'Cream', hex: '#F5EFE0' }, { name: 'Beige', hex: '#E8D9C0' },
+    { name: 'Peach', hex: '#F9C9A8' }, { name: 'Baby Pink', hex: '#F7C6CF' }, { name: 'Pink', hex: '#E68A98' },
+    { name: 'Red', hex: '#C93C3C' }, { name: 'Maroon', hex: '#7A2232' }, { name: 'Orange', hex: '#E88A3C' },
+    { name: 'Mustard', hex: '#D9A93A' }, { name: 'Yellow', hex: '#F4D35E' }, { name: 'Mint', hex: '#A8DCC4' },
+    { name: 'Green', hex: '#4E9A6A' }, { name: 'Olive', hex: '#7D7F3C' }, { name: 'Sky Blue', hex: '#9CC9E8' },
+    { name: 'Blue', hex: '#3D6FB6' }, { name: 'Navy', hex: '#1F2E55' }, { name: 'Lavender', hex: '#C7B8E3' },
+    { name: 'Purple', hex: '#7B4FA0' }, { name: 'Brown', hex: '#7A5236' }, { name: 'Grey', hex: '#9A9A9A' },
+    { name: 'Black', hex: '#1E1E1E' }
+  ];
+  function normHex(h) {
+    h = String(h || '').trim();
+    if (h && h[0] !== '#') h = '#' + h;
+    if (/^#[0-9a-f]{3}$/i.test(h)) h = '#' + h[1] + h[1] + h[2] + h[2] + h[3] + h[3];
+    return /^#[0-9a-f]{6}$/i.test(h) ? h.toUpperCase() : null;
+  }
+
   function renderProductForm(id) {
     var isNew = !id;
     var load = isNew ? Promise.resolve({ id: null, sku: '', name: '', description: '', fabric: '', category: 'kids', subcategory: '', ageGroup: '', price: '', oldPrice: '', images: [], sizes: [], colors: [], variants: [], featured: false, newArrival: false, status: 'active' }) : AdminAPI.products.get(id);
 
     load.then(function (p) {
-      var state = { images: p.images.slice(), sizes: p.sizes.slice(), colors: p.colors.slice(), variants: p.variants || [] };
+      // colors keep origName (the name saved in the DB) so a rename can carry variant stock over.
+      var state = {
+        images: p.images.slice(), sizes: p.sizes.slice(),
+        colors: p.colors.map(function (c) { return { name: c.name, hex: normHex(c.hex) || c.hex, origName: isNew ? null : c.name }; }),
+        variants: p.variants || [],
+        skuManual: false, skuAuto: '', editingColor: -1, saving: false
+      };
+      var submitLabel = isNew ? 'Create Product' : 'Save Changes';
 
       content().innerHTML =
-        '<div class="section-heading-row"><h3 style="font-size:1.05rem;">' + (isNew ? 'Add Product' : 'Edit Product') + '</h3>' +
-          '<a href="' + BASE_PATH + '/admin/products" class="btn-ghost btn-sm">← Back to Products</a></div>' +
-        '<form id="productForm">' +
-          '<div class="panel-card">' +
-            '<h3>Images</h3>' +
-            '<div class="image-upload-grid" id="imageGrid"></div>' +
-            '<p style="font-size:0.76rem;color:var(--text-soft);">First image is the main image. Click an image to set it as main, or use the buttons to reorder/delete.</p>' +
-          '</div>' +
-          '<div class="panel-card">' +
-            '<h3>Basics</h3>' +
-            '<div class="form-row">' +
-              field('pName', 'Product Name', p.name, true) +
-              field('pSku', 'SKU', p.sku, true) +
+        '<form id="productForm" class="product-form" novalidate>' +
+          '<div class="product-form-head">' +
+            '<div><h3>' + (isNew ? 'Add Product' : 'Edit Product') + '</h3>' +
+              '<span class="field-hint">' + (isNew ? 'Fields marked * are required' : esc(p.name)) + '</span></div>' +
+            '<div class="product-form-head-actions">' +
+              '<a href="' + BASE_PATH + '/admin/products" class="btn-ghost btn-sm">← Back</a>' +
+              '<button type="submit" class="btn-primary btn-sm" data-submit>' + submitLabel + '</button>' +
             '</div>' +
-            '<div class="form-row">' +
-              selectField('pCategory', 'Category', ['kids', 'family', 'couple'], p.category) +
-              field('pSubcategory', 'Subcategory', p.subcategory || '') +
+          '</div>' +
+          '<div class="product-form-grid">' +
+            '<div class="product-form-main">' +
+              '<div class="panel-card">' +
+                '<h3>Basics</h3>' +
+                '<div class="form-row form-row-name">' +
+                  field('pName', 'Product Name *', p.name, true) +
+                  '<div class="form-field sku-field"><label for="pSku">SKU <span class="sku-mode" id="skuMode"></span></label>' +
+                    '<div class="sku-input-wrap"><input type="text" id="pSku" value="' + esc(p.sku) + '" readonly autocomplete="off" spellcheck="false">' +
+                    '<button type="button" class="sku-toggle" id="skuToggle">Edit</button></div>' +
+                    '<small class="field-hint" id="skuHint"></small></div>' +
+                '</div>' +
+                '<div class="form-row form-row-3">' +
+                  selectField('pCategory', 'Category', ['kids', 'family', 'couple'], p.category) +
+                  field('pSubcategory', 'Subcategory', p.subcategory || '') +
+                  '<div class="form-field"><label for="pGender">Gender</label>' +
+                    '<select id="pGender" title="Optional — powers the storefront Gender filter"><option value=""' + (!p.gender ? ' selected' : '') + '>Not set</option>' +
+                      ['boys', 'girls', 'unisex'].map(function (g) { return '<option value="' + g + '"' + (p.gender === g ? ' selected' : '') + '>' + g.charAt(0).toUpperCase() + g.slice(1) + '</option>'; }).join('') +
+                    '</select></div>' +
+                '</div>' +
+                '<div class="form-row form-row-4">' +
+                  field('pPrice', 'Regular Price (₹) *', p.oldPrice || p.price, true, 'number') +
+                  field('pSalePrice', 'Sale Price (₹)', p.oldPrice ? p.price : '', false, 'number') +
+                  field('pAgeGroup', 'Age Group', p.ageGroup || '') +
+                  field('pFabric', 'Material / Fabric', p.fabric || '') +
+                '</div>' +
+                '<div class="form-field"><label for="pDescription">Description</label><textarea id="pDescription" rows="3">' + esc(p.description || '') + '</textarea></div>' +
+                '<p class="field-hint">Stock is managed per size/color variant — the product list total is the sum of all variants.</p>' +
+              '</div>' +
+              '<div class="panel-card">' +
+                '<h3>Sizes</h3>' +
+                '<div class="chip-input-row" id="sizeChips"></div>' +
+                '<div class="chip-add-row"><input type="text" id="newSizeInput" placeholder="e.g. 2-3Y — press Enter to add"><button type="button" class="btn-secondary btn-sm" id="addSizeBtn">Add</button></div>' +
+              '</div>' +
+              (isNew ? '' : '<div class="panel-card"><h3>Variant Stock</h3><div class="table-wrap"><table class="data-table variant-table" id="variantTable"></table></div></div>') +
             '</div>' +
-            '<div class="form-row">' +
-              field('pAgeGroup', 'Age Group', p.ageGroup || '') +
-              field('pFabric', 'Material / Fabric', p.fabric || '') +
+            '<div class="product-form-side">' +
+              '<div class="panel-card pf-images">' +
+                '<h3>Images</h3>' +
+                '<div class="image-upload-grid" id="imageGrid"></div>' +
+                '<p class="field-hint">First image is the main image. Hover an image to make it main, move it, or remove it.</p>' +
+              '</div>' +
+              '<div class="panel-card pf-colors color-card">' +
+                '<div class="panel-card-head"><h3>Colors</h3><span class="field-hint">Click a selected color to edit</span></div>' +
+                '<div class="color-selected" id="colorChips"></div>' +
+                '<div class="color-palette" id="colorPalette" role="group" aria-label="Color palette">' +
+                  COLOR_PRESETS.map(function (c, i) {
+                    return '<button type="button" class="color-preset" data-preset="' + i + '" style="background:' + c.hex + '" title="' + c.name + ' ' + c.hex + '" aria-label="' + c.name + '"></button>';
+                  }).join('') +
+                '</div>' +
+                '<div class="color-custom">' +
+                  '<input type="color" id="newColorHex" value="#CBA37D" aria-label="Custom color">' +
+                  '<input type="text" id="newColorHexText" class="color-hex-input" value="#CBA37D" maxlength="7" spellcheck="false" aria-label="HEX code">' +
+                  '<input type="text" id="newColorName" placeholder="Name (optional)" aria-label="Color name">' +
+                  '<button type="button" class="btn-secondary btn-sm" id="addColorBtn">Add</button>' +
+                  '<button type="button" class="btn-ghost btn-sm" id="cancelColorEdit" hidden>Cancel</button>' +
+                '</div>' +
+                '<p class="field-hint color-msg" id="colorMsg" aria-live="polite"></p>' +
+              '</div>' +
+              '<div class="panel-card pf-visibility">' +
+                '<h3>Visibility</h3>' +
+                '<div class="toggle-row"><input type="checkbox" id="pActive"' + (p.status !== 'draft' ? ' checked' : '') + '><label for="pActive">Active (unchecked = Draft, hidden from customers)</label></div>' +
+                '<div class="toggle-row"><input type="checkbox" id="pFeatured"' + (p.featured ? ' checked' : '') + '><label for="pFeatured">Featured Product (Homepage Featured Products)</label></div>' +
+                '<div class="toggle-row"><input type="checkbox" id="pNewArrival"' + (p.newArrival ? ' checked' : '') + '><label for="pNewArrival">New Arrival</label></div>' +
+              '</div>' +
             '</div>' +
-            '<div class="form-row">' +
-              '<div class="form-field"><label for="pGender">Gender (optional — powers the storefront Gender filter)</label>' +
-                '<select id="pGender"><option value=""' + (!p.gender ? ' selected' : '') + '>Not set</option>' +
-                  ['boys', 'girls', 'unisex'].map(function (g) { return '<option value="' + g + '"' + (p.gender === g ? ' selected' : '') + '>' + g.charAt(0).toUpperCase() + g.slice(1) + '</option>'; }).join('') +
-                '</select></div>' +
-            '</div>' +
-            '<div class="form-field"><label for="pDescription">Description</label><textarea id="pDescription" rows="3">' + esc(p.description || '') + '</textarea></div>' +
           '</div>' +
-          '<div class="panel-card">' +
-            '<h3>Pricing &amp; Stock</h3>' +
-            '<div class="form-row">' +
-              field('pPrice', 'Regular Price (₹)', p.oldPrice || p.price, true, 'number') +
-              field('pSalePrice', 'Sale Price (₹, optional)', p.oldPrice ? p.price : '', false, 'number') +
-            '</div>' +
-            '<p style="font-size:0.76rem;color:var(--text-soft);">Stock is managed per size/color variant below — the total shown on the product list is the sum of all variants.</p>' +
+          '<div class="product-form-foot">' +
+            '<p class="login-error" id="productFormError" role="alert"></p>' +
+            '<button type="submit" class="btn-primary" data-submit>' + submitLabel + '</button>' +
           '</div>' +
-          '<div class="panel-card">' +
-            '<h3>Sizes</h3>' +
-            '<div class="chip-input-row" id="sizeChips"></div>' +
-            '<div class="chip-add-row"><input type="text" id="newSizeInput" placeholder="e.g. 2-3Y"><button type="button" class="btn-secondary" id="addSizeBtn">Add</button></div>' +
-          '</div>' +
-          '<div class="panel-card">' +
-            '<h3>Colors</h3>' +
-            '<div class="chip-input-row" id="colorChips"></div>' +
-            '<div class="chip-add-row"><input type="text" id="newColorName" placeholder="Color name"><input type="color" id="newColorHex" value="#CBA37D"><button type="button" class="btn-secondary" id="addColorBtn">Add</button></div>' +
-          '</div>' +
-          (isNew ? '' : '<div class="panel-card"><h3>Variant Stock</h3><div class="table-wrap"><table class="data-table variant-table" id="variantTable"></table></div></div>') +
-          '<div class="panel-card">' +
-            '<div class="toggle-row"><input type="checkbox" id="pFeatured"' + (p.featured ? ' checked' : '') + '><label for="pFeatured">Featured Product (shows in Homepage Featured Products)</label></div>' +
-            '<div class="toggle-row"><input type="checkbox" id="pNewArrival"' + (p.newArrival ? ' checked' : '') + '><label for="pNewArrival">New Arrival</label></div>' +
-            '<div class="toggle-row"><input type="checkbox" id="pActive"' + (p.status !== 'draft' ? ' checked' : '') + '><label for="pActive">Active (unchecked = Draft, hidden from customers)</label></div>' +
-          '</div>' +
-          '<p class="login-error" id="productFormError"></p>' +
-          '<button type="submit" class="btn-primary">' + (isNew ? 'Create Product' : 'Save Changes') + '</button>' +
         '</form>';
 
       function field(id, label, val, required, type) {
-        return '<div class="form-field"><label for="' + id + '">' + label + '</label><input type="' + (type || 'text') + '" id="' + id + '" value="' + esc(val) + '"' + (required ? ' required' : '') + '></div>';
+        return '<div class="form-field"><label for="' + id + '">' + label + '</label><input type="' + (type || 'text') + '" id="' + id + '" value="' + esc(val) + '"' + (required ? ' required' : '') + (type === 'number' ? ' min="0" step="1" inputmode="numeric"' : '') + '></div>';
       }
       function selectField(id, label, options, val) {
         return '<div class="form-field"><label for="' + id + '">' + label + '</label><select id="' + id + '">' +
@@ -1437,15 +1515,68 @@
       renderSizeChips();
       renderColorChips();
       if (!isNew) renderVariantTable();
+      initSkuField();
 
+      /* --- SKU: auto (DB-assigned on save) by default, optional manual override --- */
+      function initSkuField() {
+        var input = document.getElementById('pSku');
+        var original = p.sku;
+        if (isNew) {
+          input.value = '';
+          input.placeholder = 'Loading…';
+          AdminAPI.products.peekNextSku().then(function (sku) {
+            state.skuAuto = sku || '';
+            if (!state.skuManual) syncSku();
+          }).catch(function () {
+            // Auto SKU not available (migration 0029 not applied) — fall back to manual entry.
+            state.skuAuto = '';
+            state.skuManual = true;
+            syncSku('Automatic SKU unavailable — enter a SKU manually.');
+          });
+        }
+        syncSku();
+        document.getElementById('skuToggle').addEventListener('click', function () {
+          if (isNew && !state.skuAuto && state.skuManual) return;
+          state.skuManual = !state.skuManual;
+          if (!state.skuManual) input.value = isNew ? state.skuAuto : original;
+          syncSku();
+          if (state.skuManual) { input.focus(); input.select(); }
+        });
+        function syncSku(errorHint) {
+          var mode = document.getElementById('skuMode');
+          var hint = document.getElementById('skuHint');
+          var toggle = document.getElementById('skuToggle');
+          input.readOnly = !state.skuManual;
+          input.required = state.skuManual;
+          input.classList.toggle('is-manual', state.skuManual);
+          if (state.skuManual) {
+            mode.textContent = 'Manual'; mode.className = 'sku-mode is-manual';
+            toggle.textContent = isNew ? 'Auto' : 'Cancel';
+            toggle.hidden = isNew && !state.skuAuto;
+            if (isNew && !input.value) input.value = state.skuAuto;
+            input.placeholder = 'e.g. YM040';
+            hint.textContent = errorHint || (isNew ? 'Custom SKU — must be unique.' : 'Changing the SKU does not change existing variant codes.');
+          } else {
+            mode.textContent = isNew ? 'Auto' : 'Locked'; mode.className = 'sku-mode';
+            toggle.textContent = 'Edit'; toggle.hidden = false;
+            if (isNew) { input.value = state.skuAuto; input.placeholder = state.skuAuto ? '' : 'Loading…'; }
+            hint.textContent = isNew ? 'Next free code — final SKU is assigned on save.' : '';
+          }
+        }
+      }
+
+      /* --- Images (multi-upload, main image, reorder, remove) --- */
       function renderImageGrid() {
         var grid = document.getElementById('imageGrid');
+        var last = state.images.length - 1;
         grid.innerHTML = state.images.map(function (url, i) {
           return '<div class="image-slot' + (i === 0 ? ' primary' : '') + '" data-idx="' + i + '">' +
             imageHtml(url, 'thumb').replace('class="thumb"', 'style="width:100%;height:100%;object-fit:cover;"') +
             '<div class="image-slot-actions">' +
               (i !== 0 ? '<button type="button" data-set-main="' + i + '">Main</button>' : '') +
-              '<button type="button" data-remove-img="' + i + '">Remove</button>' +
+              (i > 0 ? '<button type="button" data-move-img="' + i + '" data-dir="-1" aria-label="Move left">←</button>' : '') +
+              (i < last ? '<button type="button" data-move-img="' + i + '" data-dir="1" aria-label="Move right">→</button>' : '') +
+              '<button type="button" data-remove-img="' + i + '" aria-label="Remove image">✕</button>' +
             '</div></div>';
         }).join('') +
           '<label class="image-slot image-slot-add" id="imageAddTile"><span class="icon">' + UploadUI.icon + '</span><span id="imageUploadLabel">Add images</span><small>or drop here</small><input type="file" accept="image/*" id="imageFileInput" multiple></label>';
@@ -1454,6 +1585,13 @@
           btn.addEventListener('click', function () {
             var i = Number(btn.dataset.setMain);
             state.images.splice(0, 0, state.images.splice(i, 1)[0]);
+            renderImageGrid();
+          });
+        });
+        grid.querySelectorAll('[data-move-img]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var i = Number(btn.dataset.moveImg), j = i + Number(btn.dataset.dir);
+            var tmp = state.images[i]; state.images[i] = state.images[j]; state.images[j] = tmp;
             renderImageGrid();
           });
         });
@@ -1481,34 +1619,128 @@
         });
       }
 
+      /* --- Sizes --- */
       function renderSizeChips() {
         document.getElementById('sizeChips').innerHTML = state.sizes.map(function (s, i) {
-          return '<span class="editable-chip">' + esc(s) + '<button type="button" data-remove-size="' + i + '">&times;</button></span>';
-        }).join('') || '<span style="font-size:0.8rem;color:var(--text-soft);">No sizes yet.</span>';
+          return '<span class="editable-chip">' + esc(s) + '<button type="button" data-remove-size="' + i + '" aria-label="Remove size ' + esc(s) + '">&times;</button></span>';
+        }).join('') || '<span class="field-hint">No sizes yet.</span>';
         document.querySelectorAll('[data-remove-size]').forEach(function (btn) {
           btn.addEventListener('click', function () { state.sizes.splice(Number(btn.dataset.removeSize), 1); renderSizeChips(); if (!isNew) renderVariantTable(); });
         });
       }
-      document.getElementById('addSizeBtn').addEventListener('click', function () {
+      function addSize() {
         var input = document.getElementById('newSizeInput');
         var val = input.value.trim();
         if (val && state.sizes.indexOf(val) === -1) { state.sizes.push(val); input.value = ''; renderSizeChips(); if (!isNew) renderVariantTable(); }
-      });
+      }
+      document.getElementById('addSizeBtn').addEventListener('click', addSize);
+      document.getElementById('newSizeInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addSize(); } });
+
+      /* --- Colors: palette, custom picker, HEX, optional name, edit/remove --- */
+      var hexPicker = document.getElementById('newColorHex');
+      var hexText = document.getElementById('newColorHexText');
+      var colorName = document.getElementById('newColorName');
+      var colorMsg = document.getElementById('colorMsg');
+
+      function setColorMsg(text, isError) { colorMsg.textContent = text || ''; colorMsg.classList.toggle('is-error', !!isError); }
+      function presetNameFor(hex) { var m = COLOR_PRESETS.filter(function (c) { return c.hex === hex; })[0]; return m ? m.name : null; }
+      function nameTaken(name, exceptIdx) {
+        return state.colors.some(function (c, i) { return i !== exceptIdx && c.name.toLowerCase() === name.toLowerCase(); });
+      }
+      function setEditorHex(hex) { hexPicker.value = hex.toLowerCase(); hexText.value = hex; hexText.classList.remove('is-invalid'); }
 
       function renderColorChips() {
-        document.getElementById('colorChips').innerHTML = state.colors.map(function (c, i) {
-          return '<span class="editable-chip"><span style="width:12px;height:12px;border-radius:50%;background:' + esc(c.hex) + ';display:inline-block;"></span>' + esc(c.name) + '<button type="button" data-remove-color="' + i + '">&times;</button></span>';
-        }).join('') || '<span style="font-size:0.8rem;color:var(--text-soft);">No colors yet.</span>';
-        document.querySelectorAll('[data-remove-color]').forEach(function (btn) {
-          btn.addEventListener('click', function () { state.colors.splice(Number(btn.dataset.removeColor), 1); renderColorChips(); if (!isNew) renderVariantTable(); });
+        var wrap = document.getElementById('colorChips');
+        wrap.innerHTML = state.colors.map(function (c, i) {
+          return '<div class="color-chip' + (state.editingColor === i ? ' is-editing' : '') + '">' +
+            '<button type="button" class="color-chip-swatch" data-edit-color="' + i + '" style="background:' + esc(c.hex) + '" aria-label="Edit ' + esc(c.name) + '"></button>' +
+            '<span class="color-chip-text"><strong>' + esc(c.name) + '</strong><small>' + esc(c.hex) + '</small></span>' +
+            '<button type="button" class="color-chip-remove" data-remove-color="' + i + '" aria-label="Remove ' + esc(c.name) + '">&times;</button>' +
+          '</div>';
+        }).join('') || '<span class="field-hint">No colors yet — pick from the palette or add a custom color.</span>';
+        wrap.querySelectorAll('[data-remove-color]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var i = Number(btn.dataset.removeColor);
+            state.colors.splice(i, 1);
+            if (state.editingColor === i) stopColorEdit(); else if (state.editingColor > i) state.editingColor--;
+            renderColorChips(); if (!isNew) renderVariantTable();
+          });
+        });
+        wrap.querySelectorAll('[data-edit-color]').forEach(function (btn) {
+          btn.addEventListener('click', function () { startColorEdit(Number(btn.dataset.editColor)); });
+        });
+        var used = {};
+        state.colors.forEach(function (c) { used[c.hex] = true; });
+        document.querySelectorAll('#colorPalette [data-preset]').forEach(function (b) {
+          b.classList.toggle('is-selected', !!used[COLOR_PRESETS[Number(b.dataset.preset)].hex]);
         });
       }
-      document.getElementById('addColorBtn').addEventListener('click', function () {
-        var nameInput = document.getElementById('newColorName');
-        var name = nameInput.value.trim();
-        var hex = document.getElementById('newColorHex').value;
-        if (name && !state.colors.some(function (c) { return c.name === name; })) { state.colors.push({ name: name, hex: hex }); nameInput.value = ''; renderColorChips(); if (!isNew) renderVariantTable(); }
+      function startColorEdit(i) {
+        state.editingColor = i;
+        var c = state.colors[i];
+        setEditorHex(c.hex);
+        colorName.value = c.name;
+        document.getElementById('addColorBtn').textContent = 'Update';
+        document.getElementById('cancelColorEdit').hidden = false;
+        setColorMsg('Editing “' + c.name + '” — change the color or name, then Update.');
+        renderColorChips();
+        colorName.focus();
+      }
+      function stopColorEdit() {
+        state.editingColor = -1;
+        colorName.value = '';
+        document.getElementById('addColorBtn').textContent = 'Add';
+        document.getElementById('cancelColorEdit').hidden = true;
+        setColorMsg('');
+      }
+      function commitColor(hex, name) {
+        hex = normHex(hex);
+        if (!hex) { hexText.classList.add('is-invalid'); setColorMsg('Enter a valid HEX code like #CBA37D.', true); return false; }
+        name = (name || '').trim() || presetNameFor(hex) || hex;
+        var editing = state.editingColor;
+        if (nameTaken(name, editing)) { setColorMsg('“' + name + '” is already added — use a different name.', true); return false; }
+        if (editing >= 0) {
+          state.colors[editing].hex = hex;
+          state.colors[editing].name = name;
+          stopColorEdit();
+          setColorMsg('Updated “' + name + '”.');
+        } else {
+          if (state.colors.some(function (c) { return c.hex === hex; }) && !colorName.value.trim()) { setColorMsg(hex + ' is already added.', true); return false; }
+          state.colors.push({ name: name, hex: hex, origName: null });
+          colorName.value = '';
+          setColorMsg('Added “' + name + '”.');
+        }
+        renderColorChips(); if (!isNew) renderVariantTable();
+        return true;
+      }
+
+      hexPicker.addEventListener('input', function () { setEditorHex(hexPicker.value.toUpperCase()); });
+      hexText.addEventListener('input', function () {
+        var h = normHex(hexText.value);
+        hexText.classList.toggle('is-invalid', !h && hexText.value.length >= 4);
+        if (h) hexPicker.value = h.toLowerCase();
       });
+      document.getElementById('colorPalette').addEventListener('click', function (e) {
+        var b = e.target.closest('[data-preset]');
+        if (!b) return;
+        var preset = COLOR_PRESETS[Number(b.dataset.preset)];
+        if (state.editingColor >= 0) {
+          // While editing, a palette click just loads that color into the editor.
+          setEditorHex(preset.hex);
+          var cur = state.colors[state.editingColor];
+          if (!colorName.value.trim() || colorName.value.trim() === cur.name && presetNameFor(cur.hex) === cur.name) colorName.value = preset.name;
+          return;
+        }
+        var existing = state.colors.map(function (c) { return c.hex; }).indexOf(preset.hex);
+        if (existing !== -1) { setColorMsg(preset.name + ' is already added — click it above to edit.', true); return; }
+        setEditorHex(preset.hex);
+        commitColor(preset.hex, preset.name);
+      });
+      document.getElementById('addColorBtn').addEventListener('click', function () { commitColor(hexText.value, colorName.value); });
+      [colorName, hexText].forEach(function (el) {
+        el.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); commitColor(hexText.value, colorName.value); } });
+      });
+      document.getElementById('cancelColorEdit').addEventListener('click', function () { stopColorEdit(); renderColorChips(); });
 
       function renderVariantTable() {
         var wrap = document.getElementById('variantTable');
@@ -1516,7 +1748,8 @@
         var rows = [];
         state.sizes.forEach(function (size) {
           state.colors.forEach(function (color) {
-            var existing = state.variants.find(function (v) { return v.size === size && v.color === color.name; });
+            var key = color.origName || color.name;
+            var existing = state.variants.find(function (v) { return v.size === size && v.color === key; });
             rows.push({ size: size, color: color.name, stock: existing ? existing.stock : 0, id: existing ? existing.id : null });
           });
         });
@@ -1538,29 +1771,48 @@
 
       document.getElementById('productForm').addEventListener('submit', function (e) {
         e.preventDefault();
+        if (state.saving) return;
+        var errorEl = document.getElementById('productFormError');
+        errorEl.textContent = '';
+        var name = document.getElementById('pName').value.trim();
+        var price = document.getElementById('pPrice').value;
+        var skuVal = document.getElementById('pSku').value.trim();
+        var problem = !name ? 'Product name is required.' : (price === '' || Number(price) < 0) ? 'Enter a valid regular price.' : (state.skuManual && !skuVal) ? 'Enter a SKU, or switch back to Auto.' : '';
+        if (problem) { errorEl.textContent = problem; return; }
+
         var payload = {
-          name: document.getElementById('pName').value.trim(),
-          sku: document.getElementById('pSku').value.trim(),
+          name: name,
+          // New product in Auto mode: send no SKU — the database assigns the next YM###.
+          sku: isNew && !state.skuManual ? '' : skuVal,
           category: document.getElementById('pCategory').value,
           subcategory: document.getElementById('pSubcategory').value.trim(),
           ageGroup: document.getElementById('pAgeGroup').value.trim(),
           gender: document.getElementById('pGender').value || null,
           fabric: document.getElementById('pFabric').value.trim(),
           description: document.getElementById('pDescription').value.trim(),
-          price: Number(document.getElementById('pPrice').value),
+          price: Number(price),
           salePrice: document.getElementById('pSalePrice').value ? Number(document.getElementById('pSalePrice').value) : null,
           images: state.images,
           sizes: state.sizes,
-          colors: state.colors,
+          colors: state.colors.map(function (c) { return { name: c.name, hex: c.hex }; }),
+          colorRenames: state.colors.filter(function (c) { return c.origName && c.origName !== c.name; }).map(function (c) { return { from: c.origName, to: c.name }; }),
           featured: document.getElementById('pFeatured').checked,
           newArrival: document.getElementById('pNewArrival').checked,
           status: document.getElementById('pActive').checked ? 'active' : 'draft'
         };
-        var errorEl = document.getElementById('productFormError');
-        errorEl.textContent = '';
+        var buttons = document.querySelectorAll('#productForm [data-submit]');
+        state.saving = true;
+        buttons.forEach(function (b) { b.disabled = true; b.textContent = 'Saving…'; });
         var req = isNew ? AdminAPI.products.create(payload) : AdminAPI.products.update(p.id, payload);
-        req.then(function (saved) { Router.navigate(BASE_PATH + '/admin/products/' + saved.id); })
-          .catch(function (err) { errorEl.textContent = err.message; });
+        req.then(function (saved) {
+          adminToast(isNew ? 'Product created — SKU ' + saved.sku : 'Changes saved.');
+          if (isNew) Router.navigate(BASE_PATH + '/admin/products/' + saved.id);
+          else renderProductForm(saved.id);
+        }).catch(function (err) {
+          state.saving = false;
+          buttons.forEach(function (b) { b.disabled = false; b.textContent = submitLabel; });
+          errorEl.textContent = err.message;
+        });
       });
     });
   }
