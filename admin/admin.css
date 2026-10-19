@@ -975,3 +975,9 @@ textarea { font-family: inherit; resize: vertical; }
 .image-slot-color[style] .dot { border-style: solid; border-color: rgba(58,51,48,0.18); }
 .image-slot-color select { flex: 1; min-width: 0; min-height: 0 !important; height: 20px; border: none; background: transparent; font-size: 0.64rem; padding: 0 14px 0 0 !important; background-position: right 0 center !important; background-size: 10px !important; cursor: pointer; }
 .product-form .image-slot .image-slot-actions { bottom: 28px; }
+
+/* ---- Variant stock: delete / re-add ---- */
+.variant-actions { white-space: nowrap; display: flex; gap: 6px; }
+.variant-row-muted td { color: var(--ink-soft, var(--text-soft)); }
+.variant-note { font-size: 0.74rem; color: var(--ink-soft, var(--text-soft)); }
+.variant-actions button:disabled { opacity: 0.6; cursor: progress; }

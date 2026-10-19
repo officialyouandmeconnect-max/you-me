@@ -363,6 +363,7 @@
             supabaseClient.from('product_sizes').delete().eq('product_id', id),
             supabaseClient.from('product_colors').delete().eq('product_id', id)
           ]); }).then(function () { return writeProductChildren(product, payload, true); })
+            .then(function () { return removeOrphanVariants(id, payload); })
             .then(function () { return recomputeProductStock(id); })
             .then(function () { return AdminAPI.products.get(id); });
         });
@@ -418,6 +419,23 @@
       setVariantStock: function (productId, variantId, stock) {
         return supabaseClient.from('product_variants').update({ stock: stock }).eq('id', variantId)
           .then(throwIfError).then(function () { return recomputeProductStock(productId); });
+      },
+      // Removes one size×colour combination: it is no longer sold (storefront shows it sold
+      // out) and its stock leaves the product total. Past orders keep their own size/colour text.
+      deleteVariant: function (productId, variantId) {
+        return supabaseClient.from('product_variants').delete().eq('id', variantId).eq('product_id', productId)
+          .then(throwIfError).then(function () { return recomputeProductStock(productId); });
+      },
+      // Re-offers a combination that was deleted earlier (starts at stock 0).
+      addVariant: function (product, size, color) {
+        function insert(sku) {
+          return supabaseClient.from('product_variants').insert({ product_id: product.id, variant_sku: sku, size: size, color: color, stock: 0 }).select().single();
+        }
+        var base = variantSkuFor(product.sku, size, color);
+        return insert(base).then(function (res) {
+          if (res.error && res.error.code === '23505') return insert(base + '-' + Date.now().toString(36).toUpperCase());
+          return res;
+        }).then(function (res) { throwIfError(res); return recomputeProductStock(product.id).then(function () { return res.data; }); });
       }
     },
 
@@ -761,6 +779,25 @@
     }, Promise.resolve());
   }
 
+  function variantSkuFor(productSku, size, color) {
+    return productSku + '-' + String(color || '').toUpperCase().replace(/\s+/g, '') + '-' + String(size || '').replace(/\s+/g, '');
+  }
+
+  // Variants of a size or colour that was removed from the product. Left behind they stay
+  // invisible in Admin but still count in the product's total stock — so they go on save.
+  function removeOrphanVariants(productId, payload) {
+    var sizes = payload.sizes || [], colors = (payload.colors || []).map(function (c) { return c.name; });
+    if (!sizes.length && !colors.length) return Promise.resolve();
+    return supabaseClient.from('product_variants').select('id, size, color').eq('product_id', productId).then(function (res) {
+      throwIfError(res);
+      var ids = (res.data || []).filter(function (v) {
+        return (sizes.length && sizes.indexOf(v.size) === -1) || (colors.length && colors.indexOf(v.color) === -1);
+      }).map(function (v) { return v.id; });
+      if (!ids.length) return null;
+      return supabaseClient.from('product_variants').delete().in('id', ids).then(throwIfError);
+    });
+  }
+
   function writeProductChildren(product, payload) {
     var tasks = [];
     // payload.images: URL strings or { url, color } (color = product color name, null = all colors).
@@ -796,7 +833,11 @@
           (payload.colors || []).forEach(function (color) {
             var key = size + '|' + color.name;
             if (existing[key]) return;
-            var variantSku = product.sku + '-' + color.name.toUpperCase().replace(/\s+/g, '') + '-' + size.replace(/\s+/g, '');
+            // Existing products: only combos that involve a size/colour added in this edit. A combo
+            // the admin deleted on purpose (both size and colour already existed) is not recreated.
+            var only = payload.newCombosOnly;
+            if (only && only.sizes.indexOf(size) !== -1 && only.colors.indexOf(color.name) !== -1) return;
+            var variantSku = variantSkuFor(product.sku, size, color.name);
             toInsert.push({ product_id: product.id, variant_sku: variantSku, size: size, color: color.name, stock: 0 });
           });
         });
@@ -1844,6 +1885,13 @@
       });
       document.getElementById('cancelColorEdit').addEventListener('click', function () { stopColorEdit(); renderColorChips(); });
 
+      // Sizes/colours that already existed when this page loaded (renamed colours count as
+      // existing — their variants were carried over). A missing combo of two of these was deleted
+      // on purpose; a combo with a newly added size/colour is created when the product is saved.
+      var loadedSizes = p.sizes.slice();
+      var hadVariants = (p.variants || []).length > 0;
+      function comboIsNew(size, color) { return !hadVariants || loadedSizes.indexOf(size) === -1 || !color.origName; }
+
       function renderVariantTable() {
         var wrap = document.getElementById('variantTable');
         if (!wrap) return;
@@ -1852,21 +1900,63 @@
           state.colors.forEach(function (color) {
             var key = color.origName || color.name;
             var existing = state.variants.find(function (v) { return v.size === size && v.color === key; });
-            rows.push({ size: size, color: color.name, stock: existing ? existing.stock : 0, id: existing ? existing.id : null });
+            rows.push({ size: size, color: color.name, dbColor: key, stock: existing ? existing.stock : 0, id: existing ? existing.id : null, isNew: comboIsNew(size, color) });
           });
         });
         wrap.innerHTML = '<thead><tr><th>Size</th><th>Color</th><th>Stock</th><th></th></tr></thead><tbody>' +
-          (rows.length === 0 ? '<tr><td colspan="4" style="color:var(--text-soft);">Add sizes and colors to manage stock per variant.</td></tr>' : rows.map(function (r, i) {
-            return '<tr><td>' + esc(r.size) + '</td><td>' + esc(r.color) + '</td>' +
-              '<td><input type="number" min="0" class="variant-stock-input" data-variant-id="' + (r.id || '') + '" value="' + r.stock + '"></td>' +
-              '<td>' + (r.id ? '<button type="button" class="btn-ghost btn-sm" data-save-variant="' + r.id + '">Update</button>' : '<span style="font-size:0.72rem;color:var(--text-soft);">Save product first</span>') + '</td></tr>';
+          (rows.length === 0 ? '<tr><td colspan="4" style="color:var(--text-soft);">Add sizes and colors to manage stock per variant.</td></tr>' : rows.map(function (r) {
+            if (r.id) {
+              return '<tr><td>' + esc(r.size) + '</td><td>' + esc(r.color) + '</td>' +
+                '<td><input type="number" min="0" class="variant-stock-input" data-variant-id="' + r.id + '" value="' + r.stock + '"></td>' +
+                '<td class="variant-actions"><button type="button" class="btn-ghost btn-sm" data-save-variant="' + r.id + '">Update</button>' +
+                  '<button type="button" class="btn-danger btn-sm" data-delete-variant="' + r.id + '" data-label="' + esc(r.size + ' / ' + r.color) + '" data-stock="' + r.stock + '">Delete</button></td></tr>';
+            }
+            if (r.isNew) {
+              return '<tr class="variant-row-muted"><td>' + esc(r.size) + '</td><td>' + esc(r.color) + '</td><td>—</td>' +
+                '<td><span class="variant-note">Created when you save</span></td></tr>';
+            }
+            return '<tr class="variant-row-muted"><td>' + esc(r.size) + '</td><td>' + esc(r.color) + '</td><td><span class="variant-note">Not offered</span></td>' +
+              '<td class="variant-actions"><button type="button" class="btn-ghost btn-sm" data-add-variant data-size="' + esc(r.size) + '" data-color="' + esc(r.dbColor) + '">Add</button></td></tr>';
           }).join('')) + '</tbody>';
 
         wrap.querySelectorAll('[data-save-variant]').forEach(function (btn) {
           btn.addEventListener('click', function () {
             var input = wrap.querySelector('.variant-stock-input[data-variant-id="' + btn.dataset.saveVariant + '"]');
-            AdminAPI.products.setVariantStock(p.id, Number(btn.dataset.saveVariant), Number(input.value))
-              .then(function () { btn.textContent = 'Saved ✓'; window.setTimeout(function () { btn.textContent = 'Update'; }, 1200); });
+            var stock = Math.max(0, Math.floor(Number(input.value) || 0));
+            btn.disabled = true;
+            AdminAPI.products.setVariantStock(p.id, Number(btn.dataset.saveVariant), stock)
+              .then(function () {
+                state.variants.forEach(function (v) { if (v.id === Number(btn.dataset.saveVariant)) v.stock = stock; });
+                btn.textContent = 'Saved ✓'; window.setTimeout(function () { btn.textContent = 'Update'; btn.disabled = false; }, 1200);
+              })
+              .catch(function (err) { btn.disabled = false; adminToast('Could not update stock: ' + err.message, 'error'); });
+          });
+        });
+        wrap.querySelectorAll('[data-delete-variant]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var stockNote = Number(btn.dataset.stock) > 0 ? ' Its stock (' + btn.dataset.stock + ') will be removed.' : '';
+            if (!window.confirm('Delete variant ' + btn.dataset.label + '? It will show as unavailable on the website.' + stockNote)) return;
+            var vid = Number(btn.dataset.deleteVariant);
+            btn.disabled = true; btn.textContent = 'Deleting…';
+            AdminAPI.products.deleteVariant(p.id, vid)
+              .then(function () {
+                state.variants = state.variants.filter(function (v) { return v.id !== vid; });
+                renderVariantTable();
+                adminToast('Variant ' + btn.dataset.label + ' deleted.');
+              })
+              .catch(function (err) { btn.disabled = false; btn.textContent = 'Delete'; adminToast('Could not delete variant: ' + err.message, 'error'); });
+          });
+        });
+        wrap.querySelectorAll('[data-add-variant]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            btn.disabled = true; btn.textContent = 'Adding…';
+            AdminAPI.products.addVariant(p, btn.dataset.size, btn.dataset.color)
+              .then(function (v) {
+                state.variants.push({ id: v.id, variant_sku: v.variant_sku, size: v.size, color: v.color, stock: v.stock });
+                renderVariantTable();
+                adminToast('Variant ' + v.size + ' / ' + v.color + ' added — set its stock.');
+              })
+              .catch(function (err) { btn.disabled = false; btn.textContent = 'Add'; adminToast('Could not add variant: ' + err.message, 'error'); });
           });
         });
       }
@@ -1898,6 +1988,8 @@
           sizes: state.sizes,
           colors: state.colors.map(function (c) { return { name: c.name, hex: c.hex }; }),
           colorRenames: state.colors.filter(function (c) { return c.origName && c.origName !== c.name; }).map(function (c) { return { from: c.origName, to: c.name }; }),
+          // Existing product: don't recreate combos the admin deleted (see comboIsNew()).
+          newCombosOnly: !isNew && hadVariants ? { sizes: loadedSizes, colors: state.colors.filter(function (c) { return c.origName; }).map(function (c) { return c.name; }) } : null,
           featured: document.getElementById('pFeatured').checked,
           newArrival: document.getElementById('pNewArrival').checked,
           status: document.getElementById('pActive').checked ? 'active' : 'draft'
