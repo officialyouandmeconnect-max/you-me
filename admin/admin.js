@@ -376,13 +376,31 @@
         return supabaseClient.from('products').update({ status: status, updated_at: new Date().toISOString() }).eq('id', id)
           .then(throwIfError);
       },
+      // Permanent delete, single or bulk, through the admin_delete_products() RPC (migration
+      // 0028) — admin check, id validation and per-product savepoints all happen in Postgres.
+      // Past orders keep their own snapshot (order_items.product_id is SET NULL, never cascaded).
+      // Resolves { deleted: [{id,name}], failed: [{id,name,error}], storageWarning: string|null }.
+      // Only images the server reports as used by nothing else are removed from storage.
+      removeMany: function (ids) {
+        var clean = (ids || []).map(Number).filter(function (n) { return Number.isInteger(n) && n > 0; });
+        if (clean.length === 0) return Promise.reject(new Error('No valid products selected'));
+        return supabaseClient.rpc('admin_delete_products', { p_ids: clean }).then(function (res) {
+          throwIfError(res);
+          var out = res.data || {};
+          var result = { deleted: out.deleted || [], failed: out.failed || [], storageWarning: null };
+          var paths = out.orphan_image_paths || [];
+          if (paths.length === 0) return result;
+          return supabaseClient.storage.from('product-images').remove(paths).then(function (r) {
+            if (r.error) result.storageWarning = r.error.message;
+            return result;
+          }, function (err) { result.storageWarning = err.message; return result; });
+        });
+      },
       remove: function (id) {
-        return supabaseClient.from('order_items').select('id', { count: 'exact', head: true }).eq('product_id', id)
-          .then(function (res) {
-            throwIfError(res);
-            if (res.count && res.count > 0) return AdminAPI.products.setStatus(id, 'draft');
-            return supabaseClient.from('products').delete().eq('id', id).then(throwIfError);
-          });
+        return AdminAPI.products.removeMany([id]).then(function (result) {
+          if (result.failed.length) throw new Error(result.failed[0].error);
+          return result;
+        });
       },
       setVariantStock: function (productId, variantId, stock) {
         return supabaseClient.from('product_variants').update({ stock: stock }).eq('id', variantId)
@@ -1130,7 +1148,10 @@
   }
 
   /* ---------- 5. Products ---------- */
-  var productListState = { q: '' };
+  // selected: { [productId]: true } — only ever ids currently visible in the table (pruned on
+  // every render), so Select All / Bulk Delete can never touch rows hidden by the search.
+  // busy: a delete request is in flight — blocks a second, duplicate request.
+  var productListState = { q: '', selected: {}, busy: false, products: [] };
 
   ROUTE_RENDERERS.products = function (param) {
     if (param === 'new') return renderProductForm(null);
@@ -1138,60 +1159,202 @@
     renderProductList();
   };
 
+  // Small, self-dismissing status message (success / error) for admin actions.
+  function adminToast(message, tone) {
+    var el = document.createElement('div');
+    el.className = 'admin-toast admin-toast-' + (tone || 'success');
+    el.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+    el.textContent = message;
+    document.body.appendChild(el);
+    setTimeout(function () { el.classList.add('is-leaving'); setTimeout(function () { el.remove(); }, 300); }, tone === 'error' ? 7000 : 3500);
+  }
+
   function renderProductList() {
     content().innerHTML = '<p class="empty-state">Loading products…</p>';
     AdminAPI.products.list().then(function (products) {
-      var filtered = productListState.q
-        ? products.filter(function (p) { return (p.name + ' ' + p.sku).toLowerCase().indexOf(productListState.q.toLowerCase()) !== -1; })
-        : products;
-
+      productListState.products = products;
       content().innerHTML =
         '<div class="section-heading-row">' +
           '<div class="search-box"><input type="text" id="productSearch" placeholder="Search by name or SKU…" value="' + esc(productListState.q) + '"></div>' +
           '<a href="' + BASE_PATH + '/admin/products/new" class="btn-primary">+ Add Product</a>' +
         '</div>' +
-        '<div class="table-wrap"><table class="data-table"><thead><tr>' +
-          '<th>Image</th><th>Name</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Featured</th><th>New</th><th></th>' +
-        '</tr></thead><tbody>' +
-        (filtered.length === 0 ? '' : filtered.map(function (p) {
-          return '<tr>' +
-            '<td>' + imageHtml(p.images[0]) + '</td>' +
-            '<td>' + esc(p.name) + '</td>' +
-            '<td>' + esc(p.sku) + '</td>' +
-            '<td>' + esc(p.category) + (p.subcategory ? ' / ' + esc(p.subcategory) : '') + '</td>' +
-            '<td>' + fmtPrice(p.price) + (p.oldPrice ? ' <s style="color:#999">' + fmtPrice(p.oldPrice) + '</s>' : '') + '</td>' +
-            '<td>' + p.stock + '</td>' +
-            '<td><span class="badge badge-' + p.status + '">' + statusLabel(p.status) + '</span></td>' +
-            '<td>' + (p.featured ? '✔️' : '—') + '</td>' +
-            '<td>' + (p.newArrival ? '✔️' : '—') + '</td>' +
-            '<td style="white-space:nowrap;">' +
-              '<a href="' + BASE_PATH + '/admin/products/' + p.id + '" class="btn-ghost btn-sm">Edit</a> ' +
-              '<button class="btn-ghost btn-sm" data-dup="' + p.id + '">Duplicate</button> ' +
-              '<button class="btn-ghost btn-sm" data-toggle-status="' + p.id + '" data-current="' + p.status + '">' + (p.status === 'active' ? 'Disable' : 'Activate') + '</button> ' +
-              '<button class="btn-danger btn-sm" data-delete="' + p.id + '">Delete</button>' +
-            '</td>' +
-          '</tr>';
-        }).join('')) +
-        '</tbody></table></div>' +
-        (filtered.length === 0 ? '<p class="empty-state">No products match your search.</p>' : '');
+        '<div id="productBulkBar" class="bulk-bar"></div>' +
+        '<div id="productTableArea"></div>';
 
+      // Search filters the already-loaded list in place (no refetch, keeps input focus).
       document.getElementById('productSearch').addEventListener('input', function (e) {
-        productListState.q = e.target.value; renderProductList();
+        productListState.q = e.target.value; renderProductTable();
       });
-      content().querySelectorAll('[data-dup]').forEach(function (btn) {
-        btn.addEventListener('click', function () { AdminAPI.products.duplicate(btn.dataset.dup).then(renderProductList); });
+      renderProductTable();
+    }).catch(function (err) {
+      content().innerHTML = '<p class="empty-state">Could not load products: ' + esc(err.message) + '</p>';
+    });
+  }
+
+  function visibleProducts() {
+    var q = productListState.q.toLowerCase();
+    return q ? productListState.products.filter(function (p) { return (p.name + ' ' + p.sku).toLowerCase().indexOf(q) !== -1; }) : productListState.products;
+  }
+
+  function selectedProductIds() { return Object.keys(productListState.selected).map(Number); }
+
+  function renderProductTable() {
+    var area = document.getElementById('productTableArea');
+    if (!area) return;
+    var filtered = visibleProducts();
+    var visibleIds = {};
+    filtered.forEach(function (p) { visibleIds[p.id] = true; });
+    Object.keys(productListState.selected).forEach(function (id) { if (!visibleIds[id]) delete productListState.selected[id]; });
+
+    area.innerHTML =
+      '<div class="table-wrap"><table class="data-table"><thead><tr>' +
+        '<th class="select-col"><input type="checkbox" id="productSelectAll" aria-label="Select all products shown"' + (filtered.length === 0 ? ' disabled' : '') + '></th>' +
+        '<th>Image</th><th>Name</th><th>SKU</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Featured</th><th>New</th><th></th>' +
+      '</tr></thead><tbody>' +
+      (filtered.length === 0 ? '' : filtered.map(function (p) {
+        var checked = !!productListState.selected[p.id];
+        return '<tr' + (checked ? ' class="is-selected"' : '') + '>' +
+          '<td class="select-col"><input type="checkbox" data-select="' + p.id + '" aria-label="Select ' + esc(p.name) + '"' + (checked ? ' checked' : '') + '></td>' +
+          '<td>' + imageHtml(p.images[0]) + '</td>' +
+          '<td>' + esc(p.name) + '</td>' +
+          '<td>' + esc(p.sku) + '</td>' +
+          '<td>' + esc(p.category) + (p.subcategory ? ' / ' + esc(p.subcategory) : '') + '</td>' +
+          '<td>' + fmtPrice(p.price) + (p.oldPrice ? ' <s style="color:#999">' + fmtPrice(p.oldPrice) + '</s>' : '') + '</td>' +
+          '<td>' + p.stock + '</td>' +
+          '<td><span class="badge badge-' + p.status + '">' + statusLabel(p.status) + '</span></td>' +
+          '<td>' + (p.featured ? '✔️' : '—') + '</td>' +
+          '<td>' + (p.newArrival ? '✔️' : '—') + '</td>' +
+          '<td style="white-space:nowrap;">' +
+            '<a href="' + BASE_PATH + '/admin/products/' + p.id + '" class="btn-ghost btn-sm">Edit</a> ' +
+            '<button class="btn-ghost btn-sm" data-dup="' + p.id + '">Duplicate</button> ' +
+            '<button class="btn-ghost btn-sm" data-toggle-status="' + p.id + '" data-current="' + p.status + '">' + (p.status === 'active' ? 'Disable' : 'Activate') + '</button> ' +
+            '<button class="btn-danger btn-sm" data-delete="' + p.id + '">Delete</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('')) +
+      '</tbody></table></div>' +
+      (filtered.length === 0 ? '<p class="empty-state">' + (productListState.products.length === 0 ? 'No products yet.' : 'No products match your search.') + '</p>' : '');
+
+    area.querySelectorAll('[data-select]').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        if (cb.checked) productListState.selected[cb.dataset.select] = true;
+        else delete productListState.selected[cb.dataset.select];
+        cb.closest('tr').classList.toggle('is-selected', cb.checked);
+        syncProductSelectionUi();
       });
-      content().querySelectorAll('[data-toggle-status]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var next = btn.dataset.current === 'active' ? 'draft' : 'active';
-          AdminAPI.products.setStatus(btn.dataset.toggleStatus, next).then(renderProductList);
-        });
+    });
+    document.getElementById('productSelectAll').addEventListener('change', function (e) {
+      // Applies only to the rows currently shown (i.e. the current search result).
+      var on = e.target.checked;
+      filtered.forEach(function (p) { if (on) productListState.selected[p.id] = true; else delete productListState.selected[p.id]; });
+      renderProductTable();
+    });
+    area.querySelectorAll('[data-dup]').forEach(function (btn) {
+      btn.addEventListener('click', function () { AdminAPI.products.duplicate(btn.dataset.dup).then(renderProductList); });
+    });
+    area.querySelectorAll('[data-toggle-status]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var next = btn.dataset.current === 'active' ? 'draft' : 'active';
+        AdminAPI.products.setStatus(btn.dataset.toggleStatus, next).then(renderProductList);
       });
-      content().querySelectorAll('[data-delete]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          if (!window.confirm('Delete this product? If it appears in past orders it will be set to Draft instead.')) return;
-          AdminAPI.products.remove(btn.dataset.delete).then(renderProductList);
-        });
+    });
+    area.querySelectorAll('[data-delete]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var p = productListState.products.filter(function (x) { return String(x.id) === btn.dataset.delete; })[0];
+        if (p) confirmProductDelete([p.id], 'Delete “' + p.name + '”?', '<strong>' + esc(p.name) + '</strong> (' + esc(p.sku) + ') will be permanently deleted.');
+      });
+    });
+    syncProductSelectionUi();
+  }
+
+  function syncProductSelectionUi() {
+    var filtered = visibleProducts();
+    var count = selectedProductIds().length;
+    var all = document.getElementById('productSelectAll');
+    if (all) {
+      all.checked = filtered.length > 0 && count === filtered.length;
+      all.indeterminate = count > 0 && count < filtered.length;
+    }
+    var bar = document.getElementById('productBulkBar');
+    if (!bar) return;
+    var total = productListState.products.length;
+    bar.innerHTML =
+      '<span class="bulk-bar-count">' + (count > 0
+        ? '<strong>' + count + '</strong> selected'
+        : filtered.length + (filtered.length === total ? '' : ' of ' + total) + ' product' + (total === 1 ? '' : 's')) + '</span>' +
+      (count > 0
+        ? '<button type="button" class="btn-ghost btn-sm" id="productClearSelection">Clear</button>' +
+          '<button type="button" class="btn-danger btn-sm" id="productBulkDelete"' + (productListState.busy ? ' disabled' : '') + '>Delete selected (' + count + ')</button>'
+        : '');
+    bar.classList.toggle('has-selection', count > 0);
+    var clear = document.getElementById('productClearSelection');
+    if (clear) clear.addEventListener('click', function () { productListState.selected = {}; renderProductTable(); });
+    var bulk = document.getElementById('productBulkDelete');
+    if (bulk) bulk.addEventListener('click', function () {
+      var ids = selectedProductIds();
+      confirmProductDelete(ids, 'Delete ' + ids.length + ' product' + (ids.length === 1 ? '' : 's') + '?',
+        '<strong>' + ids.length + ' product' + (ids.length === 1 ? '' : 's') + '</strong> will be permanently deleted.');
+    });
+  }
+
+  // One confirm modal for both single and bulk delete. The list only changes after the server
+  // answers: rows it confirms deleted disappear, rows that failed stay visible (and selected) with
+  // the server's real error shown.
+  function confirmProductDelete(ids, title, bodyHtml) {
+    if (productListState.busy) return;
+    Modal.open(
+      '<div class="confirm-delete">' +
+        '<h3>' + esc(title) + '</h3>' +
+        '<p>' + bodyHtml + ' This cannot be undone.</p>' +
+        '<p class="confirm-delete-note">It will be removed from the admin list, inventory, search and the website. Past orders and payments keep their own record of it. Images used only by ' + (ids.length === 1 ? 'this product' : 'these products') + ' are removed from storage; shared and Media Library images are kept.</p>' +
+        '<p class="confirm-delete-error" id="confirmDeleteError" hidden></p>' +
+        '<div class="confirm-delete-actions">' +
+          '<button type="button" class="btn-ghost btn-sm" id="confirmDeleteCancel">Cancel</button>' +
+          '<button type="button" class="btn-danger btn-sm" id="confirmDeleteGo">Delete permanently</button>' +
+        '</div>' +
+      '</div>'
+    );
+    document.getElementById('confirmDeleteCancel').addEventListener('click', Modal.close);
+    var go = document.getElementById('confirmDeleteGo');
+    go.addEventListener('click', function () {
+      if (productListState.busy) return;
+      productListState.busy = true;
+      go.disabled = true; go.textContent = 'Deleting…';
+      document.getElementById('confirmDeleteCancel').disabled = true;
+      syncProductSelectionUi();
+
+      AdminAPI.products.removeMany(ids).then(function (result) {
+        productListState.busy = false;
+        var gone = {};
+        result.deleted.forEach(function (d) { gone[d.id] = true; delete productListState.selected[d.id]; });
+        productListState.products = productListState.products.filter(function (p) { return !gone[p.id]; });
+
+        if (result.failed.length === 0) {
+          Modal.close();
+          adminToast(result.deleted.length === 1 ? '“' + result.deleted[0].name + '” deleted.' : result.deleted.length + ' products deleted.');
+        } else {
+          var errEl = document.getElementById('confirmDeleteError');
+          if (errEl) {
+            errEl.hidden = false;
+            errEl.innerHTML = (result.deleted.length ? result.deleted.length + ' deleted. ' : '') + result.failed.length + ' could not be deleted:<br>' +
+              result.failed.map(function (f) { return esc((f.name || '#' + f.id) + ': ' + f.error); }).join('<br>');
+            go.hidden = true;
+            var cancel = document.getElementById('confirmDeleteCancel');
+            cancel.disabled = false; cancel.textContent = 'Close';
+          }
+          adminToast(result.failed.length + ' of ' + (result.deleted.length + result.failed.length) + ' could not be deleted.', 'error');
+        }
+        if (result.storageWarning) adminToast('Product deleted, but image cleanup failed: ' + result.storageWarning, 'error');
+        renderProductTable();
+      }).catch(function (err) {
+        productListState.busy = false;
+        go.disabled = false; go.textContent = 'Delete permanently';
+        var cancelBtn = document.getElementById('confirmDeleteCancel');
+        if (cancelBtn) cancelBtn.disabled = false;
+        var errEl = document.getElementById('confirmDeleteError');
+        if (errEl) { errEl.hidden = false; errEl.textContent = err.message; }
+        adminToast('Delete failed: ' + err.message, 'error');
+        syncProductSelectionUi();
       });
     });
   }
