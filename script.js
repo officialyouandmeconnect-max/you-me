@@ -40,7 +40,11 @@
   // Wear, New Arrivals, Search) reads from this same array once loadProducts() resolves —
   // products/images added from the Admin Panel appear here automatically, no HTML edits needed.
   var PRODUCTS = [];
+  var PRODUCTS_LOADED = false; // true only after a successful load — an API failure never reads as "no products"
   var SIZE_GUIDE_ENTRIES = [];
+  // Homepage category tiles (migration 0030): { slug: { title, image_url, status } }. Stays null
+  // if the table isn't there yet, and everything falls back to the previous behaviour.
+  var SHOP_CATEGORIES = null;
 
   function loadProducts() {
     return supabaseClient
@@ -52,10 +56,21 @@
         if (res.error) throw res.error;
         PRODUCTS.length = 0;
         (res.data || []).forEach(function (row) { PRODUCTS.push(mapSupabaseProduct(row)); });
+        PRODUCTS_LOADED = true;
       })
       .catch(function (err) {
         console.error('Could not load products from Supabase:', err);
       });
+  }
+
+  function loadShopCategories() {
+    return supabaseClient.from('shop_categories').select('slug, title, image_url, status')
+      .then(function (res) {
+        if (res.error) throw res.error;
+        SHOP_CATEGORIES = {};
+        (res.data || []).forEach(function (row) { SHOP_CATEGORIES[row.slug] = row; });
+      })
+      .catch(function () { SHOP_CATEGORIES = null; });
   }
 
   // Real Admin-entered measurements only (supabase/migrations/0019) — never a client-side
@@ -238,7 +253,7 @@
       if (existing) {
         existing.qty += qty;
       } else {
-        items.push({ lineId: id, productId: productId, name: product.name, price: product.price, img: product.images[0], size: size, color: color, qty: qty });
+        items.push({ lineId: id, productId: productId, name: product.name, price: product.price, img: imagesForColor(product, color).images[0] || product.images[0], size: size, color: color, qty: qty }); // cart thumbnail = the chosen colour's main photo
       }
       persist();
     }
@@ -603,6 +618,14 @@
         return;
       }
 
+      if ((route === 'kids' || route === 'new-arrivals') && categoryIsComingSoon(route)) {
+        setActiveNav(route);
+        showView('comingSoon');
+        ComingSoon.render(route);
+        window.scrollTo(0, 0);
+        return;
+      }
+
       if (route === 'kids') {
         showView('gallery');
         setActiveNav('kids');
@@ -630,7 +653,7 @@
       if (route === 'family' || route === 'couples') {
         var cat = route === 'family' ? 'family' : 'couple';
         setActiveNav(route);
-        if (categoryHasProducts(cat)) {
+        if (!categoryIsComingSoon(route)) {
           showView('gallery');
           if (cat === 'family') Gallery.renderCategory('family', 'Family Wear', 'Matching looks for the whole family.');
           else Gallery.renderCategory('couple', 'Couple Sets', 'Better together, always.');
@@ -983,15 +1006,23 @@
   /* ---------- 11. Coming Soon view (Family Wear / Couple Sets) ---------- */
   var ComingSoon = (function () {
     var COPY = {
-      family: { title: 'Family Wear', message: 'Matching styles for the whole family are on the way.', backLabel: 'Back to Kids Wear' },
-      couples: { title: 'Couple Sets', message: 'Something special for two is coming soon.', backLabel: 'Continue Shopping Kids Wear' }
+      family: { eyebrow: 'Family Wear', message: 'Our Family Wear collection is on its way. Stay tuned for something special.' },
+      couples: { eyebrow: 'Couple Sets', message: 'Our Couple Sets collection is on its way — matching looks made for two. Stay tuned for something special.' },
+      kids: { eyebrow: 'Kids Wear', message: 'Our Kids Wear collection is on its way. Stay tuned for something special.' },
+      'new-arrivals': { eyebrow: 'New Arrivals', message: 'Fresh new pieces are on their way. Stay tuned for something special.' }
     };
+    var current = 'family';
 
     function render(kind) {
-      var copy = COPY[kind] || COPY.family;
-      document.getElementById('comingSoonTitle').textContent = copy.title + ' — Coming Soon ♡';
+      current = COPY[kind] ? kind : 'family';
+      var copy = COPY[current];
+      var row = SHOP_CATEGORIES && SHOP_CATEGORIES[current];
+      document.getElementById('comingSoonEyebrow').textContent = (row && row.title) || copy.eyebrow;
+      document.getElementById('comingSoonTitle').textContent = 'Something Beautiful Is Coming Soon';
       document.getElementById('comingSoonMessage').textContent = copy.message;
-      document.getElementById('comingSoonBack').textContent = copy.backLabel;
+      // "Explore Kids Wear" only when Kids Wear itself is open for shopping.
+      var explore = document.getElementById('comingSoonBack');
+      if (explore) explore.hidden = current === 'kids' || categoryIsComingSoon('kids');
       document.getElementById('notifyFeedback').textContent = '';
       var emailInput = document.getElementById('notifyEmail');
       if (emailInput) emailInput.value = '';
@@ -1000,29 +1031,164 @@
     function init() {
       var backBtn = document.getElementById('comingSoonBack');
       if (backBtn) backBtn.addEventListener('click', function () { Router.navigate('kids'); });
+      var homeBtn = document.getElementById('comingSoonHome');
+      if (homeBtn) homeBtn.addEventListener('click', function (e) { e.preventDefault(); Router.navigate(''); });
 
+      // Saved for real in newsletter_subscribers (same table + duplicate handling as the
+      // homepage newsletter form), tagged with which collection they're waiting for.
       var form = document.getElementById('notifyForm');
       if (form) form.addEventListener('submit', function (event) {
         event.preventDefault();
         var input = document.getElementById('notifyEmail');
         var email = input ? input.value.trim() : '';
         var feedback = document.getElementById('notifyFeedback');
+        var btn = form.querySelector('button[type="submit"]');
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
           if (feedback) { feedback.textContent = 'Please enter a valid email address.'; feedback.style.color = '#3A3330'; }
           return;
         }
-        try {
-          var raw = window.localStorage.getItem('youandme_notify');
-          var list = raw ? JSON.parse(raw) : [];
-          list.push({ email: email, route: window.location.hash.replace('#', ''), at: new Date().toISOString() });
-          window.localStorage.setItem('youandme_notify', JSON.stringify(list));
-        } catch (e) { /* storage unavailable */ }
-        if (feedback) { feedback.textContent = "You're on the list! We'll email you the moment this launches."; feedback.style.color = ''; }
-        form.reset();
+        if (btn) btn.disabled = true;
+        supabaseClient.from('newsletter_subscribers').insert({ email: email, source: 'coming-soon-' + current })
+          .then(function (res) {
+            if (res.error && res.error.code !== '23505') throw res.error;
+            if (feedback) { feedback.textContent = "You're on the list! We'll let you know the moment this launches."; feedback.style.color = ''; }
+            form.reset();
+          })
+          .catch(function () {
+            if (feedback) { feedback.textContent = 'Could not save that right now — please try again.'; feedback.style.color = '#3A3330'; }
+          })
+          .then(function () { if (btn) btn.disabled = false; });
       });
     }
 
     return { render: render, init: init };
+  })();
+
+  /* ---------- 11.9 Variant + gallery helpers (Product Modal & Quick View share these) ---------- */
+  // All from real product data: product_variants (size × color × stock) and product_images
+  // (with their optional color tag, see imagesForColor() in supabase-client.js).
+  var VariantUI = (function () {
+    function needsSize(p) { return p.sizes.length > 1; }
+    function needsColor(p) { return p.colors.length > 1; }
+    // Single-option products are pre-selected — nothing to choose there.
+    function initialSelection(p) {
+      return { size: p.sizes.length === 1 ? p.sizes[0] : null, color: p.colors.length === 1 ? p.colors[0].name : null };
+    }
+    function isComplete(p, sel) { return (!needsSize(p) || !!sel.size) && (!needsColor(p) || !!sel.color); }
+    function cartSize(p, sel) { return sel.size || p.sizes[0] || null; }
+    function cartColor(p, sel) { return sel.color || (p.colors[0] && p.colors[0].name) || null; }
+
+    // Real stock for whatever is selected so far: exact variant once size+color are chosen,
+    // otherwise the sum over matching variants. Products with no variant rows (older data) use
+    // the product-level total.
+    function stockFor(p, size, color) {
+      if (!p.variants.length) return p.stock;
+      return p.variants.filter(function (v) {
+        return (!size || v.size === size) && (!color || v.color === color);
+      }).reduce(function (sum, v) { return sum + v.stock; }, 0);
+    }
+    function variantFor(p, size, color) {
+      return p.variants.filter(function (v) { return v.size === size && v.color === color; })[0] || null;
+    }
+    function selectionStock(p, sel) { return stockFor(p, cartSize(p, sel), cartColor(p, sel)); }
+
+    function sizeButtonsHtml(p, sel, attr) {
+      return p.sizes.map(function (s) {
+        var oos = stockFor(p, s, sel.color) <= 0;
+        return '<button type="button" class="pm-size-btn' + (sel.size === s ? ' selected' : '') + (oos ? ' is-oos' : '') + '" ' + attr + '="' + escapeHtml(s) + '"' +
+          (oos ? ' aria-label="' + escapeHtml(s) + ' — out of stock' + (sel.color ? ' in ' + escapeHtml(sel.color) : '') + '"' : '') + ' aria-pressed="' + (sel.size === s) + '">' + escapeHtml(s) + '</button>';
+      }).join('');
+    }
+    function colorButtonsHtml(p, sel, attr) {
+      return p.colors.map(function (c) {
+        var oos = stockFor(p, sel.size, c.name) <= 0;
+        return '<button type="button" class="pm-color-btn' + (sel.color === c.name ? ' selected' : '') + (oos ? ' is-oos' : '') + '" ' + attr + '="' + escapeHtml(c.name) + '" aria-label="' + escapeHtml(c.name) + (oos ? ' — out of stock' : '') + '" aria-pressed="' + (sel.color === c.name) + '" title="' + escapeHtml(c.name) + '">' +
+          '<span class="swatch" style="background:' + escapeHtml(c.hex) + '"></span></button>';
+      }).join('');
+    }
+
+    /* Gallery: main stage with cross-fading layers + thumbnails for the selected color. */
+    function galleryShellHtml(id, overlayHtml) {
+      return '<div class="ym-gallery" id="' + id + '">' +
+        '<div class="ym-gallery-main"><div class="ym-gallery-stage" data-gallery-stage></div>' + (overlayHtml || '') +
+          '<span class="ym-gallery-note" data-gallery-note hidden></span></div>' +
+        '<div class="ym-gallery-thumbs" data-gallery-thumbs></div>' +
+      '</div>';
+    }
+    function layerInnerHtml(url, alt) {
+      if (url && !isPlaceholderImage(url)) return '<img class="ym-gallery-img" src="' + escapeHtml(url) + '" alt="' + escapeHtml(alt || '') + '" decoding="async">';
+      return productImageHtml(url, alt);
+    }
+    // New image fades in on top only once it has loaded; the old one stays visible until then,
+    // so switching colors never flashes an empty frame. The latest request always wins.
+    function setMain(root, url, alt) {
+      var stage = root.querySelector('[data-gallery-stage]');
+      var key = url || '';
+      var layers = stage.querySelectorAll('.ym-gallery-layer');
+      var latest = layers[layers.length - 1];
+      // Already showing (or already loading) this exact image — nothing to do.
+      if (latest && latest.dataset.url === key) return;
+      var token = (stage._token || 0) + 1;
+      stage._token = token;
+      var layer = document.createElement('div');
+      layer.className = 'ym-gallery-layer';
+      layer.dataset.url = key;
+      layer.innerHTML = layerInnerHtml(url, alt);
+      stage.appendChild(layer);
+      function show() {
+        if (stage._token !== token || !layer.isConnected) return; // a newer pick superseded this one
+        void layer.offsetWidth; // commit opacity:0 first so the fade runs (no rAF — paused in background tabs)
+        layer.classList.add('is-current');
+        Array.prototype.forEach.call(stage.querySelectorAll('.ym-gallery-layer'), function (l) {
+          if (l === layer) return;
+          l.classList.remove('is-current');
+          window.setTimeout(function () { if (l.isConnected) l.remove(); }, 320);
+        });
+      }
+      var img = layer.querySelector('img');
+      if (img && !img.complete) { img.addEventListener('load', show, { once: true }); img.addEventListener('error', show, { once: true }); }
+      else show();
+    }
+    function sync(root, p, color, index) {
+      if (!root) return 0;
+      var res = imagesForColor(p, color);
+      var imgs = res.images;
+      var i = Math.max(0, Math.min(index || 0, imgs.length - 1));
+      var thumbs = root.querySelector('[data-gallery-thumbs]');
+      var key = imgs.join('|');
+      if (thumbs._key !== key) {
+        thumbs._key = key;
+        thumbs.innerHTML = imgs.length > 1 ? imgs.map(function (url, n) {
+          return '<button type="button" data-gallery-thumb="' + n + '" aria-label="Show image ' + (n + 1) + '">' + productImageHtml(url, '') + '</button>';
+        }).join('') : '';
+      }
+      Array.prototype.forEach.call(thumbs.querySelectorAll('[data-gallery-thumb]'), function (b) {
+        var on = Number(b.dataset.galleryThumb) === i;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-current', on ? 'true' : 'false');
+      });
+      setMain(root, imgs[i] || null, p.name + (color ? ' — ' + color : ''));
+      var note = root.querySelector('[data-gallery-note]');
+      if (color && !res.exact) {
+        note.hidden = false;
+        note.textContent = imgs.length ? 'No ' + color + ' photo yet — showing general photos' : 'No ' + color + ' photo yet';
+      } else note.hidden = true;
+      return i;
+    }
+    // Warm the cache with each color's main photo so the first switch is instant.
+    function preload(p) {
+      p.colors.forEach(function (c) {
+        var first = imagesForColor(p, c.name).images[0];
+        if (first && !isPlaceholderImage(first)) { var im = new Image(); im.src = first; }
+      });
+    }
+
+    return {
+      initialSelection: initialSelection, isComplete: isComplete, cartSize: cartSize, cartColor: cartColor,
+      stockFor: stockFor, variantFor: variantFor, selectionStock: selectionStock, needsSize: needsSize, needsColor: needsColor,
+      sizeButtonsHtml: sizeButtonsHtml, colorButtonsHtml: colorButtonsHtml,
+      galleryShellHtml: galleryShellHtml, sync: sync, preload: preload
+    };
   })();
 
   /* ---------- 12. Product detail modal ---------- */
@@ -1032,58 +1198,39 @@
     function panel() { return document.getElementById('productModal'); }
     function body() { return document.getElementById('productModalBody'); }
 
-    function open(productId, intent) {
+    // preset: optional { size, color } carried over from Quick View's "View Full Details".
+    function open(productId, intent, preset) {
       var product = findProduct(productId);
       if (!product) return;
+      var sel = VariantUI.initialSelection(product);
       state.product = product;
-      state.size = null;
-      state.color = null;
+      state.size = (preset && preset.size) || sel.size;
+      state.color = (preset && preset.color) || sel.color;
       state.qty = 1;
       state.galleryIndex = 0;
       state.sizeGuideOpen = false;
       state.pendingIntent = intent || null;
       RecentlyViewedService.record(product.id);
       render();
+      VariantUI.preload(product);
       openPanel(panel());
     }
 
     function close() { closePanel(panel()); }
 
+    // Full render only when a product opens (or delivery info changes). Size/color/thumbnail
+    // clicks go through sync(), which updates just the affected pieces — the gallery
+    // cross-fades instead of being rebuilt, and quantity stays exactly as chosen.
     function render() {
       var p = state.product;
       if (!p || !body()) return;
       var discount = discountPercent(p);
-      var stock = stockInfo(p.stock);
       var wishActive = WishlistService.has(p.id);
-
-      var thumbs = p.images.map(function (url, i) {
-        return '<button type="button" data-thumb="' + i + '" class="' + (i === state.galleryIndex ? 'active' : '') + '">' +
-          productImageHtml(url) + '</button>';
-      }).join('');
-
-      var sizeBtns = p.sizes.map(function (s) {
-        return '<button type="button" class="pm-size-btn' + (state.size === s ? ' selected' : '') + '" data-size="' + escapeHtml(s) + '">' + escapeHtml(s) + '</button>';
-      }).join('');
-
-      var colorBtns = p.colors.map(function (c) {
-        return '<button type="button" class="pm-color-btn' + (state.color === c.name ? ' selected' : '') + '" data-color="' + escapeHtml(c.name) + '" aria-label="' + escapeHtml(c.name) + '">' +
-          '<span class="swatch" style="background:' + c.hex + '"></span></button>';
-      }).join('');
-
-      // BUG FIX: this used to GENERATE fake chest measurements from a formula (14 + i*2) and
-      // fake "Smallest/Mid-range/Largest" labels for every product, regardless of its real
-      // sizes — a direct fabrication. Now reads only real, Admin-entered rows for this product's
-      // own age_group (supabase/migrations/0019); shows an honest "not available yet" message
-      // if none exist rather than inventing anything.
-      var sizeGuideHtml = state.sizeGuideOpen ? sizeGuideTableHtml(p.ageGroup) : '';
 
       body().innerHTML =
         '<div class="pm-layout"><div class="pm-media">' +
-        '<div class="pm-gallery-main">' +
-          productImageHtml(p.images[state.galleryIndex]) +
-          '<button type="button" class="wishlist-btn' + (wishActive ? ' active' : '') + '" style="position:absolute;top:14px;right:14px;" aria-label="Toggle wishlist" data-wishlist="' + p.id + '">' + heartIconSVG(wishActive) + '</button>' +
-        '</div>' +
-        '<div class="pm-gallery-thumbs">' + thumbs + '</div>' +
+          VariantUI.galleryShellHtml('pmGallery',
+            '<button type="button" class="wishlist-btn' + (wishActive ? ' active' : '') + '" style="position:absolute;top:14px;right:14px;z-index:3;" aria-label="Toggle wishlist" data-wishlist="' + p.id + '">' + heartIconSVG(wishActive) + '</button>') +
         '</div><div class="pm-details">' +
         '<h2 class="pm-name" id="productModalTitle">' + escapeHtml(p.name) + '</h2>' +
         '<div class="pm-price-row">' +
@@ -1091,15 +1238,15 @@
           (p.oldPrice ? '<span class="product-old-price">' + formatPrice(p.oldPrice) + '</span>' : '') +
           (discount > 0 ? '<span class="product-discount">' + discount + '% OFF</span>' : '') +
         '</div>' +
-        '<div class="pm-stock ' + stock.cls + '">' + stock.label + '</div>' +
-        '<div class="pm-option-block">' +
-          '<div class="pm-option-label"><span>Size</span><button type="button" class="pm-size-guide-link" id="pmSizeGuideToggle">' + (state.sizeGuideOpen ? 'Hide size guide' : 'Size guide') + '</button></div>' +
-          '<div class="pm-size-options">' + sizeBtns + '</div>' + sizeGuideHtml +
-        '</div>' +
-        '<div class="pm-option-block">' +
-          '<div class="pm-option-label"><span>Color</span></div>' +
-          '<div class="pm-color-options">' + colorBtns + '</div>' +
-        '</div>' +
+        '<div class="pm-stock" id="pmStockLabel"></div>' +
+        (p.sizes.length ? '<div class="pm-option-block">' +
+          '<div class="pm-option-label"><span>Size</span><button type="button" class="pm-size-guide-link" id="pmSizeGuideToggle"></button></div>' +
+          '<div class="pm-size-options" id="pmSizeOptions"></div><div id="pmSizeGuide"></div>' +
+        '</div>' : '') +
+        (p.colors.length ? '<div class="pm-option-block">' +
+          '<div class="pm-option-label"><span>Color <em class="pm-selected-color" id="pmColorName"></em></span></div>' +
+          '<div class="pm-color-options" id="pmColorOptions"></div>' +
+        '</div>' : '') +
         '<div class="pm-qty-row">' +
           '<span class="pm-option-label" style="margin:0;">Quantity</span>' +
           '<div class="qty-stepper">' +
@@ -1108,26 +1255,63 @@
             '<button type="button" data-qty="1" aria-label="Increase quantity">+</button>' +
           '</div>' +
         '</div>' +
-        '<p class="pm-selection-error" id="pmSelectionError"></p>' +
+        '<p class="pm-selection-error" id="pmSelectionError" role="alert"></p>' +
         '<div class="pm-actions">' +
-          '<button type="button" class="btn btn-outline btn-swap-host" id="pmAddToCart" data-tooltip="' + formatPrice(p.price) + '"' + (p.stock <= 0 ? ' disabled' : '') + '>' + swapLabel('Add to Cart') + '</button>' +
-          '<button type="button" class="btn btn-primary btn-swap-host" id="pmBuyNow" data-tooltip="' + formatPrice(p.price) + '"' + (p.stock <= 0 ? ' disabled' : '') + '>' + swapLabel('Buy Now') + '</button>' +
+          '<button type="button" class="btn btn-outline btn-swap-host" id="pmAddToCart" data-tooltip="' + formatPrice(p.price) + '">' + swapLabel('Add to Cart') + '</button>' +
+          '<button type="button" class="btn btn-primary btn-swap-host" id="pmBuyNow" data-tooltip="' + formatPrice(p.price) + '">' + swapLabel('Buy Now') + '</button>' +
         '</div>' +
         '<p class="pm-stock-note">Stock and price are confirmed automatically when you check out.</p>' +
-        (p.stock <= 0
-          ? '<div class="quick-add-oos"><p><strong>Out of Stock</strong></p>' +
-              '<div class="quick-add-notify-row"><input type="email" id="pmNotifyEmail" placeholder="Your email" value="' + escapeHtml((SessionService.getUser() && SessionService.getUser().email) || '') + '">' +
-              '<button type="button" class="btn btn-outline btn-sm" id="pmNotifyBtn">Notify Me</button></div>' +
-              '<p class="account-payment-note" id="pmNotifyFeedback"></p></div>'
-          : '') +
+        '<div id="pmOosBlock"></div>' +
         '<div class="pm-sticky-actions">' +
-          '<button type="button" class="btn btn-outline btn-swap-host" id="pmAddToCartSticky" data-tooltip="' + formatPrice(p.price) + '"' + (p.stock <= 0 ? ' disabled' : '') + '>' + swapLabel('Add to Cart') + '</button>' +
-          '<button type="button" class="btn btn-primary btn-swap-host" id="pmBuyNowSticky" data-tooltip="' + formatPrice(p.price) + '"' + (p.stock <= 0 ? ' disabled' : '') + '>' + swapLabel('Buy Now') + '</button>' +
+          '<button type="button" class="btn btn-outline btn-swap-host" id="pmAddToCartSticky" data-tooltip="' + formatPrice(p.price) + '">' + swapLabel('Add to Cart') + '</button>' +
+          '<button type="button" class="btn btn-primary btn-swap-host" id="pmBuyNowSticky" data-tooltip="' + formatPrice(p.price) + '">' + swapLabel('Buy Now') + '</button>' +
         '</div>' +
         productDetailAccordionHtml(p) +
         '</div></div>' +
         discoveryRowHtml('You May Also Like', PRODUCTS.filter(function (o) { return o.id !== p.id && o.category === p.category; }).slice(0, 8)) +
         discoveryRowHtml('Recently Viewed', RecentlyViewedService.get(p.id, 8));
+      sync();
+    }
+
+    function sync() {
+      var p = state.product;
+      if (!p || !body()) return;
+      var sel = { size: state.size, color: state.color };
+      var complete = VariantUI.isComplete(p, sel);
+      var available = complete ? VariantUI.selectionStock(p, sel) : VariantUI.stockFor(p, state.size, state.color);
+      var stock = stockInfo(available);
+      var stockEl = document.getElementById('pmStockLabel');
+      stockEl.className = 'pm-stock ' + stock.cls;
+      stockEl.textContent = complete && available <= 0 && p.stock > 0 ? 'Out of stock in this ' + (VariantUI.needsSize(p) && VariantUI.needsColor(p) ? 'size & colour' : VariantUI.needsSize(p) ? 'size' : 'colour') : stock.label;
+
+      var sizeEl = document.getElementById('pmSizeOptions');
+      if (sizeEl) sizeEl.innerHTML = VariantUI.sizeButtonsHtml(p, sel, 'data-size');
+      var guideToggle = document.getElementById('pmSizeGuideToggle');
+      if (guideToggle) guideToggle.textContent = state.sizeGuideOpen ? 'Hide size guide' : 'Size guide';
+      var guide = document.getElementById('pmSizeGuide');
+      // Real, Admin-entered rows for this product's own age_group only (migration 0019).
+      if (guide) guide.innerHTML = state.sizeGuideOpen ? sizeGuideTableHtml(p.ageGroup) : '';
+      var colorEl = document.getElementById('pmColorOptions');
+      if (colorEl) colorEl.innerHTML = VariantUI.colorButtonsHtml(p, sel, 'data-color');
+      var colorName = document.getElementById('pmColorName');
+      if (colorName) colorName.textContent = state.color ? '— ' + state.color : '';
+
+      state.galleryIndex = VariantUI.sync(document.getElementById('pmGallery'), p, state.color, state.galleryIndex);
+
+      var blocked = p.stock <= 0 || (complete && available <= 0);
+      ['pmAddToCart', 'pmBuyNow', 'pmAddToCartSticky', 'pmBuyNowSticky'].forEach(function (id) {
+        var b = document.getElementById(id);
+        if (b) b.disabled = blocked;
+      });
+      var oos = document.getElementById('pmOosBlock');
+      var hadInput = document.getElementById('pmNotifyEmail');
+      var typed = hadInput ? hadInput.value : ((SessionService.getUser() && SessionService.getUser().email) || '');
+      oos.innerHTML = blocked
+        ? '<div class="quick-add-oos"><p><strong>Out of Stock</strong>' + (complete && p.stock > 0 ? ' — try another size or colour' : '') + '</p>' +
+            '<div class="quick-add-notify-row"><input type="email" id="pmNotifyEmail" placeholder="Your email" value="' + escapeHtml(typed) + '">' +
+            '<button type="button" class="btn btn-outline btn-sm" id="pmNotifyBtn">Notify Me</button></div>' +
+            '<p class="account-payment-note" id="pmNotifyFeedback"></p></div>'
+        : '';
     }
 
     // Real product fields only — native <details>/<summary> (no extra JS state needed for
@@ -1188,22 +1372,23 @@
     }
 
     function validate() {
-      if (!state.size) { showError('Please select a size to continue.'); return false; }
-      if (!state.color) { showError('Please select a color to continue.'); return false; }
+      var p = state.product;
+      if (VariantUI.needsSize(p) && !state.size) { showError('Please select a size to continue.'); return false; }
+      if (VariantUI.needsColor(p) && !state.color) { showError('Please select a color to continue.'); return false; }
+      if (VariantUI.selectionStock(p, { size: state.size, color: state.color }) <= 0) { showError('This size and colour is out of stock.'); return false; }
       showError('');
       return true;
     }
 
     function doAddToCart(thenBuyNow) {
       if (!validate()) return;
-      CartService.addItem(state.product.id, state.size, state.color, state.qty);
+      var p = state.product, sel = { size: state.size, color: state.color };
+      CartService.addItem(p.id, VariantUI.cartSize(p, sel), VariantUI.cartColor(p, sel), state.qty);
       if (thenBuyNow) {
         close();
         window.setTimeout(function () { Checkout.open(); }, 320);
       } else {
-        // Phase 2: Add to Cart opens the existing slide-out Cart Drawer instead of just a toast
-        // + close — the customer sees their real cart state immediately, same drawer/data as
-        // everywhere else, no second cart UI.
+        // Add to Cart opens the existing slide-out Cart Drawer — same drawer/data as everywhere.
         close();
         window.setTimeout(function () { CartDrawer.open(); }, 260);
       }
@@ -1212,14 +1397,17 @@
     function onBodyClick(event) {
       if (event.target.closest('[data-wishlist]')) return; // handled by global delegated listener
 
-      var thumb = event.target.closest('[data-thumb]');
-      if (thumb) { state.galleryIndex = Number(thumb.dataset.thumb); render(); return; }
+      var thumb = event.target.closest('[data-gallery-thumb]');
+      if (thumb && thumb.closest('#pmGallery')) { state.galleryIndex = Number(thumb.dataset.galleryThumb); sync(); return; }
 
-      var sizeBtn = event.target.closest('[data-size]');
-      if (sizeBtn) { state.size = sizeBtn.dataset.size; render(); return; }
+      var sizeBtn = event.target.closest('#pmSizeOptions [data-size]');
+      if (sizeBtn) { state.size = sizeBtn.dataset.size; showError(''); sync(); return; }
 
-      var colorBtn = event.target.closest('[data-color]');
-      if (colorBtn) { state.color = colorBtn.dataset.color; render(); return; }
+      var colorBtn = event.target.closest('#pmColorOptions [data-color]');
+      if (colorBtn) {
+        if (state.color !== colorBtn.dataset.color) { state.color = colorBtn.dataset.color; state.galleryIndex = 0; }
+        showError(''); sync(); return;
+      }
 
       var qtyBtn = event.target.closest('[data-qty]');
       if (qtyBtn) {
@@ -1234,13 +1422,15 @@
         var feedback = document.getElementById('pmNotifyFeedback');
         var email = emailInput.value.trim();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { feedback.textContent = 'Enter a valid email address.'; return; }
-        NotifyMeService.subscribe(state.product.id, null, email)
+        var p = state.product, sel = { size: state.size, color: state.color };
+        var variant = VariantUI.isComplete(p, sel) ? VariantUI.variantFor(p, VariantUI.cartSize(p, sel), VariantUI.cartColor(p, sel)) : null;
+        NotifyMeService.subscribe(p.id, variant ? variant.id : null, email)
           .then(function () { feedback.textContent = "We'll email you when this is back in stock."; })
           .catch(function () { feedback.textContent = "Couldn't save that right now — please try again."; });
         return;
       }
 
-      if (event.target.id === 'pmSizeGuideToggle') { state.sizeGuideOpen = !state.sizeGuideOpen; render(); return; }
+      if (event.target.id === 'pmSizeGuideToggle') { state.sizeGuideOpen = !state.sizeGuideOpen; sync(); return; }
       if (event.target.closest('#pmAddToCart, #pmAddToCartSticky')) { doAddToCart(false); return; }
       if (event.target.closest('#pmBuyNow, #pmBuyNowSticky')) { doAddToCart(true); return; }
 
@@ -1387,12 +1577,11 @@
     return { open: open, close: close, init: init };
   })();
 
-  // Phase 2 Quick View — a fast, compact look from a listing card without leaving the grid.
-  // Reuses the exact same real product data (images/price/sizes/colors/stock/delivery) as the
-  // full Product Modal; "View Full Details" hands off to that same modal for the complete page
-  // (fabric/accordion/Similar Styles/etc) rather than duplicating that content here.
+  // Quick View — a fast look from a listing card without leaving the grid. Same real product
+  // data and the same gallery/variant helpers as the full Product Modal; "View Full Details"
+  // hands off to that modal with the current size/colour carried over.
   var QuickView = (function () {
-    var state = { product: null, size: null, color: null };
+    var state = { product: null, size: null, color: null, galleryIndex: 0 };
 
     function panel() { return document.getElementById('quickViewSheet'); }
     function body() { return document.getElementById('quickViewSheetBody'); }
@@ -1400,68 +1589,98 @@
     function open(productId) {
       var product = findProduct(productId);
       if (!product) return;
+      var sel = VariantUI.initialSelection(product);
       state.product = product;
-      state.size = product.sizes.length === 1 ? product.sizes[0] : null;
-      state.color = product.colors.length === 1 ? product.colors[0].name : null;
+      state.size = sel.size;
+      state.color = sel.color;
+      state.galleryIndex = 0;
       RecentlyViewedService.record(product.id);
       render();
+      VariantUI.preload(product);
       openPanel(panel());
+      var b = body(); if (b) b.scrollTop = 0;
     }
     function close() { closePanel(panel()); }
 
     function render() {
       var p = state.product;
       var discount = discountPercent(p);
-      var stock = stockInfo(p.stock);
       var loc = DeliveryLocation.get();
 
       body().innerHTML =
         '<div class="qv-layout">' +
-          '<div class="qv-image">' + productImageHtml(p.images[0]) + '</div>' +
+          '<div class="qv-media">' + VariantUI.galleryShellHtml('qvGallery') + '</div>' +
           '<div class="qv-info">' +
             '<h3 class="pm-name">' + escapeHtml(p.name) + '</h3>' +
             '<div class="pm-price-row"><span class="pm-price">' + formatPrice(p.price) + '</span>' +
               (p.oldPrice ? '<span class="product-old-price">' + formatPrice(p.oldPrice) + '</span>' : '') +
               (discount > 0 ? '<span class="product-discount">' + discount + '% OFF</span>' : '') +
             '</div>' +
-            '<div class="pm-stock ' + stock.cls + '">' + stock.label + '</div>' +
-            (p.sizes.length > 1 ? '<div class="pm-option-block"><div class="pm-option-label"><span>Size</span></div><div class="pm-size-options">' +
-              p.sizes.map(function (s) { return '<button type="button" class="pm-size-btn' + (state.size === s ? ' selected' : '') + '" data-qv-size="' + escapeHtml(s) + '">' + escapeHtml(s) + '</button>'; }).join('') +
-            '</div></div>' : '') +
-            (p.colors.length > 1 ? '<div class="pm-option-block"><div class="pm-option-label"><span>Colour</span></div><div class="pm-color-options">' +
-              p.colors.map(function (c) { return '<button type="button" class="pm-color-btn' + (state.color === c.name ? ' selected' : '') + '" data-qv-color="' + escapeHtml(c.name) + '" aria-label="' + escapeHtml(c.name) + '"><span class="swatch" style="background:' + c.hex + '"></span></button>'; }).join('') +
-            '</div></div>' : '') +
+            '<div class="pm-stock" id="qvStockLabel"></div>' +
+            (p.sizes.length > 1 ? '<div class="pm-option-block"><div class="pm-option-label"><span>Size</span></div><div class="pm-size-options" id="qvSizeOptions"></div></div>' : '') +
+            (p.colors.length > 1 ? '<div class="pm-option-block"><div class="pm-option-label"><span>Colour <em class="pm-selected-color" id="qvColorName"></em></span></div><div class="pm-color-options" id="qvColorOptions"></div></div>' : '') +
             (loc && loc.pincode ? '<p class="account-payment-note">' + (loc.serviceable ? '✓ Delivers to ' + escapeHtml(loc.pincode) : 'Delivery to ' + escapeHtml(loc.pincode) + ' — check availability') + '</p>' : '') +
-            '<p class="pm-selection-error" id="quickViewError"></p>' +
-            '<div class="action-row">' +
-              '<button type="button" class="btn btn-primary" id="quickViewAddBtn"' + (p.stock <= 0 ? ' disabled' : '') + '>Add to Cart</button>' +
+            '<p class="pm-selection-error" id="quickViewError" role="alert"></p>' +
+            '<div class="action-row qv-actions">' +
+              '<button type="button" class="btn btn-outline" id="quickViewAddBtn">Add to Cart</button>' +
+              '<button type="button" class="btn btn-primary" id="quickViewBuyBtn">Buy Now</button>' +
             '</div>' +
             '<button type="button" class="link-btn" id="quickViewFullDetails">View Full Details</button>' +
           '</div>' +
         '</div>';
+      sync();
+    }
+
+    function sync() {
+      var p = state.product;
+      var sel = { size: state.size, color: state.color };
+      var complete = VariantUI.isComplete(p, sel);
+      var available = complete ? VariantUI.selectionStock(p, sel) : VariantUI.stockFor(p, state.size, state.color);
+      var stock = stockInfo(available);
+      var stockEl = document.getElementById('qvStockLabel');
+      stockEl.className = 'pm-stock ' + stock.cls;
+      stockEl.textContent = complete && available <= 0 && p.stock > 0 ? 'Out of stock in this selection' : stock.label;
+      var sizeEl = document.getElementById('qvSizeOptions');
+      if (sizeEl) sizeEl.innerHTML = VariantUI.sizeButtonsHtml(p, sel, 'data-qv-size');
+      var colorEl = document.getElementById('qvColorOptions');
+      if (colorEl) colorEl.innerHTML = VariantUI.colorButtonsHtml(p, sel, 'data-qv-color');
+      var colorName = document.getElementById('qvColorName');
+      if (colorName) colorName.textContent = state.color ? '— ' + state.color : '';
+      state.galleryIndex = VariantUI.sync(document.getElementById('qvGallery'), p, state.color, state.galleryIndex);
+      var blocked = p.stock <= 0 || (complete && available <= 0);
+      ['quickViewAddBtn', 'quickViewBuyBtn'].forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = blocked; });
+    }
+
+    function addSelected(thenBuy) {
+      var p = state.product, sel = { size: state.size, color: state.color };
+      var err = document.getElementById('quickViewError');
+      if (!VariantUI.isComplete(p, sel)) { err.textContent = 'Please select ' + (VariantUI.needsSize(p) && !state.size ? 'a size' : 'a colour') + '.'; return; }
+      if (VariantUI.selectionStock(p, sel) <= 0) { err.textContent = 'This size and colour is out of stock.'; return; }
+      CartService.addItem(p.id, VariantUI.cartSize(p, sel), VariantUI.cartColor(p, sel), 1);
+      close();
+      window.setTimeout(function () { if (thenBuy) Checkout.open(); else CartDrawer.open(); }, thenBuy ? 320 : 200);
     }
 
     function onClick(event) {
+      var thumb = event.target.closest('#qvGallery [data-gallery-thumb]');
+      if (thumb) { state.galleryIndex = Number(thumb.dataset.galleryThumb); sync(); return; }
       var sizeBtn = event.target.closest('[data-qv-size]');
-      if (sizeBtn) { state.size = sizeBtn.dataset.qvSize; render(); return; }
+      if (sizeBtn) { state.size = sizeBtn.dataset.qvSize; document.getElementById('quickViewError').textContent = ''; sync(); return; }
       var colorBtn = event.target.closest('[data-qv-color]');
-      if (colorBtn) { state.color = colorBtn.dataset.qvColor; render(); return; }
+      if (colorBtn) {
+        if (state.color !== colorBtn.dataset.qvColor) { state.color = colorBtn.dataset.qvColor; state.galleryIndex = 0; }
+        document.getElementById('quickViewError').textContent = '';
+        sync(); return;
+      }
 
       if (event.target.id === 'quickViewFullDetails') {
-        var id = state.product.id;
+        var id = state.product.id, preset = { size: state.size, color: state.color };
         close();
-        ProductModal.open(id);
+        ProductModal.open(id, null, preset);
         return;
       }
-
-      if (event.target.id === 'quickViewAddBtn') {
-        var p = state.product;
-        var ready = (p.sizes.length <= 1 || state.size) && (p.colors.length <= 1 || state.color);
-        if (!ready) { document.getElementById('quickViewError').textContent = 'Please select ' + (p.sizes.length > 1 && !state.size ? 'a size' : 'a colour') + '.'; return; }
-        CartService.addItem(p.id, state.size || (p.sizes[0] || null), state.color || (p.colors[0] && p.colors[0].name) || null, 1);
-        close();
-        window.setTimeout(function () { CartDrawer.open(); }, 200);
-      }
+      if (event.target.id === 'quickViewAddBtn') { addSelected(false); return; }
+      if (event.target.id === 'quickViewBuyBtn') { addSelected(true); return; }
     }
 
     function init() {
@@ -5273,18 +5492,58 @@
     renderOfferSection(data.content, data.products);
   }
 
-  function categoryHasProducts(category) {
-    return PRODUCTS.some(function (p) { return p.category === category; });
+  var CATEGORY_MEMBERSHIP = {
+    kids: function (p) { return p.category === 'kids'; },
+    'new-arrivals': function (p) { return p.newArrival; },
+    family: function (p) { return p.category === 'family'; },
+    couples: function (p) { return p.category === 'couple'; }
+  };
+  function categoryHasProducts(slug) {
+    var test = CATEGORY_MEMBERSHIP[slug];
+    return test ? PRODUCTS.some(test) : false;
   }
-  // Homepage category tiles follow the live catalog: "Coming soon" disappears the moment Admin
-  // publishes the first Family / Couple product — no HTML edit needed.
+  // Coming Soon when Admin set it (shop_categories.status), or when an Active category has no
+  // live products yet — a visitor never lands on an empty product grid. Without the
+  // shop_categories table (pre-migration 0030) only Family / Couple can be Coming Soon, exactly
+  // as before. A failed product load never turns a category into "Coming Soon".
+  function categoryIsComingSoon(slug) {
+    var row = SHOP_CATEGORIES && SHOP_CATEGORIES[slug];
+    if (row && row.status === 'coming_soon') return true;
+    if (!PRODUCTS_LOADED) return false;
+    if (row) return !categoryHasProducts(slug);
+    return (slug === 'family' || slug === 'couples') && !categoryHasProducts(slug);
+  }
+  // Homepage category tiles: Admin photo (Admin → Categories) replaces the illustration, and the
+  // "Coming soon" tag / CTA follow the same categoryIsComingSoon() the category pages use.
   function renderCategoryTiles() {
-    document.querySelectorAll('.category-tile[data-category]').forEach(function (tile) {
-      var live = categoryHasProducts(tile.dataset.category);
+    document.querySelectorAll('.category-tile[data-slug]').forEach(function (tile) {
+      var slug = tile.dataset.slug;
+      var row = SHOP_CATEGORIES && SHOP_CATEGORIES[slug];
+      var soon = categoryIsComingSoon(slug);
       var tag = tile.querySelector('[data-live-tag]');
       var cta = tile.querySelector('[data-live-cta]');
-      if (tag) tag.hidden = live;
-      if (cta) cta.innerHTML = live ? 'Shop now &#8594;' : 'Get notified &#8594;';
+      if (tag) tag.hidden = !soon;
+      if (cta) cta.innerHTML = soon ? 'Get notified &#8594;' : 'Shop now &#8594;';
+
+      var media = tile.querySelector('.category-tile-media');
+      var photo = media && media.querySelector('.category-tile-photo');
+      var url = row && row.image_url;
+      if (media && url) {
+        if (!photo) {
+          photo = document.createElement('img');
+          photo.className = 'category-tile-photo';
+          photo.loading = 'lazy';
+          photo.decoding = 'async';
+          photo.addEventListener('load', function () { media.classList.add('has-photo'); });
+          photo.addEventListener('error', function () { media.classList.remove('has-photo'); photo.remove(); });
+          media.insertBefore(photo, media.firstChild);
+        }
+        photo.alt = (row.title || '') + ' collection';
+        if (photo.getAttribute('src') !== url) photo.src = url;
+      } else if (photo) {
+        media.classList.remove('has-photo');
+        photo.remove();
+      }
     });
   }
 
@@ -5447,7 +5706,7 @@
     // Everything that reads PRODUCTS (featured grid, and the router — Kids Wear / View All /
     // New Arrivals / Search all filter the same live array) waits for the store API first.
     loadSizeGuide();
-    loadProducts().then(function () {
+    Promise.all([loadProducts(), loadShopCategories()]).then(function () {
       // Featured Products hides itself entirely when Admin hasn't flagged anything as featured,
       // instead of leaving an empty heading + blank grid on the homepage.
       var featuredItems = PRODUCTS.filter(function (p) { return p.featured; });

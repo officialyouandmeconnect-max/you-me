@@ -23,7 +23,10 @@ var BASE_PATH = '';
 // Raw Postgres row (snake_case, nested foreign-table arrays from a `.select('*, product_images(*), ...')`
 // query) -> the camelCase product shape every render function in script.js / admin.js already expects.
 function mapSupabaseProduct(row) {
-  var images = (row.product_images || []).slice().sort(function (a, b) { return a.sort_order - b.sort_order; }).map(function (i) { return i.image_url; });
+  var imageRows = (row.product_images || []).slice().sort(function (a, b) { return a.sort_order - b.sort_order; });
+  var images = imageRows.map(function (i) { return i.image_url; });
+  // Same order as images[], plus which color each one shows (null = general, all colors).
+  var imageEntries = imageRows.map(function (i) { return { url: i.image_url, color: i.color || null }; });
   var sizes = (row.product_sizes || []).slice().sort(function (a, b) { return a.sort_order - b.sort_order; }).map(function (s) { return s.size; });
   var colors = (row.product_colors || []).slice().sort(function (a, b) { return a.sort_order - b.sort_order; }).map(function (c) { return { name: c.name, hex: c.hex }; });
   var variants = (row.product_variants || []).map(function (v) { return { id: v.id, variant_sku: v.variant_sku, size: v.size, color: v.color, stock: v.stock }; });
@@ -42,6 +45,7 @@ function mapSupabaseProduct(row) {
     price: row.sale_price || row.price,
     oldPrice: row.sale_price ? row.price : null,
     images: images,
+    imageEntries: imageEntries,
     sizes: sizes,
     colors: colors,
     variants: variants,
@@ -52,6 +56,18 @@ function mapSupabaseProduct(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+// Gallery for one selected color: that color's own images first (its main image first). If the
+// color has none, the general (untagged) images. Never another color's images — returns
+// { images, exact } where exact=false means no color-specific photo exists for that color.
+function imagesForColor(product, colorName) {
+  var entries = product.imageEntries || (product.images || []).map(function (u) { return { url: u, color: null }; });
+  if (!colorName) return { images: entries.map(function (e) { return e.url; }), exact: true };
+  var own = entries.filter(function (e) { return e.color === colorName; }).map(function (e) { return e.url; });
+  if (own.length) return { images: own, exact: true };
+  var general = entries.filter(function (e) { return !e.color; }).map(function (e) { return e.url; });
+  return { images: general, exact: false };
 }
 
 var PRODUCT_SELECT = '*, product_images(*), product_sizes(*), product_colors(*), product_variants(*)';

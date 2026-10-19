@@ -4565,3 +4565,77 @@ body[data-view="home"] #footerNewsletterFeedback { display: none; }
   .send-letters span { opacity: 1; }
   .send-btn.is-sent .send-state--sent .send-icon svg { opacity: 1; }
 }
+
+/* =========================================================
+   Category tile photos (Admin → Categories). The built-in illustration stays until a photo
+   has actually loaded; same card size either way.
+   ========================================================= */
+.category-tile-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.4s ease, transform 0.6s ease; }
+.category-tile-media.has-photo .category-tile-photo { opacity: 1; }
+.category-tile-media.has-photo .category-tile-icon { opacity: 0; }
+.category-tile:hover .category-tile-media.has-photo .category-tile-photo { transform: scale(1.04); }
+.category-tile-media .category-tile-tag { z-index: 2; }
+@media (prefers-reduced-motion: reduce) { .category-tile-photo { transition: none; } .category-tile:hover .category-tile-media.has-photo .category-tile-photo { transform: none; } }
+
+/* Coming Soon page */
+.coming-soon-card { max-width: 560px; }
+.coming-soon-actions .btn { white-space: nowrap; padding-left: 18px; padding-right: 18px; }
+.coming-soon-eyebrow { display: block; margin-bottom: 8px; }
+.coming-soon-card h2 { font-size: clamp(1.45rem, 4vw, 1.9rem); line-height: 1.2; }
+.coming-soon-actions { display: flex; flex-direction: column; gap: 10px; }
+.coming-soon-actions [hidden] { display: none; }
+@media (min-width: 520px) { .coming-soon-actions { flex-direction: row; } .coming-soon-actions .btn { flex: 1; } }
+@media (max-width: 520px) { .view-coming-soon { padding: 56px 16px; } .coming-soon-card { padding: 36px 20px; } }
+
+/* =========================================================
+   Product gallery (Quick View + Product Details): whole garment visible (contain), cross-fade
+   between images, thumbnails for the selected colour only.
+   ========================================================= */
+.ym-gallery { display: flex; flex-direction: column; gap: 10px; }
+.ym-gallery-main { position: relative; width: 100%; aspect-ratio: 4 / 5; border-radius: var(--radius-md); overflow: hidden; background: var(--color-cream); }
+.ym-gallery-stage { position: absolute; inset: 0; }
+.ym-gallery-layer { position: absolute; inset: 0; opacity: 0; transition: opacity 0.3s ease; }
+.ym-gallery-layer.is-current { opacity: 1; }
+.ym-gallery-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.ym-gallery-note { position: absolute; left: 10px; bottom: 10px; z-index: 2; background: rgba(255,255,255,0.92); color: var(--ink, var(--brown-800)); font-size: 0.72rem; padding: 4px 10px; border-radius: 999px; }
+.ym-gallery-note[hidden] { display: none; }
+.ym-gallery-thumbs { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.ym-gallery-thumbs:empty { display: none; }
+.ym-gallery-thumbs::-webkit-scrollbar { display: none; }
+.ym-gallery-thumbs button { position: relative; flex: 0 0 auto; width: 64px; aspect-ratio: 4 / 5; padding: 0; border: 2px solid transparent; border-radius: 8px; overflow: hidden; cursor: pointer; background: var(--color-cream); transition: border-color 0.2s ease, opacity 0.2s ease; opacity: 0.75; }
+.ym-gallery-thumbs button:hover, .ym-gallery-thumbs button.active { opacity: 1; }
+.ym-gallery-thumbs button.active { border-color: var(--brown-700, var(--color-pink)); }
+.pm-media .ym-gallery { margin-bottom: 8px; }
+@media (prefers-reduced-motion: reduce) { .ym-gallery-layer { transition: none; } }
+
+/* Selected colour name + sold-out options (real variant stock) */
+.pm-selected-color { font-style: normal; font-weight: 400; color: var(--color-text-soft); margin-left: 4px; }
+.pm-size-btn.is-oos { color: var(--color-text-soft); text-decoration: line-through; opacity: 0.6; }
+.pm-size-btn.is-oos.selected { opacity: 1; }
+.pm-color-btn.is-oos::after { content: ''; position: absolute; left: 50%; top: 2px; bottom: 2px; width: 1.5px; background: rgba(58,51,48,0.55); transform: translateX(-50%) rotate(45deg); border-radius: 2px; pointer-events: none; }
+.pm-color-btn { position: relative; }
+
+/* =========================================================
+   Quick View: larger image. Works inside the shared popup system above (centred modal on
+   desktop, bottom sheet on phones ≤720px); only width and the inner layout change here.
+   ========================================================= */
+.quick-view-sheet .address-picker-body { flex: 1 1 auto; min-height: 0; }
+.qv-layout { display: flex; flex-direction: column; gap: 18px; }
+.qv-media { min-width: 0; }
+.qv-media .ym-gallery-main { max-height: 56vh; }
+.qv-info { min-width: 0; }
+.qv-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.qv-actions .btn { flex: 1 1 140px; justify-content: center; }
+#quickViewFullDetails { margin-top: 12px; }
+@media (min-width: 721px) {
+  .panel.quick-view-sheet { width: min(1040px, calc(100% - 48px)); max-height: min(92vh, 900px); }
+  .quick-view-sheet .address-picker-body { padding: 20px 28px 28px; }
+  .qv-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 32px; align-items: start; }
+  .qv-media { position: sticky; top: 0; }
+  .qv-media .ym-gallery-main { max-height: calc(min(92vh, 900px) - 200px); min-height: 280px; }
+  .qv-info { padding-top: 6px; }
+  .qv-info .pm-name { font-size: 1.5rem; }
+}
+@media (min-width: 721px) and (max-width: 900px) {
+  .qv-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+}

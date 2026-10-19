@@ -373,7 +373,7 @@
             sku: null, name: p.name + ' (Copy)', description: p.description, fabric: p.fabric,
             category: p.category, subcategory: p.subcategory, ageGroup: p.ageGroup, gender: p.gender,
             price: p.oldPrice || p.price, salePrice: p.oldPrice ? p.price : null,
-            images: p.images, sizes: p.sizes, colors: p.colors,
+            images: p.imageEntries || p.images, sizes: p.sizes, colors: p.colors,
             featured: false, newArrival: false, status: 'draft'
           };
           // Copy gets the next auto SKU; falls back to the old "-COPY-" suffix only if the auto
@@ -621,11 +621,14 @@
       list: function () {
         return Promise.all([
           supabaseClient.from('media').select('*').order('uploaded_at', { ascending: false }),
-          supabaseClient.from('product_images').select('image_url')
+          supabaseClient.from('product_images').select('image_url'),
+          supabaseClient.from('shop_categories').select('image_url')
         ]).then(function (results) {
           var mediaRes = throwIfError(results[0]), imagesRes = throwIfError(results[1]);
           var inUseUrls = {};
           (imagesRes.data || []).forEach(function (r) { inUseUrls[r.image_url] = true; });
+          // Homepage category photos count as in use too (table may not exist before migration 0030).
+          if (!results[2].error) (results[2].data || []).forEach(function (r) { if (r.image_url) inUseUrls[r.image_url] = true; });
           return (mediaRes.data || []).map(function (m) { return { id: m.id, url: m.url, filename: m.filename, inUse: !!inUseUrls[m.url] }; });
         });
       },
@@ -658,6 +661,22 @@
     // supabase/migrations/0007_campaigns.sql for what "reads" actually means: highest-priority
     // campaign that's enabled, not paused, and inside its start/end window, computed live on
     // every request — no stored status to drift, no admin action needed at midnight).
+    // Homepage "Shop by Category" tiles (migration 0030): photo + Coming Soon / Active status.
+    categories: {
+      list: function () {
+        return supabaseClient.from('shop_categories').select('*').order('sort_order').then(function (res) {
+          if (res.error && /shop_categories/.test(res.error.message || '')) throw new Error('Category settings need migration 0030_shop_categories_and_color_images.sql — run it in Supabase first.');
+          throwIfError(res);
+          return res.data || [];
+        });
+      },
+      update: function (slug, fields) {
+        fields.updated_at = new Date().toISOString();
+        return supabaseClient.from('shop_categories').update(fields).eq('slug', slug).select().single()
+          .then(function (res) { throwIfError(res); return res.data; });
+      }
+    },
+
     campaigns: {
       list: function () {
         return supabaseClient.from('campaigns')
@@ -744,8 +763,20 @@
 
   function writeProductChildren(product, payload) {
     var tasks = [];
-    var images = (payload.images || []).map(function (url, i) { return { product_id: product.id, image_url: url, sort_order: i, is_primary: i === 0 }; });
-    if (images.length) tasks.push(supabaseClient.from('product_images').insert(images).then(throwIfError));
+    // payload.images: URL strings or { url, color } (color = product color name, null = all colors).
+    // The color key is only sent when some image is actually tagged, so untagged saves keep
+    // working even before migration 0030 adds the column.
+    var tagged = (payload.images || []).some(function (im) { return im && typeof im === 'object' && im.color; });
+    var images = (payload.images || []).map(function (im, i) {
+      var url = typeof im === 'string' ? im : im.url;
+      var row = { product_id: product.id, image_url: url, sort_order: i, is_primary: i === 0 };
+      if (tagged) row.color = (typeof im === 'object' && im.color) || null;
+      return row;
+    });
+    if (images.length) tasks.push(supabaseClient.from('product_images').insert(images).then(function (res) {
+      if (res.error && /column .*color/i.test(res.error.message || '')) throw new Error('Image colors need migration 0030_shop_categories_and_color_images.sql — run it in Supabase, or set every image to "All colors".');
+      return throwIfError(res);
+    }));
 
     var sizes = (payload.sizes || []).map(function (s, i) { return { product_id: product.id, size: s, sort_order: i }; });
     if (sizes.length) tasks.push(supabaseClient.from('product_sizes').insert(sizes).then(throwIfError));
@@ -1414,7 +1445,9 @@
     load.then(function (p) {
       // colors keep origName (the name saved in the DB) so a rename can carry variant stock over.
       var state = {
-        images: p.images.slice(), sizes: p.sizes.slice(),
+        // { url, color } — color = product color name this photo shows, null = all colors.
+        images: (p.imageEntries || p.images.map(function (u) { return { url: u, color: null }; })).map(function (e) { return { url: e.url, color: e.color || null }; }),
+        imageFilter: null, sizes: p.sizes.slice(),
         colors: p.colors.map(function (c) { return { name: c.name, hex: normHex(c.hex) || c.hex, origName: isNew ? null : c.name }; }),
         variants: p.variants || [],
         skuManual: false, skuAuto: '', editingColor: -1, saving: false
@@ -1469,8 +1502,9 @@
             '<div class="product-form-side">' +
               '<div class="panel-card pf-images">' +
                 '<h3>Images</h3>' +
+                '<div class="image-color-tabs" id="imageColorTabs" role="tablist" aria-label="Images by color"></div>' +
                 '<div class="image-upload-grid" id="imageGrid"></div>' +
-                '<p class="field-hint">First image is the main image. Hover an image to make it main, move it, or remove it.</p>' +
+                '<p class="field-hint" id="imageHint"></p>' +
               '</div>' +
               '<div class="panel-card pf-colors color-card">' +
                 '<div class="panel-card-head"><h3>Colors</h3><span class="field-hint">Click a selected color to edit</span></div>' +
@@ -1565,38 +1599,95 @@
         }
       }
 
-      /* --- Images (multi-upload, main image, reorder, remove) --- */
+      /* --- Images (multi-upload, main image, reorder, remove) + image ↔ color mapping --- */
+      // state.imageFilter: null = all images, '' = general (untagged) images, else a color name.
+      // "Main" and ←/→ act within the current tab, so each color gets its own main photo + order.
+      function visibleImageIdx() {
+        var out = [];
+        state.images.forEach(function (im, i) {
+          if (state.imageFilter === null || (state.imageFilter === '' ? !im.color : im.color === state.imageFilter)) out.push(i);
+        });
+        return out;
+      }
+      function renderImageTabs() {
+        var tabs = document.getElementById('imageColorTabs');
+        if (!state.colors.length) { tabs.innerHTML = ''; tabs.hidden = true; if (state.imageFilter) state.imageFilter = null; return; }
+        tabs.hidden = false;
+        function count(fn) { return state.images.filter(fn).length; }
+        var items = [{ key: null, label: 'All', n: state.images.length }]
+          .concat(state.colors.map(function (c) { return { key: c.name, label: c.name, hex: c.hex, n: count(function (im) { return im.color === c.name; }) }; }))
+          .concat([{ key: '', label: 'All colors', n: count(function (im) { return !im.color; }), general: true }]);
+        tabs.innerHTML = items.map(function (t) {
+          var on = state.imageFilter === t.key;
+          return '<button type="button" role="tab" aria-selected="' + on + '" class="image-color-tab' + (on ? ' is-active' : '') + (t.key && !t.n ? ' is-empty' : '') + '" data-img-filter="' + (t.key === null ? '__all' : esc(t.key)) + '"' + (t.general ? ' title="Photos shown for every color"' : '') + '>' +
+            (t.hex ? '<span class="dot" style="background:' + esc(t.hex) + '"></span>' : '') + esc(t.label) + ' <small>' + t.n + '</small></button>';
+        }).join('');
+        tabs.querySelectorAll('[data-img-filter]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var k = b.dataset.imgFilter;
+            state.imageFilter = k === '__all' ? null : k;
+            renderImageGrid();
+          });
+        });
+      }
       function renderImageGrid() {
+        renderImageTabs();
         var grid = document.getElementById('imageGrid');
-        var last = state.images.length - 1;
-        grid.innerHTML = state.images.map(function (url, i) {
-          return '<div class="image-slot' + (i === 0 ? ' primary' : '') + '" data-idx="' + i + '">' +
-            imageHtml(url, 'thumb').replace('class="thumb"', 'style="width:100%;height:100%;object-fit:cover;"') +
+        var vis = visibleImageIdx();
+        var f = state.imageFilter;
+        var colorOpts = function (sel) {
+          return '<option value=""' + (!sel ? ' selected' : '') + '>All colors</option>' +
+            state.colors.map(function (c) { return '<option value="' + esc(c.name) + '"' + (sel === c.name ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('');
+        };
+        grid.innerHTML = vis.map(function (gi, k) {
+          var im = state.images[gi];
+          var isMain = k === 0;
+          var col = im.color ? state.colors.filter(function (c) { return c.name === im.color; })[0] : null;
+          return '<div class="image-slot' + (isMain ? ' primary' : '') + '" data-idx="' + gi + '">' +
+            imageHtml(im.url, 'thumb').replace('class="thumb"', 'style="width:100%;height:100%;object-fit:cover;"') +
             '<div class="image-slot-actions">' +
-              (i !== 0 ? '<button type="button" data-set-main="' + i + '">Main</button>' : '') +
-              (i > 0 ? '<button type="button" data-move-img="' + i + '" data-dir="-1" aria-label="Move left">←</button>' : '') +
-              (i < last ? '<button type="button" data-move-img="' + i + '" data-dir="1" aria-label="Move right">→</button>' : '') +
-              '<button type="button" data-remove-img="' + i + '" aria-label="Remove image">✕</button>' +
-            '</div></div>';
+              (!isMain ? '<button type="button" data-set-main="' + gi + '">Main</button>' : '') +
+              (k > 0 ? '<button type="button" data-move-img="' + k + '" data-dir="-1" aria-label="Move left">←</button>' : '') +
+              (k < vis.length - 1 ? '<button type="button" data-move-img="' + k + '" data-dir="1" aria-label="Move right">→</button>' : '') +
+              '<button type="button" data-remove-img="' + gi + '" aria-label="Remove image">✕</button>' +
+            '</div>' +
+            (state.colors.length ? '<label class="image-slot-color"' + (col ? ' style="--dot:' + esc(col.hex) + '"' : '') + '><span class="dot"></span><select data-img-color="' + gi + '" aria-label="Color for this image">' + colorOpts(im.color) + '</select></label>' : '') +
+          '</div>';
         }).join('') +
-          '<label class="image-slot image-slot-add" id="imageAddTile"><span class="icon">' + UploadUI.icon + '</span><span id="imageUploadLabel">Add images</span><small>or drop here</small><input type="file" accept="image/*" id="imageFileInput" multiple></label>';
+          '<label class="image-slot image-slot-add" id="imageAddTile"><span class="icon">' + UploadUI.icon + '</span><span id="imageUploadLabel">' +
+            (f ? 'Add ' + esc(f) + ' images' : 'Add images') + '</span><small>or drop here</small><input type="file" accept="image/*" id="imageFileInput" multiple></label>';
+
+        var hint = document.getElementById('imageHint');
+        hint.textContent = !state.colors.length
+          ? 'First image is the main image. Hover an image to make it main, move it, or remove it.'
+          : f === null
+            ? 'First image is the product\'s main image. Tag each photo with its color — or open a color tab to upload and order that color\'s photos.'
+            : f === ''
+              ? 'Photos shown for every color (e.g. size chart, detail shots). Used when a color has no photos of its own.'
+              : 'Photos for ' + f + '. The first one is ' + f + '\'s main image on the website.';
 
         grid.querySelectorAll('[data-set-main]').forEach(function (btn) {
           btn.addEventListener('click', function () {
-            var i = Number(btn.dataset.setMain);
-            state.images.splice(0, 0, state.images.splice(i, 1)[0]);
+            var gi = Number(btn.dataset.setMain);
+            var target = visibleImageIdx()[0];
+            state.images.splice(target, 0, state.images.splice(gi, 1)[0]);
             renderImageGrid();
           });
         });
         grid.querySelectorAll('[data-move-img]').forEach(function (btn) {
           btn.addEventListener('click', function () {
-            var i = Number(btn.dataset.moveImg), j = i + Number(btn.dataset.dir);
+            var v = visibleImageIdx();
+            var k = Number(btn.dataset.moveImg), i = v[k], j = v[k + Number(btn.dataset.dir)];
             var tmp = state.images[i]; state.images[i] = state.images[j]; state.images[j] = tmp;
             renderImageGrid();
           });
         });
         grid.querySelectorAll('[data-remove-img]').forEach(function (btn) {
           btn.addEventListener('click', function () { state.images.splice(Number(btn.dataset.removeImg), 1); renderImageGrid(); });
+        });
+        grid.querySelectorAll('[data-img-color]').forEach(function (sel) {
+          sel.addEventListener('click', function (e) { e.stopPropagation(); });
+          sel.addEventListener('change', function () { state.images[Number(sel.dataset.imgColor)].color = sel.value || null; renderImageGrid(); });
         });
         var addTile = document.getElementById('imageAddTile');
         ['dragenter', 'dragover'].forEach(function (t) { addTile.addEventListener(t, function (ev) { ev.preventDefault(); addTile.classList.add('is-drag'); }); });
@@ -1610,10 +1701,11 @@
         document.getElementById('imageFileInput').addEventListener('change', function (e) {
           var files = Array.prototype.slice.call(e.target.files || []);
           var label = document.getElementById('imageUploadLabel');
+          var tagColor = state.imageFilter || null; // uploads in a color tab belong to that color
           if (label && files.length) label.textContent = 'Uploading…';
           files.forEach(function (file) {
             AdminAPI.media.upload(file)
-              .then(function (data) { state.images.push(data.url); renderImageGrid(); })
+              .then(function (data) { state.images.push({ url: data.url, color: tagColor }); renderImageGrid(); })
               .catch(function (err) { window.alert(err.message || 'Upload failed'); if (label) label.textContent = 'Add Image'; });
           });
         });
@@ -1661,7 +1753,12 @@
         wrap.querySelectorAll('[data-remove-color]').forEach(function (btn) {
           btn.addEventListener('click', function () {
             var i = Number(btn.dataset.removeColor);
+            var gone = state.colors[i].name;
             state.colors.splice(i, 1);
+            // Its photos stay on the product as general (all-color) images.
+            state.images.forEach(function (im) { if (im.color === gone) im.color = null; });
+            if (state.imageFilter === gone) state.imageFilter = null;
+            renderImageGrid();
             if (state.editingColor === i) stopColorEdit(); else if (state.editingColor > i) state.editingColor--;
             renderColorChips(); if (!isNew) renderVariantTable();
           });
@@ -1700,8 +1797,13 @@
         var editing = state.editingColor;
         if (nameTaken(name, editing)) { setColorMsg('“' + name + '” is already added — use a different name.', true); return false; }
         if (editing >= 0) {
+          var oldName = state.colors[editing].name;
           state.colors[editing].hex = hex;
           state.colors[editing].name = name;
+          if (oldName !== name) {
+            state.images.forEach(function (im) { if (im.color === oldName) im.color = name; });
+            if (state.imageFilter === oldName) state.imageFilter = name;
+          }
           stopColorEdit();
           setColorMsg('Updated “' + name + '”.');
         } else {
@@ -1710,7 +1812,7 @@
           colorName.value = '';
           setColorMsg('Added “' + name + '”.');
         }
-        renderColorChips(); if (!isNew) renderVariantTable();
+        renderColorChips(); renderImageGrid(); if (!isNew) renderVariantTable();
         return true;
       }
 
@@ -3076,20 +3178,123 @@
   };
 
   /* ---------- 10. Categories ---------- */
+  // Downscale a photo in the browser before upload (max edge 1600px, WebP) — the homepage tiles
+  // never show more than ~600px wide, so this keeps pages fast without a paid image CDN. Falls
+  // back to the original file if the browser can't decode/encode it (or it's a GIF/SVG).
+  function optimizeImageFile(file, maxEdge) {
+    maxEdge = maxEdge || 1600;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return Promise.resolve(file);
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(function (blob) {
+          if (!blob || blob.size >= file.size) return resolve(file);
+          resolve(new File([blob], file.name.replace(/\.[^.]+$/, '') + '.webp', { type: 'image/webp' }));
+        }, 'image/webp', 0.85);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  var CATEGORY_TILE_TINTS = { kids: '#E9F0F6', 'new-arrivals': '#E9F4EB', family: '#F8F0E5', couples: '#FDEDED' };
+
   ROUTE_RENDERERS.categories = function () {
     content().innerHTML = '<p class="empty-state">Loading…</p>';
-    AdminAPI.products.list().then(function (products) {
+    Promise.all([
+      AdminAPI.categories.list().catch(function (err) { return { error: err }; }),
+      AdminAPI.products.list()
+    ]).then(function (results) {
+      var cats = results[0], products = results[1];
       var counts = {};
       products.forEach(function (p) {
         var key = p.category + (p.subcategory ? ' / ' + p.subcategory : '');
         counts[key] = (counts[key] || 0) + 1;
       });
-      content().innerHTML = '<div class="panel-card"><h3>Categories in Use</h3>' +
+      var liveCount = {
+        kids: products.filter(function (p) { return p.status === 'active' && p.category === 'kids'; }).length,
+        'new-arrivals': products.filter(function (p) { return p.status === 'active' && p.newArrival; }).length,
+        family: products.filter(function (p) { return p.status === 'active' && p.category === 'family'; }).length,
+        couples: products.filter(function (p) { return p.status === 'active' && p.category === 'couple'; }).length
+      };
+
+      var tilesHtml = cats.error
+        ? '<p class="login-error">' + esc(cats.error.message) + '</p>'
+        : '<div class="cat-admin-grid">' + cats.map(function (c) {
+            return '<div class="cat-admin-card" data-slug="' + esc(c.slug) + '">' +
+              '<div class="cat-admin-media" style="background:' + (CATEGORY_TILE_TINTS[c.slug] || '#F6F1EA') + '">' +
+                (c.image_url ? '<img src="' + esc(c.image_url) + '" alt="' + esc(c.title) + ' photo">' : '<span>No photo — homepage shows the built-in illustration</span>') +
+                (c.status === 'coming_soon' ? '<span class="cat-admin-tag">Coming soon</span>' : '') +
+              '</div>' +
+              '<div class="cat-admin-body">' +
+                '<div class="cat-admin-title"><strong>' + esc(c.title) + '</strong><small>' + liveCount[c.slug] + ' active product' + (liveCount[c.slug] === 1 ? '' : 's') + '</small></div>' +
+                '<label class="cat-admin-status"><span>Status</span><select data-cat-status>' +
+                  '<option value="active"' + (c.status === 'active' ? ' selected' : '') + '>Active — show products</option>' +
+                  '<option value="coming_soon"' + (c.status === 'coming_soon' ? ' selected' : '') + '>Coming Soon page</option>' +
+                '</select></label>' +
+                (c.status === 'active' && liveCount[c.slug] === 0 ? '<p class="cat-admin-note">Active but no active products yet — visitors see the Coming Soon page until one is published.</p>' : '') +
+                '<div class="cat-admin-actions">' +
+                  '<label class="btn-ghost btn-sm cat-admin-upload">' + (c.image_url ? 'Replace photo' : 'Upload photo') + '<input type="file" accept="image/jpeg,image/png,image/webp" data-cat-upload data-ym-upload="skip" hidden></label>' +
+                  (c.image_url ? '<button type="button" class="btn-ghost btn-sm" data-cat-remove>Remove</button>' : '') +
+                '</div>' +
+                '<p class="cat-admin-msg" data-cat-msg role="status"></p>' +
+              '</div>' +
+            '</div>';
+          }).join('') + '</div>';
+
+      content().innerHTML =
+        '<div class="panel-card"><div class="panel-card-head"><h3>Homepage Categories</h3></div>' +
+          '<p class="field-hint" style="margin:-6px 0 14px;">Photos and status for the "Shop by Category" tiles. Changes show on the website immediately. Best photo: portrait or 4:3, at least 1000px wide.</p>' +
+          tilesHtml +
+        '</div>' +
+        '<div class="panel-card"><h3>Categories in Use</h3>' +
         '<div class="table-wrap"><table class="data-table"><thead><tr><th>Category / Subcategory</th><th>Products</th></tr></thead><tbody>' +
         Object.keys(counts).sort().map(function (k) { return '<tr><td>' + esc(k) + '</td><td>' + counts[k] + '</td></tr>'; }).join('') +
         '</tbody></table></div>' +
         '<p style="font-size:0.8rem;color:var(--text-soft);margin-top:14px;">Categories and subcategories are set per-product on the product edit page — this view is a live summary of what\'s currently in use.</p>' +
       '</div>';
+
+      content().querySelectorAll('.cat-admin-card').forEach(function (card) {
+        var slug = card.dataset.slug;
+        var msg = card.querySelector('[data-cat-msg]');
+        function busy(text) { card.classList.add('is-busy'); msg.classList.remove('is-error'); msg.textContent = text; }
+        function fail(err) { card.classList.remove('is-busy'); msg.classList.add('is-error'); msg.textContent = err.message || 'Something went wrong'; }
+        function done(text) { adminToast(text); ROUTE_RENDERERS.categories(); }
+
+        card.querySelector('[data-cat-status]').addEventListener('change', function (e) {
+          var status = e.target.value;
+          busy('Saving…');
+          AdminAPI.categories.update(slug, { status: status })
+            .then(function () { done(status === 'active' ? 'Category is now Active.' : 'Category now shows the Coming Soon page.'); })
+            .catch(fail);
+        });
+        card.querySelector('[data-cat-upload]').addEventListener('change', function (e) {
+          var file = e.target.files && e.target.files[0];
+          if (!file) return;
+          if (!/^image\//.test(file.type)) return fail(new Error('Please choose an image file.'));
+          busy('Optimising & uploading…');
+          optimizeImageFile(file)
+            .then(function (optimized) { return AdminAPI.media.upload(optimized); })
+            .then(function (res) { return AdminAPI.categories.update(slug, { image_url: res.url }); })
+            .then(function () { done('Category photo saved.'); })
+            .catch(fail);
+        });
+        var removeBtn = card.querySelector('[data-cat-remove]');
+        if (removeBtn) removeBtn.addEventListener('click', function () {
+          if (!window.confirm('Remove this photo from the homepage tile? The file stays in Media Library.')) return;
+          busy('Removing…');
+          AdminAPI.categories.update(slug, { image_url: null }).then(function () { done('Photo removed — the illustration is back.'); }).catch(fail);
+        });
+      });
+    }).catch(function (err) {
+      content().innerHTML = '<p class="empty-state">Could not load categories: ' + esc(err.message) + '</p>';
     });
   };
 

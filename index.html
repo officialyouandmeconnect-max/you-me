@@ -127,7 +127,7 @@
 <link rel="icon" href="favicon-48.png" sizes="48x48" type="image/png">
 <link rel="icon" href="favicon.png" sizes="512x512" type="image/png">
 <link rel="manifest" href="site.webmanifest">
-<link rel="stylesheet" href="style.css?v=20261012a">
+<link rel="stylesheet" href="style.css?v=20261019a">
 </head>
 <body>
 
@@ -280,7 +280,7 @@
     <div class="section-inner" id="personalizedSectionInner"><!-- rows injected via JS --></div>
   </section>
 
-  <!-- ============ 4. SHOP BY CATEGORY (editorial tiles; add a photo later with style="--tile-img:url(...)") ============ -->
+  <!-- ============ 4. SHOP BY CATEGORY (photo + Coming Soon status managed in Admin → Categories; see renderCategoryTiles in script.js) ============ -->
   <section class="section category-tiles-section" id="shop-by-collection" aria-labelledby="catTilesHeading" data-reveal="fade-up">
     <div class="section-inner">
       <div class="section-heading">
@@ -291,19 +291,19 @@
         <a href="#all" class="view-all">Shop All <span class="arrow">&#8594;</span></a>
       </div>
       <div class="category-tiles">
-        <a href="#kids" class="category-tile tile-1">
-          <span class="category-tile-media" aria-hidden="true"><span class="category-tile-icon"><svg viewBox="0 0 64 64"><path d="M22 10 8 18l6 12 6-4v28h24V26l6 4 6-12-14-8c-1.5 4-5 6.5-10 6.5S23.5 14 22 10Z" fill="#A7C5DB"/></svg></span></span>
-          <span class="category-tile-text"><strong>Kids Wear</strong><small>Rompers, sets &amp; everyday essentials</small><em>Shop now &#8594;</em></span>
+        <a href="#kids" class="category-tile tile-1" data-slug="kids">
+          <span class="category-tile-media" aria-hidden="true"><span class="category-tile-tag" data-live-tag hidden>Coming soon</span><span class="category-tile-icon"><svg viewBox="0 0 64 64"><path d="M22 10 8 18l6 12 6-4v28h24V26l6 4 6-12-14-8c-1.5 4-5 6.5-10 6.5S23.5 14 22 10Z" fill="#A7C5DB"/></svg></span></span>
+          <span class="category-tile-text"><strong>Kids Wear</strong><small>Rompers, sets &amp; everyday essentials</small><em data-live-cta>Shop now &#8594;</em></span>
         </a>
-        <a href="#new-arrivals" class="category-tile tile-2">
-          <span class="category-tile-media" aria-hidden="true"><span class="category-tile-icon"><svg viewBox="0 0 64 64"><path d="M32 18 7 34.5c-2 1.3-1 4.5 1.4 4.5h47.2c2.4 0 3.4-3.2 1.4-4.5L32 18Z" fill="#CFE6D3"/><path d="M28.5 12.5a3.5 3.5 0 1 1 3.5 3.5V20" fill="none" stroke="#CFE6D3" stroke-width="3.4" stroke-linecap="round"/></svg></span></span>
-          <span class="category-tile-text"><strong>New Arrivals</strong><small>The latest pieces, just in</small><em>Shop now &#8594;</em></span>
+        <a href="#new-arrivals" class="category-tile tile-2" data-slug="new-arrivals">
+          <span class="category-tile-media" aria-hidden="true"><span class="category-tile-tag" data-live-tag hidden>Coming soon</span><span class="category-tile-icon"><svg viewBox="0 0 64 64"><path d="M32 18 7 34.5c-2 1.3-1 4.5 1.4 4.5h47.2c2.4 0 3.4-3.2 1.4-4.5L32 18Z" fill="#CFE6D3"/><path d="M28.5 12.5a3.5 3.5 0 1 1 3.5 3.5V20" fill="none" stroke="#CFE6D3" stroke-width="3.4" stroke-linecap="round"/></svg></span></span>
+          <span class="category-tile-text"><strong>New Arrivals</strong><small>The latest pieces, just in</small><em data-live-cta>Shop now &#8594;</em></span>
         </a>
-        <a href="#family" class="category-tile tile-3" data-category="family">
+        <a href="#family" class="category-tile tile-3" data-category="family" data-slug="family">
           <span class="category-tile-media" aria-hidden="true"><span class="category-tile-tag" data-live-tag>Coming soon</span><span class="category-tile-icon"><svg viewBox="0 0 64 64"><circle cx="21" cy="16" r="7" fill="#E7CDA8"/><circle cx="43" cy="16" r="7" fill="#E7CDA8"/><path d="M9 54V36c0-6.6 5.4-12 12-12s12 5.4 12 12v18Z" fill="#E7CDA8"/><path d="M31 54V36c0-6.6 5.4-12 12-12s12 5.4 12 12v18Z" fill="#E7CDA8" opacity=".75"/></svg></span></span>
           <span class="category-tile-text"><strong>Family Wear</strong><small>Matching looks for everyone</small><em data-live-cta>Get notified &#8594;</em></span>
         </a>
-        <a href="#couples" class="category-tile tile-4" data-category="couple">
+        <a href="#couples" class="category-tile tile-4" data-category="couple" data-slug="couples">
           <span class="category-tile-media" aria-hidden="true"><span class="category-tile-tag" data-live-tag>Coming soon</span><span class="category-tile-icon"><svg viewBox="0 0 64 64"><path d="M32 54S10 40.5 6 27C3.4 18 9 10 17.5 10c6.2 0 10 3.7 14.5 9 4.5-5.3 8.3-9 14.5-9C55 10 60.6 18 58 27 54 40.5 32 54 32 54Z" fill="#F7A7A7"/></svg></span></span>
           <span class="category-tile-text"><strong>Couple Sets</strong><small>Better together, always</small><em data-live-cta>Get notified &#8594;</em></span>
         </a>
@@ -539,14 +539,18 @@
 <div id="viewComingSoon" class="view-coming-soon" hidden>
   <div class="coming-soon-card">
     <span class="deco heart" style="position:static; display:inline-block; opacity:1; font-size:1.6rem; margin-bottom:10px;">&#10084;</span>
-    <h2 id="comingSoonTitle">Coming Soon</h2>
+    <span class="eyebrow coming-soon-eyebrow" id="comingSoonEyebrow">Family Wear</span>
+    <h2 id="comingSoonTitle">Something Beautiful Is Coming Soon</h2>
     <p id="comingSoonMessage"></p>
     <form class="notify-form" id="notifyForm">
-      <input type="email" id="notifyEmail" placeholder="Enter your email address" aria-label="Email address" required>
+      <input type="email" id="notifyEmail" placeholder="Email me when it launches" aria-label="Email address" required>
       <button type="submit" class="btn btn-primary">Notify Me</button>
     </form>
     <p class="notify-feedback" id="notifyFeedback" role="status" aria-live="polite"></p>
-    <button type="button" class="btn btn-outline" id="comingSoonBack">Back to Kids Wear</button>
+    <div class="coming-soon-actions">
+      <button type="button" class="btn btn-outline" id="comingSoonBack">Explore Kids Wear</button>
+      <a href="#" class="btn btn-outline" id="comingSoonHome">Back to Home</a>
+    </div>
   </div>
 </div>
 <!-- /VIEW: COMING SOON -->
@@ -828,7 +832,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-<script src="supabase-client.js?v=20260829a"></script>
-<script src="script.js?v=20261012a"></script>
+<script src="supabase-client.js?v=20261019a"></script>
+<script src="script.js?v=20261019a"></script>
 </body>
 </html>
